@@ -14,7 +14,10 @@ from pathlib import Path
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI, Form, HTTPException, Request
+import base64
+import secrets
+
+from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -39,6 +42,34 @@ def create_app(cfg: Config) -> FastAPI:
         autoescape=select_autoescape(["html"]),
     )
     scheduler: AsyncIOScheduler | None = None
+
+    # ─── HTTP Basic Auth middleware ────────────────────────────────────
+    if cfg.web.auth.enabled and cfg.web.auth.password:
+        expected_user = cfg.web.auth.username.encode()
+        expected_pass = cfg.web.auth.password.encode()
+
+        @app.middleware("http")
+        async def basic_auth(request: Request, call_next):
+            # Health endpoint must stay open for Docker / Kuma probes.
+            if request.url.path == "/healthz":
+                return await call_next(request)
+            header = request.headers.get("authorization", "")
+            if header.startswith("Basic "):
+                try:
+                    creds = base64.b64decode(header[6:]).decode()
+                    user, _, pwd = creds.partition(":")
+                    if (
+                        secrets.compare_digest(user.encode(), expected_user)
+                        and secrets.compare_digest(pwd.encode(), expected_pass)
+                    ):
+                        return await call_next(request)
+                except Exception:
+                    pass
+            return Response(
+                status_code=401,
+                content="Unauthorized",
+                headers={"WWW-Authenticate": 'Basic realm="HomelabSage"'},
+            )
 
     @app.on_event("startup")
     async def _start() -> None:

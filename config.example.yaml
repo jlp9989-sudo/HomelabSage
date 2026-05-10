@@ -111,6 +111,13 @@ web:
   host: 0.0.0.0
   port: 8000
 
+  # HTTP Basic Auth. STRONGLY RECOMMENDED if `host` is not loopback.
+  # `/healthz` stays open for container/Kuma healthchecks.
+  auth:
+    enabled: false
+    username: admin
+    password: "${HOMELABSAGE_PASSWORD:-}"
+
 # ──────────────────────────────────────────────────────────────────────
 # Almacenamiento
 # ──────────────────────────────────────────────────────────────────────
