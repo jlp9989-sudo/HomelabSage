@@ -44,8 +44,8 @@ dev = [
 homelabsage = "homelabsage.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/HomelabSage/HomelabSage"
-Issues = "https://github.com/HomelabSage/HomelabSage/issues"
+Homepage = "https://github.com/jlp9989-sudo/HomelabSage"
+Issues = "https://github.com/jlp9989-sudo/HomelabSage/issues"
 
 [build-system]
 requires = ["hatchling"]

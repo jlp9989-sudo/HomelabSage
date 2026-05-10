@@ -80,7 +80,7 @@ Each layer is one file. The whole thing is ~1,900 lines of Python.
 ```yaml
 services:
   homelabsage:
-    image: ghcr.io/homelabsage/homelabsage:latest
+    image: ghcr.io/jlp9989-sudo/homelabsage:latest
     container_name: homelabsage
     restart: unless-stopped
     ports:
@@ -115,7 +115,7 @@ There's an Unraid Community Apps template under `unraid/` (planned). Until then,
 ### From source
 
 ```bash
-git clone https://github.com/HomelabSage/HomelabSage
+git clone https://github.com/jlp9989-sudo/HomelabSage
 cd HomelabSage
 pip install -e ".[dev]"
 
@@ -284,7 +284,7 @@ The core handles LLM analysis, dedup by stable id, persistence, and routing to o
 ## Development
 
 ```bash
-git clone https://github.com/HomelabSage/HomelabSage
+git clone https://github.com/jlp9989-sudo/HomelabSage
 cd HomelabSage
 pip install -e ".[dev]"
 
