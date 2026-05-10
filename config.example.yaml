@@ -1,0 +1,119 @@
+# HomelabSage — config.yaml
+# Copia este archivo a `config.yaml` (gitignored) y rellena.
+# Cualquier `${VAR}` se lee del entorno o de `.env`.
+
+# ──────────────────────────────────────────────────────────────────────
+# LLM — análisis de release notes con tu LLM local (o nube)
+# ──────────────────────────────────────────────────────────────────────
+llm:
+  # Modos: ollama | openai | anthropic | disabled
+  # `disabled` = solo detecta updates, sin análisis IA (más rápido, menos útil).
+  provider: ollama
+
+  # Endpoint del backend LLM.
+  # Ollama por defecto: http://localhost:11434
+  # llama.cpp server: http://localhost:8080
+  # OpenAI: https://api.openai.com
+  # Anthropic: https://api.anthropic.com
+  endpoint: http://localhost:11434
+
+  # Modelo a usar. Para análisis recomendamos uno con ≥30B parámetros.
+  # Si tu modelo no respeta JSON estricto, marca strict_json: false.
+  model: qwen3:30b
+
+  # Context window del modelo (tokens). Release notes largas pueden ser grandes.
+  context_size: 32768
+
+  # API key (solo openai/anthropic). Para ollama dejar vacío.
+  api_key: "${LLM_API_KEY:-}"
+
+  # Timeout por llamada (s). Modelos grandes en CPU/Vulkan pueden tardar.
+  timeout: 180
+
+  strict_json: true
+
+# ──────────────────────────────────────────────────────────────────────
+# Sources — qué dominios escanea
+# ──────────────────────────────────────────────────────────────────────
+sources:
+
+  docker:
+    enabled: true
+    # Socket del daemon Docker. En contenedor montar /var/run/docker.sock.
+    socket: /var/run/docker.sock
+    # Mapeo manual de container_name → repo GitHub (cuando no se puede inferir).
+    overrides: {}
+      # OpenClaw: openclaw/openclaw
+      # a-eye: spaceinvaderone/a-eye
+    # Containers a ignorar (regex sobre el nombre).
+    skip:
+      - "^.*_(redis|valkey|postgres|mysql|mariadb|db)$"
+
+  homeassistant:
+    enabled: false
+    url: http://homeassistant.local:8123
+    token: "${HA_TOKEN:-}"
+    # Incluye también integraciones HACS instaladas.
+    include_hacs: true
+    # Incluye add-ons del Supervisor (si aplica).
+    include_addons: true
+
+  # Próximamente — placeholders, mantén disabled.
+  fedora:
+    enabled: false
+  llamacpp:
+    enabled: false
+  huggingface_models:
+    enabled: false
+    models: []
+  unraid:
+    enabled: false
+  rss_feeds:
+    enabled: false
+    feeds: []
+
+# ──────────────────────────────────────────────────────────────────────
+# Outputs — adónde envía los análisis
+# ──────────────────────────────────────────────────────────────────────
+outputs:
+
+  # Notion DB. La DB debe existir con columnas específicas (ver docs).
+  notion:
+    enabled: false
+    api_key: "${NOTION_API_KEY:-}"
+    database_id: "${NOTION_DB_INFRA_UPDATES:-}"
+    # always = escribe siempre. only_action_required = solo si la IA marca acción.
+    write_policy: always
+
+  # Telegram bot push. Bot creado vía @BotFather.
+  telegram:
+    enabled: false
+    bot_token: "${TELEGRAM_BOT_TOKEN:-}"
+    chat_id: "${TELEGRAM_CHAT_ID:-}"
+    # Umbral mínimo de severity para notificar: critical | high | medium | info
+    min_severity: high
+
+# ──────────────────────────────────────────────────────────────────────
+# Scheduler — cuándo escanea (cron syntax)
+# ──────────────────────────────────────────────────────────────────────
+scheduler:
+  enabled: true
+  cron: "0 9 * * *"
+  timezone: Europe/Madrid
+  # Push opcional a Uptime Kuma / Healthchecks tras cada run exitoso.
+  heartbeat_url: "${HEARTBEAT_URL:-}"
+
+# ──────────────────────────────────────────────────────────────────────
+# Web UI
+# ──────────────────────────────────────────────────────────────────────
+web:
+  enabled: true
+  host: 0.0.0.0
+  port: 8000
+
+# ──────────────────────────────────────────────────────────────────────
+# Almacenamiento
+# ──────────────────────────────────────────────────────────────────────
+storage:
+  # Path al SQLite. En docker: /data/state.sqlite (mount volume).
+  database_path: ./data/state.sqlite

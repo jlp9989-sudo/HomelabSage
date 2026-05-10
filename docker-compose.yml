@@ -1,0 +1,18 @@
+services:
+  homelabsage:
+    image: homelabsage:dev
+    build: .
+    container_name: homelabsage
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config.yaml:/app/config.yaml:ro
+      - ./.env:/app/.env:ro
+      - homelabsage-data:/data
+    environment:
+      TZ: Europe/Madrid
+
+volumes:
+  homelabsage-data:
