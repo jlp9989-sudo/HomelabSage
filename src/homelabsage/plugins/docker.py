@@ -125,6 +125,13 @@ class DockerPlugin(Plugin):
             new_version = release.get("tag_name", "").lstrip("v")
             if not new_version or not self._is_newer(current, new_version):
                 continue
+            labels = c.attrs.get("Config", {}).get("Labels") or {}
+            compose_project = labels.get("com.docker.compose.project", "")
+            image_tag = c.image.tags[0] if c.image.tags else ""
+            # Short image name for note matching: "owner/name:tag" → "name"
+            image_short = image_tag.split("/")[-1].split(":")[0]
+            keywords = [k for k in {repo, repo.split("/")[-1], image_short, compose_project} if k]
+
             updates.append(
                 Update(
                     source=self.id,
@@ -134,12 +141,15 @@ class DockerPlugin(Plugin):
                     release_url=release.get("html_url"),
                     release_notes=release.get("body") or "",
                     context={
-                        "image": c.image.tags[0] if c.image.tags else "",
+                        "image": image_tag,
                         "repo": repo,
+                        "compose_project": compose_project,
                         "ports": list((c.attrs.get("NetworkSettings", {}).get("Ports") or {}).keys()),
                         "restart_policy": c.attrs.get("HostConfig", {}).get(
                             "RestartPolicy", {}
                         ).get("Name", ""),
+                        # Forwarded to NotesProvider for relevance matching
+                        "_note_keywords": keywords,
                     },
                 )
             )

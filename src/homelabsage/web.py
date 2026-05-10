@@ -14,7 +14,7 @@ from pathlib import Path
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -22,6 +22,7 @@ from .config import Config
 from .db import Database
 from .engine import Engine
 from .models import UpdateStatus
+from .notes import NotesEditor
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ def create_app(cfg: Config) -> FastAPI:
     app = FastAPI(title="HomelabSage", version="0.0.1", docs_url=None, redoc_url=None)
     db = Database(cfg.storage.database_path)
     engine = Engine(cfg, db)
+    editor = NotesEditor(cfg.notes.notes_dir or None)
     env = Environment(
         loader=FileSystemLoader(TEMPLATES_DIR),
         autoescape=select_autoescape(["html"]),
@@ -83,6 +85,50 @@ def create_app(cfg: Config) -> FastAPI:
     @app.get("/api/updates")
     async def api_updates() -> list[dict]:
         return [it.model_dump(mode="json") for it in db.list(limit=500)]
+
+    # ─── Notes editor ──────────────────────────────────────────────
+
+    @app.get("/notes", response_class=HTMLResponse)
+    async def notes_list() -> HTMLResponse:
+        tmpl = env.get_template("notes_list.html")
+        return HTMLResponse(tmpl.render(
+            files=editor.list(),
+            enabled=editor.enabled,
+            notes_dir=str(editor.dir) if editor.dir else "",
+        ))
+
+    @app.get("/notes/edit", response_class=HTMLResponse)
+    async def notes_edit(filename: str | None = None) -> HTMLResponse:
+        """Editor view. If `filename` is None or new, show empty editor."""
+        tmpl = env.get_template("notes_edit.html")
+        if not editor.enabled:
+            raise HTTPException(400, "notes_dir not configured")
+        is_new = not filename
+        content = ""
+        if filename:
+            try:
+                content = editor.read(filename)
+            except (PermissionError, ValueError, FileNotFoundError) as e:
+                raise HTTPException(404, str(e)) from e
+        return HTMLResponse(tmpl.render(filename=filename or "", content=content, is_new=is_new))
+
+    @app.post("/notes/save")
+    async def notes_save(
+        filename: str = Form(...), content: str = Form(""),
+    ) -> RedirectResponse:
+        try:
+            editor.write(filename, content)
+        except (PermissionError, ValueError) as e:
+            raise HTTPException(400, str(e)) from e
+        return RedirectResponse("/notes", status_code=303)
+
+    @app.post("/notes/delete")
+    async def notes_delete(filename: str = Form(...)) -> RedirectResponse:
+        try:
+            editor.delete(filename)
+        except (PermissionError, ValueError) as e:
+            raise HTTPException(400, str(e)) from e
+        return RedirectResponse("/notes", status_code=303)
 
     @app.get("/healthz")
     async def healthz() -> dict:

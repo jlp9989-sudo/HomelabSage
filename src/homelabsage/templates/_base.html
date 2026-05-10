@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}HomelabSage{% endblock %}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  body { font: 14px/1.45 system-ui, sans-serif; background:#0f1419; color:#d9e1e8; margin:0; }
+  header { padding:1rem 1.5rem; background:#161c24; border-bottom:1px solid #2a3340; display:flex; gap:1rem; align-items:center; }
+  header h1 { margin:0; font-size:1.1rem; }
+  nav a { color:#8fa3b8; text-decoration:none; padding:.35rem .75rem; border-radius:4px; }
+  nav a:hover, nav a.active { color:#d9e1e8; background:#1c2530; }
+  .spacer { margin-left:auto; }
+  button, .btn { background:#1e90ff; border:0; color:#fff; padding:.45rem .9rem; border-radius:4px; cursor:pointer; font-size:.85rem; text-decoration:none; display:inline-block; }
+  button.ghost, .btn.ghost { background:transparent; border:1px solid #2a3340; color:#d9e1e8; }
+  button.danger, .btn.danger { background:#c0392b; }
+  main { padding:1rem 1.5rem; }
+  .pill { padding:.3rem .7rem; background:#1c2530; border-radius:999px; font-size:.8rem; }
+  table { width:100%; border-collapse:collapse; background:#161c24; border-radius:6px; overflow:hidden; }
+  th, td { padding:.55rem .8rem; text-align:left; border-bottom:1px solid #2a3340; vertical-align:top; }
+  th { background:#1c2530; font-size:.75rem; text-transform:uppercase; letter-spacing:.04em; color:#8fa3b8; }
+  tr:last-child td { border-bottom:0; }
+  .sev { display:inline-block; padding:.15rem .55rem; border-radius:3px; font-size:.75rem; font-weight:600; }
+  .sev-critical { background:#7b1f1f; color:#fff; }
+  .sev-high     { background:#a44a18; color:#fff; }
+  .sev-medium   { background:#a48618; color:#000; }
+  .sev-info     { background:#205b8a; color:#fff; }
+  .muted { color:#8fa3b8; }
+  .actions form { display:inline; }
+  code { background:#0a0d11; padding:0 .25rem; border-radius:3px; }
+  input[type=text], textarea { background:#0a0d11; color:#d9e1e8; border:1px solid #2a3340; padding:.5rem; border-radius:4px; font: 13px/1.45 ui-monospace, monospace; width:100%; box-sizing:border-box; }
+  textarea { min-height:60vh; resize:vertical; }
+  .row { display:flex; gap:.5rem; margin-bottom:.5rem; align-items:center; }
+  .row > label { min-width:6rem; color:#8fa3b8; }
+</style>
+</head>
+<body>
+<header>
+  <h1>HomelabSage</h1>
+  <nav>
+    <a href="/" class="{% if nav == 'updates' %}active{% endif %}">Updates</a>
+    <a href="/notes" class="{% if nav == 'notes' %}active{% endif %}">Notes</a>
+  </nav>
+  <div class="spacer"></div>
+  {% block header_actions %}{% endblock %}
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

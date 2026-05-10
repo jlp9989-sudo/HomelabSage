@@ -6,15 +6,21 @@ Sources:
   - `extra_docs`: list of files always included verbatim (CLAUDE.md, etc).
 
 Output is plain text injected into the LLM prompt.
+
+This module also exposes `NotesEditor` — CRUD operations on `notes_dir` used
+by the web UI. Paths are validated to stay within `notes_dir`.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+ALLOWED_SUFFIXES = {".md", ".txt"}
 
 # Match a Markdown header line: "## Foo" or "### Bar"
 _HEADER_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
@@ -61,13 +67,24 @@ def _sections(md: str) -> list[tuple[str, str]]:
     return sections
 
 
-def _match_score(subject: str, header_path: str, body: str) -> int:
-    """Simple ranking — substring presence in header (weight 3) or body (1)."""
-    s = subject.lower()
+def _match_score(keywords: list[str], header_path: str, body: str) -> int:
+    """Rank a section by how strongly it matches ANY of the given keywords.
+
+    Each keyword in the header counts 3×; in the body, raw occurrences.
+    Short keywords (<3 chars) are skipped to avoid noise from common letters.
+    """
+    if not keywords:
+        return 0
+    hp = header_path.lower()
+    bd = body.lower()
     score = 0
-    if s in header_path.lower():
-        score += 3
-    score += body.lower().count(s)
+    for kw in keywords:
+        k = kw.strip().lower()
+        if len(k) < 3:
+            continue
+        if k in hp:
+            score += 3
+        score += bd.count(k)
     return score
 
 
@@ -100,11 +117,16 @@ class NotesProvider:
                 if text:
                     self._always.append(f"### {p.name}\n{text}")
 
-    def context_for(self, subject: str) -> str:
-        """Return up to `max_chars` of the most relevant notes for `subject`."""
+    def context_for(self, subject: str, keywords: list[str] | None = None) -> str:
+        """Return up to `max_chars` of the most relevant notes.
+
+        Matches against `subject` plus any extra `keywords` the plugin provides
+        (image repo, compose stack, image short name, etc.).
+        """
+        terms = [subject] + (keywords or [])
         scored: list[tuple[int, Path, str, str]] = []
         for f, h, b in self._sections:
-            s = _match_score(subject, h, b)
+            s = _match_score(terms, h, b)
             if s > 0:
                 scored.append((s, f, h, b))
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -129,3 +151,63 @@ class NotesProvider:
             budget -= len(chunk)
 
         return "\n\n".join(parts)
+
+
+# ─── Editor (web UI) ──────────────────────────────────────────────────
+
+
+class NotesEditor:
+    """CRUD operations on `notes_dir`, used by the web UI.
+
+    All operations are path-traversal safe: filenames are sanitized and
+    resolved paths must stay inside `notes_dir`.
+    """
+
+    def __init__(self, notes_dir: str | Path | None):
+        self.dir = Path(notes_dir).resolve() if notes_dir else None
+
+    @property
+    def enabled(self) -> bool:
+        return self.dir is not None and self.dir.is_dir()
+
+    def _safe_path(self, filename: str) -> Path:
+        if not self.enabled:
+            raise PermissionError("notes_dir is not configured or does not exist")
+        # No subdirs, no traversal — only flat files inside notes_dir.
+        clean = Path(filename).name
+        if not clean or clean.startswith("."):
+            raise ValueError(f"invalid filename: {filename!r}")
+        if Path(clean).suffix.lower() not in ALLOWED_SUFFIXES:
+            raise ValueError(f"only {sorted(ALLOWED_SUFFIXES)} files are allowed")
+        full = (self.dir / clean).resolve()  # type: ignore[union-attr]
+        if not str(full).startswith(str(self.dir)):  # type: ignore[union-attr]
+            raise PermissionError(f"path escapes notes_dir: {filename!r}")
+        return full
+
+    def list(self) -> list[dict]:
+        if not self.enabled:
+            return []
+        out: list[dict] = []
+        for p in sorted(self.dir.glob("*")):  # type: ignore[union-attr]
+            if p.is_file() and p.suffix.lower() in ALLOWED_SUFFIXES:
+                stat = p.stat()
+                out.append({
+                    "name": p.name,
+                    "size": stat.st_size,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                })
+        return out
+
+    def read(self, filename: str) -> str:
+        return self._safe_path(filename).read_text(encoding="utf-8", errors="replace")
+
+    def write(self, filename: str, content: str) -> None:
+        path = self._safe_path(filename)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Atomic write — temp then rename to avoid half-written files.
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(path)
+
+    def delete(self, filename: str) -> None:
+        self._safe_path(filename).unlink(missing_ok=True)

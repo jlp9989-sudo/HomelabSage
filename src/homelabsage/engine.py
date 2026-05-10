@@ -77,7 +77,8 @@ class Engine:
                 stats["new"] += 1
                 if self.llm.is_enabled():
                     try:
-                        notes_ctx = self.notes.context_for(update.subject)
+                        kw = update.context.get("_note_keywords") or []
+                        notes_ctx = self.notes.context_for(update.subject, keywords=kw)
                         analyzed.analysis = await self.llm.analyze(update, notes=notes_ctx)
                         if analyzed.analysis:
                             analyzed.status = UpdateStatus.ANALYZED

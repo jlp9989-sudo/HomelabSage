@@ -1,0 +1,42 @@
+{% extends "_base.html" %}
+{% set nav = "notes" %}
+{% block title %}Notes · HomelabSage{% endblock %}
+{% block header_actions %}
+  {% if enabled %}
+    <a class="btn" href="/notes/edit">New note</a>
+  {% endif %}
+{% endblock %}
+{% block content %}
+{% if not enabled %}
+  <p class="muted">
+    Notes editor disabled: set <code>notes.notes_dir</code> in <code>config.yaml</code>
+    to a writable directory (and bind-mount it into the container).
+  </p>
+{% else %}
+  <p class="muted">Editing files in <code>{{ notes_dir }}</code>. Used by the LLM as context.</p>
+
+  {% if not files %}
+    <p class="muted">No notes yet. <a href="/notes/edit">Create your first one</a>.</p>
+  {% else %}
+    <table>
+      <thead><tr><th>File</th><th>Size</th><th>Modified</th><th></th></tr></thead>
+      <tbody>
+        {% for f in files %}
+        <tr>
+          <td><a href="/notes/edit?filename={{ f.name }}"><code>{{ f.name }}</code></a></td>
+          <td class="muted">{{ f.size }} B</td>
+          <td class="muted">{{ f.modified }}</td>
+          <td class="actions">
+            <form method="post" action="/notes/delete"
+                  onsubmit="return confirm('Delete {{ f.name }}?');">
+              <input type="hidden" name="filename" value="{{ f.name }}">
+              <button class="ghost danger" type="submit">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endif %}
+{% endblock %}

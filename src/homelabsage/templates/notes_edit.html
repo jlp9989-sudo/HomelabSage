@@ -1,0 +1,28 @@
+{% extends "_base.html" %}
+{% set nav = "notes" %}
+{% block title %}{% if is_new %}New note{% else %}{{ filename }}{% endif %} · HomelabSage{% endblock %}
+{% block content %}
+<form method="post" action="/notes/save">
+  <div class="row">
+    <label for="filename">Filename</label>
+    <input type="text" id="filename" name="filename" value="{{ filename }}"
+           placeholder="e.g. ragflow_elasticsearch.md"
+           {% if not is_new %}readonly{% endif %} required pattern=".+\.(md|txt)">
+  </div>
+
+  <div class="row" style="align-items:flex-start">
+    <label for="content" style="margin-top:.5rem">Content</label>
+    <textarea id="content" name="content" placeholder="Write notes about a service: versionlocks, custom builds, cross-service dependencies, known traps. The LLM will read this when analyzing updates.">{{ content }}</textarea>
+  </div>
+
+  <div class="row" style="justify-content:flex-end">
+    <a class="btn ghost" href="/notes">Cancel</a>
+    <button type="submit">Save</button>
+  </div>
+</form>
+
+<p class="muted" style="margin-top:1.5rem; font-size:.8rem">
+  Tip: use Markdown headers (<code>## subject</code>) — the LLM scoring picks
+  sections whose header matches the update's subject, image repo or compose stack name.
+</p>
+{% endblock %}
