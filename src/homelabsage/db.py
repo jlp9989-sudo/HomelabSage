@@ -11,7 +11,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from .models import AnalyzedUpdate, Analysis, Severity, Update, UpdateStatus
+from .models import Analysis, AnalyzedUpdate, Severity, Update, UpdateStatus
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS updates (

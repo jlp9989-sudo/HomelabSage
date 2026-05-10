@@ -8,15 +8,14 @@ later if you want live updates without page reloads.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
+import secrets
 from pathlib import Path
 
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-import base64
-import secrets
-
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     """Severity assigned by the LLM to an update."""
 
     CRITICAL = "critical"
@@ -22,7 +22,7 @@ class Severity(str, Enum):
         return {"info": 0, "medium": 1, "high": 2, "critical": 3}[self.value]
 
 
-class UpdateStatus(str, Enum):
+class UpdateStatus(StrEnum):
     """Tracking state of a detected update in the local DB."""
 
     NEW = "new"
