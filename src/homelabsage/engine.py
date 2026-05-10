@@ -12,6 +12,7 @@ from .config import Config
 from .db import Database
 from .llm import LLMClient
 from .models import AnalyzedUpdate, UpdateStatus
+from .notes import NotesProvider
 from .outputs import Output
 from .outputs.notion import NotionOutput
 from .outputs.telegram import TelegramOutput
@@ -45,6 +46,11 @@ class Engine:
         self.cfg = cfg
         self.db = db
         self.llm = LLMClient(cfg.llm)
+        self.notes = NotesProvider(
+            notes_dir=cfg.notes.notes_dir or None,
+            extra_docs=cfg.notes.extra_docs,
+            max_chars=cfg.notes.max_chars,
+        )
         self.plugins = build_plugins(cfg)
         self.outputs = build_outputs(cfg)
 
@@ -71,7 +77,8 @@ class Engine:
                 stats["new"] += 1
                 if self.llm.is_enabled():
                     try:
-                        analyzed.analysis = await self.llm.analyze(update)
+                        notes_ctx = self.notes.context_for(update.subject)
+                        analyzed.analysis = await self.llm.analyze(update, notes=notes_ctx)
                         if analyzed.analysis:
                             analyzed.status = UpdateStatus.ANALYZED
                             analyzed.analyzed_at = datetime.utcnow()

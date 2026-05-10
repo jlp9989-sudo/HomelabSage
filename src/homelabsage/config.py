@@ -124,6 +124,21 @@ class StorageConfig(BaseModel):
     database_path: str = "./data/state.sqlite"
 
 
+class NotesConfig(BaseModel):
+    """User's homelab notes — extra context for the LLM.
+
+    `notes_dir`: directory scanned for .md/.txt files; sections are matched
+    against each update's subject so the LLM gets just the relevant pieces.
+
+    `extra_docs`: a few files always injected in full (e.g. CLAUDE.md).
+    Keep these short — they cost tokens on every LLM call.
+    """
+
+    notes_dir: str = ""
+    extra_docs: list[str] = Field(default_factory=list)
+    max_chars: int = 4000
+
+
 class Config(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
@@ -131,6 +146,7 @@ class Config(BaseModel):
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     web: WebConfig = Field(default_factory=WebConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    notes: NotesConfig = Field(default_factory=NotesConfig)
 
 
 def load_config(path: str | Path) -> Config:

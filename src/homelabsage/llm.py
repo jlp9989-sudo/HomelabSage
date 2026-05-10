@@ -21,12 +21,19 @@ log = logging.getLogger(__name__)
 PROMPT_TEMPLATE = """\
 You analyze software updates for a homelab user.
 
+Your output decisions must take into account:
+  1. The release notes (what changed upstream)
+  2. The user's current container/config snapshot
+  3. The user's homelab notes — past decisions, custom builds, versionlocks,
+     dependencies between services, known traps. These reflect REAL constraints
+     that may turn an otherwise harmless update into a breaking one for this user.
+
 For the update below, output a STRICT JSON object with EXACTLY these keys:
   - "severity": one of "critical" | "high" | "medium" | "info"
   - "summary": short paragraph (2-3 sentences), no markdown
   - "breaking_changes": list of short strings describing breaking changes that affect THIS user's setup
   - "config_obsolete": list of short strings describing parts of the user's current setup that the new version makes redundant
-  - "new_features_relevant": list of short strings with new features likely useful for a homelab
+  - "new_features_relevant": list of short strings with new features likely useful for THIS user (cite the note if it informed your choice)
   - "action_required": boolean — true if the user MUST do something before/after updating
   - "recommended_action": short string with the next step, or null
 
@@ -37,6 +44,10 @@ Rules:
 - Severity "critical" only for security CVEs or data-loss risk.
 - "breaking_changes" must be filtered to the user's actual setup. Generic breaking changes
   irrelevant to them go in "config_obsolete" or are omitted.
+- If the user's notes explicitly versionlock or warn against this update, raise severity
+  by one step and mention the note in the summary.
+- If the user's notes indicate the update depends on / will break another service
+  (e.g. an upstream library), reflect it in breaking_changes or recommended_action.
 
 # Update
 - Source: {source}
@@ -48,12 +59,15 @@ Rules:
 # User's current setup / config for this subject
 {context}
 
+# User's homelab notes (relevant excerpts)
+{notes}
+
 # Release notes
 {release_notes}
 """
 
 
-def build_prompt(update: Update) -> str:
+def build_prompt(update: Update, notes: str = "") -> str:
     return PROMPT_TEMPLATE.format(
         source=update.source,
         subject=update.subject,
@@ -61,6 +75,7 @@ def build_prompt(update: Update) -> str:
         new_version=update.new_version,
         release_url=update.release_url or "(none)",
         context=json.dumps(update.context, indent=2, default=str) if update.context else "(none)",
+        notes=notes.strip() or "(no relevant notes)",
         release_notes=(update.release_notes or "(no release notes)").strip()[:15000],
     )
 
@@ -72,10 +87,10 @@ class LLMClient:
     def is_enabled(self) -> bool:
         return self.cfg.provider != "disabled"
 
-    async def analyze(self, update: Update) -> Analysis | None:
+    async def analyze(self, update: Update, notes: str = "") -> Analysis | None:
         if not self.is_enabled():
             return None
-        prompt = build_prompt(update)
+        prompt = build_prompt(update, notes=notes)
         try:
             raw = await self._call(prompt)
         except Exception as e:

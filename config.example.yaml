@@ -117,3 +117,25 @@ web:
 storage:
   # Path al SQLite. En docker: /data/state.sqlite (mount volume).
   database_path: ./data/state.sqlite
+
+# ──────────────────────────────────────────────────────────────────────
+# Notas del homelab — context extra que la IA usa para evaluar updates
+# ──────────────────────────────────────────────────────────────────────
+# La IA por defecto solo ve release notes + docker inspect. Para que
+# sepa que "tu Elasticsearch está versionlocked en 8.x por RAGFlow" o
+# que "tu Plex usa --gpus device=UUID y no --runtime=nvidia", apúntala
+# a tus notas operativas.
+notes:
+  # Directorio con tus notas (.md / .txt). Cada archivo se trocea por
+  # secciones y solo se inyectan las secciones que mencionen el subject
+  # del update (matching case-insensitive substring). Coste tokens: bajo.
+  notes_dir: ""
+
+  # Archivos siempre inyectados completos. Útil para tu CLAUDE.md /
+  # arquitectura. Mantenlos cortos porque se envían en cada análisis.
+  extra_docs: []
+    # - /opt/homelab-notes/ARCHITECTURE.md
+    # - /opt/homelab-notes/POLICY.md
+
+  # Tope de caracteres totales que pasan al prompt por update.
+  max_chars: 4000
