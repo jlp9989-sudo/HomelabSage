@@ -74,6 +74,10 @@ class AnalyzedUpdate(BaseModel):
     status: UpdateStatus = UpdateStatus.NEW
     detected_at: datetime = Field(default_factory=datetime.utcnow)
     analyzed_at: datetime | None = None
+    # Cache of the Notion page id once we have created/found it. Lets the
+    # Notion output PATCH instead of POST and prevents duplicate rows when
+    # the same id is re-emitted (e.g. analysis was None on a prior run).
+    notion_page_id: str | None = None
 
     @property
     def id(self) -> str:

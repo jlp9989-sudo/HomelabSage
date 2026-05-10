@@ -1,5 +1,10 @@
 """Notion output — write each AnalyzedUpdate as a row in a Notion database.
 
+Idempotent: on first send for an update, POST creates a page and we persist
+the returned page_id into SQLite. On subsequent sends for the same id we
+PATCH the existing page instead of POSTing a new one — no duplicates even
+if the LLM analysis transitions from None to set across runs.
+
 Expected DB columns (you can tweak via README on first run):
   - Title (title)               → "{subject} {current} → {new}"
   - Source (select)             → docker | homeassistant | ...
@@ -19,6 +24,7 @@ import logging
 import httpx
 
 from ..config import NotionOutputConfig
+from ..db import Database
 from ..models import AnalyzedUpdate
 from . import Output
 
@@ -31,8 +37,13 @@ NOTION_VERSION = "2022-06-28"
 class NotionOutput(Output):
     id = "notion"
 
-    def __init__(self, cfg: NotionOutputConfig):
+    def __init__(self, cfg: NotionOutputConfig, db: Database | None = None):
         self.cfg = cfg
+        # `db` is optional so the output can still be exercised in isolation
+        # (tests, dry-runs). Without it, idempotency falls back to "best
+        # effort": we only PATCH when the in-memory item already has the
+        # page_id set by the caller.
+        self.db = db
 
     def _should_send(self, item: AnalyzedUpdate) -> bool:
         if not self.cfg.enabled:
@@ -70,15 +81,29 @@ class NotionOutput(Output):
     async def send(self, item: AnalyzedUpdate) -> None:
         if not self._should_send(item):
             return
-        payload = {
-            "parent": {"database_id": self.cfg.database_id},
-            "properties": self._properties(item),
-        }
         try:
             async with httpx.AsyncClient(timeout=20) as client:
-                r = await client.post(
-                    f"{NOTION_API}/pages", headers=self._headers(), json=payload
-                )
-                r.raise_for_status()
+                if item.notion_page_id:
+                    r = await client.patch(
+                        f"{NOTION_API}/pages/{item.notion_page_id}",
+                        headers=self._headers(),
+                        json={"properties": self._properties(item)},
+                    )
+                    r.raise_for_status()
+                else:
+                    r = await client.post(
+                        f"{NOTION_API}/pages",
+                        headers=self._headers(),
+                        json={
+                            "parent": {"database_id": self.cfg.database_id},
+                            "properties": self._properties(item),
+                        },
+                    )
+                    r.raise_for_status()
+                    page_id = r.json().get("id")
+                    if page_id:
+                        item.notion_page_id = page_id
+                        if self.db is not None:
+                            self.db.set_notion_page_id(item.id, page_id)
         except httpx.HTTPError as e:
             log.error("Notion write failed for %s: %s", item.id, e)

@@ -32,10 +32,10 @@ def build_plugins(cfg: Config) -> list[Plugin]:
     return plugins
 
 
-def build_outputs(cfg: Config) -> list[Output]:
+def build_outputs(cfg: Config, db: Database) -> list[Output]:
     outputs: list[Output] = []
     if cfg.outputs.notion.enabled:
-        outputs.append(NotionOutput(cfg.outputs.notion))
+        outputs.append(NotionOutput(cfg.outputs.notion, db))
     if cfg.outputs.telegram.enabled:
         outputs.append(TelegramOutput(cfg.outputs.telegram))
     return outputs
@@ -52,7 +52,7 @@ class Engine:
             max_chars=cfg.notes.max_chars,
         )
         self.plugins = build_plugins(cfg)
-        self.outputs = build_outputs(cfg)
+        self.outputs = build_outputs(cfg, db)
 
     async def run_once(self) -> dict[str, int]:
         """Single full cycle. Returns counts (`scanned`, `new`, `analyzed`, `failed`)."""
@@ -74,6 +74,11 @@ class Engine:
                 existing = self.db.get(analyzed.id)
                 if existing and existing.analysis is not None:
                     continue
+                # Re-emitting an existing-but-unanalyzed item (e.g. previous
+                # LLM failed). Carry forward the Notion page_id so the output
+                # PATCHes the existing row instead of creating a duplicate.
+                if existing and existing.notion_page_id:
+                    analyzed.notion_page_id = existing.notion_page_id
                 stats["new"] += 1
                 if self.llm.is_enabled():
                     try:
