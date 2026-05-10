@@ -19,6 +19,11 @@ log = logging.getLogger(__name__)
 # `ghcr.io/owner/repo` or similar GHCR pattern
 _GHCR_RE = re.compile(r"^(?:ghcr\.io|gcr\.io)/([\w.-]+)/([\w.-]+)")
 
+# A tag "looks like a version" if it starts with optional v + digits.
+# This rejects variant tags like "openvino", "cuda12", "ubuntu-22.04-full",
+# "release-1.30.0", "alpine", which were causing false positives.
+_SEMVER_RE = re.compile(r"^v?\d+(?:\.\d+){1,3}")
+
 
 class DockerPlugin(Plugin):
     id = "docker"
@@ -72,12 +77,14 @@ class DockerPlugin(Plugin):
         """Best-effort extraction of running version.
 
         Strategies (first match wins):
-          - image tag != latest/edge/main/master
-          - OCI label `org.opencontainers.image.version`
+          1. Image tag that LOOKS LIKE a version (matches semver-ish regex).
+             This skips variant tags like `openvino`, `cuda`, `release-1.x`
+             that aren't real versions.
+          2. OCI label `org.opencontainers.image.version`.
         """
         for tag in c.image.tags or []:
             after = tag.split(":")[-1] if ":" in tag else ""
-            if after and after.lower() not in {"latest", "edge", "main", "master", "stable", ""}:
+            if after and _SEMVER_RE.match(after):
                 return after.lstrip("v")
         try:
             labels = c.image.labels or {}
@@ -89,12 +96,15 @@ class DockerPlugin(Plugin):
 
     @staticmethod
     def _is_newer(current: str, candidate: str) -> bool:
-        """True if `candidate` is strictly greater than `current` (semver-ish)."""
+        """True if `candidate` is strictly greater than `current`.
+
+        Refuses to compare when either side isn't real semver — string-`!=`
+        produces too many false positives (`"openvino" != "2.7.5"`, etc).
+        """
         try:
             return Version(candidate.lstrip("v")) > Version(current.lstrip("v"))
         except InvalidVersion:
-            # Non-semver tags: fall back to string compare
-            return candidate != current
+            return False
 
     async def scan(self) -> list[Update]:
         if not self.cfg.enabled:
