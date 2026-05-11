@@ -1,5 +1,10 @@
 # HomelabSage
 
+[![CI](https://github.com/jlp9989-sudo/HomelabSage/actions/workflows/ci.yml/badge.svg)](https://github.com/jlp9989-sudo/HomelabSage/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-pre--alpha-orange)](#)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
+
 **AI-powered homelab analyzer, update tracker and improvement advisor.**
 
 Watches your stack (Docker containers, Home Assistant, Linux packages, firmware, news feeds, RSS) and uses a **local LLM** to tell you, for each update:
