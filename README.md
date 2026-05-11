@@ -214,6 +214,42 @@ llm:
   api_key: "${LLM_API_KEY}"
 ```
 
+**Free cloud LLM tiers (OpenAI-compatible):**
+
+No GPU at home? All three providers below expose an OpenAI-compatible Chat Completions API — only `endpoint`, `model` and `api_key` change. The default `0 9 * * *` scan cadence fits inside every free tier listed.
+
+*Groq* — fastest free inference, generous daily quota:
+
+```yaml
+llm:
+  provider: openai
+  endpoint: https://api.groq.com/openai
+  model: llama-3.3-70b-versatile     # check console.groq.com/docs/models for current ids
+  api_key: "${LLM_API_KEY}"
+```
+
+*OpenRouter* — single account, 200+ models including free variants:
+
+```yaml
+llm:
+  provider: openai
+  endpoint: https://openrouter.ai/api
+  model: meta-llama/llama-3.3-70b-instruct:free
+  api_key: "${LLM_API_KEY}"
+```
+
+*Google Gemini* — Flash free tier (~1,500 req/day):
+
+```yaml
+llm:
+  provider: openai
+  endpoint: https://generativelanguage.googleapis.com/v1beta/openai
+  model: gemini-2.0-flash
+  api_key: "${LLM_API_KEY}"
+```
+
+> Tip: run `homelabsage check -v` once after switching to confirm the JSON schema parser is happy. Free models occasionally bend the schema; the tolerant parser handles most cases but `-v` will surface anything it had to fall back on.
+
 **Disabled (no LLM, detection only):**
 
 ```yaml

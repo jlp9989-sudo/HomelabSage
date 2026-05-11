@@ -123,8 +123,20 @@ class LLMClient:
             return r.json().get("response", "")
 
     async def _call_openai_compat(self, prompt: str) -> str:
-        """OpenAI / Anthropic-compat chat completions."""
-        url = self.cfg.endpoint.rstrip("/") + "/v1/chat/completions"
+        """OpenAI-compatible chat completions.
+
+        Endpoint convention varies across providers:
+          - OpenAI / Groq / OpenRouter: base URL, we append /v1/chat/completions
+          - Gemini: ends in /v1beta/openai, we append only /chat/completions
+          - Pre-built: user already pasted /chat/completions, we use as-is
+        """
+        endpoint = self.cfg.endpoint.rstrip("/")
+        if endpoint.endswith("/chat/completions"):
+            url = endpoint
+        elif "/v1" in endpoint.lower() or "/v2" in endpoint.lower():
+            url = endpoint + "/chat/completions"
+        else:
+            url = endpoint + "/v1/chat/completions"
         headers = {"Authorization": f"Bearer {self.cfg.api_key}"} if self.cfg.api_key else {}
         payload = {
             "model": self.cfg.model,
