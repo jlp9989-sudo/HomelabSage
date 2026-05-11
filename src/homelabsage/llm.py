@@ -80,6 +80,22 @@ def build_prompt(update: Update, notes: str = "") -> str:
     )
 
 
+def _resolve_chat_completions_url(endpoint: str) -> str:
+    """Build the full chat-completions URL from a user-supplied endpoint.
+
+    Endpoint convention varies across providers:
+      - OpenAI / Groq / OpenRouter base URL → append /v1/chat/completions
+      - Gemini's /v1beta/openai             → append only /chat/completions
+      - User pasted full /chat/completions  → use as-is
+    """
+    e = endpoint.rstrip("/")
+    if e.endswith("/chat/completions"):
+        return e
+    if "/v1" in e.lower() or "/v2" in e.lower():
+        return e + "/chat/completions"
+    return e + "/v1/chat/completions"
+
+
 class LLMClient:
     def __init__(self, cfg: LLMConfig):
         self.cfg = cfg
@@ -123,20 +139,8 @@ class LLMClient:
             return r.json().get("response", "")
 
     async def _call_openai_compat(self, prompt: str) -> str:
-        """OpenAI-compatible chat completions.
-
-        Endpoint convention varies across providers:
-          - OpenAI / Groq / OpenRouter: base URL, we append /v1/chat/completions
-          - Gemini: ends in /v1beta/openai, we append only /chat/completions
-          - Pre-built: user already pasted /chat/completions, we use as-is
-        """
-        endpoint = self.cfg.endpoint.rstrip("/")
-        if endpoint.endswith("/chat/completions"):
-            url = endpoint
-        elif "/v1" in endpoint.lower() or "/v2" in endpoint.lower():
-            url = endpoint + "/chat/completions"
-        else:
-            url = endpoint + "/v1/chat/completions"
+        """OpenAI-compatible chat completions."""
+        url = _resolve_chat_completions_url(self.cfg.endpoint)
         headers = {"Authorization": f"Bearer {self.cfg.api_key}"} if self.cfg.api_key else {}
         payload = {
             "model": self.cfg.model,

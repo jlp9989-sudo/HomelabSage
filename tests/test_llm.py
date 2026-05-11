@@ -1,7 +1,9 @@
 """LLM parser must be tolerant of common model misbehaviors:
 markdown fences, prose around JSON, extra fields, wrong severity case…"""
 
-from homelabsage.llm import _parse_analysis, build_prompt
+import pytest
+
+from homelabsage.llm import _parse_analysis, _resolve_chat_completions_url, build_prompt
 from homelabsage.models import Severity, Update
 
 JSON_GOOD = """{
@@ -81,3 +83,33 @@ def test_build_prompt_truncates_huge_release_notes():
     assert 15000 <= p.count("A") <= 15020
     # template overhead ~2k chars; allow some headroom but keep the bound real
     assert len(p) < 17500
+
+
+@pytest.mark.parametrize(
+    "endpoint, expected",
+    [
+        # OpenAI default — bare base URL, append /v1/chat/completions
+        ("https://api.openai.com", "https://api.openai.com/v1/chat/completions"),
+        # Trailing slash must be tolerated
+        ("https://api.openai.com/", "https://api.openai.com/v1/chat/completions"),
+        # Groq — base URL + /openai segment, no version: append /v1/chat/completions
+        ("https://api.groq.com/openai", "https://api.groq.com/openai/v1/chat/completions"),
+        # OpenRouter — base URL + /api segment, no version: append /v1/chat/completions
+        ("https://openrouter.ai/api", "https://openrouter.ai/api/v1/chat/completions"),
+        # Gemini — already includes /v1beta version segment: append only /chat/completions
+        (
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        ),
+        # User pasted the full v1 path (common copy-paste from OpenAI docs):
+        # detect the version segment, append /chat/completions only — no double /v1
+        ("https://api.openai.com/v1", "https://api.openai.com/v1/chat/completions"),
+        # User pasted the full URL: leave it alone
+        (
+            "https://api.openai.com/v1/chat/completions",
+            "https://api.openai.com/v1/chat/completions",
+        ),
+    ],
+)
+def test_resolve_chat_completions_url(endpoint, expected):
+    assert _resolve_chat_completions_url(endpoint) == expected
