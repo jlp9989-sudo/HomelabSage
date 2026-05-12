@@ -17,6 +17,7 @@ from jinja2 import Environment
 from ..db import Database
 from ..engine import Engine
 from ..models import UpdateStatus
+from .routes_wizard import is_wizard_complete
 
 
 def register_updates_routes(
@@ -39,6 +40,13 @@ def register_updates_routes(
                 fresh = load_config(engine._cfg_path)
             except Exception:
                 pass
+        # Show the "start the wizard" banner only on a fresh install: no
+        # wizard marker yet AND no scan results to show. We deliberately
+        # don't redirect — a banner is recoverable, a redirect surprises
+        # the user and breaks bookmarks.
+        show_wizard_banner = (
+            not is_wizard_complete(engine._cfg_path) and not items
+        )
         tmpl = env.get_template("index.html")
         return HTMLResponse(
             tmpl.render(
@@ -46,6 +54,7 @@ def register_updates_routes(
                 llm_enabled=engine.llm.is_enabled(),
                 llm_profiles=list(fresh.llm_profiles.keys()),
                 llm_active=fresh.llm_active,
+                show_wizard_banner=show_wizard_banner,
             )
         )
 

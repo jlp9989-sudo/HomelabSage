@@ -35,6 +35,7 @@ from .routes_settings import register_settings_routes
 from .routes_settings_html import register_settings_html_routes
 from .routes_settings_test import register_settings_test_routes
 from .routes_updates import register_updates_routes
+from .routes_wizard import register_wizard_routes
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +83,7 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
     # FIRST — otherwise the catch-all wins and the test endpoints 404.
     register_settings_test_routes(app, cfg, cfg_path, env)
     register_settings_html_routes(app, cfg, cfg_path, env)
+    register_wizard_routes(app, cfg, cfg_path, env)
     register_health_routes(app)
 
     # Static assets (HTMX, future CSS sprites). Mounted last so route handlers

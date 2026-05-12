@@ -9,6 +9,17 @@
 {% endblock %}
 {% block content %}
 
+{% if show_wizard_banner %}
+<div class="flash" style="background:#1c3850; color:#cfe5ff; border:1px solid #2d4f6f">
+  <strong>Welcome 👋</strong>
+  — Looks like this install hasn't been set up yet.
+  <a href="/wizard" class="btn" style="margin-left:.5rem">Start the setup wizard</a>
+  <a href="/wizard" class="muted" style="font-size:.78rem; margin-left:.5rem">
+    (~1 minute, walks you through LLM + Docker + schedule)
+  </a>
+</div>
+{% endif %}
+
 {% if llm_profiles %}
 <div style="display:flex; gap:.5rem; align-items:center; margin-bottom:1rem">
   <form method="post" action="/llm/active"

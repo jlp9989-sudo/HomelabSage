@@ -1,0 +1,189 @@
+{# First-run wizard. One template, three views (welcome / step / done) so
+   navigation stays in one file and the progress chrome is shared.
+
+   Views:
+     - welcome: introduction + Start button + Skip-all link
+     - step:    one config block (LLM, Docker, Scheduler) with field form
+     - done:    completion screen with Run-first-scan + Go-to-dashboard
+#}
+{% extends "_base.html" %}
+{% block title %}HomelabSage — Setup wizard{% endblock %}
+{% block content %}
+
+<style>
+  .wizard-frame { max-width:46rem; margin:1rem auto; }
+  .wizard-progress { display:flex; gap:.25rem; margin-bottom:1.2rem; }
+  .wizard-progress .pip {
+    flex:1; height:.4rem; background:#1c2530; border-radius:999px;
+  }
+  .wizard-progress .pip.done   { background:#1c4a26; }
+  .wizard-progress .pip.active { background:#1e90ff; }
+  .wizard-intro { background:#161c24; border:1px solid #2a3340; border-radius:6px;
+                  padding:1rem 1.2rem; margin-bottom:1.2rem; }
+  .wizard-intro h2 { margin:0 0 .5rem 0; font-size:1.1rem; }
+  .wizard-intro p { color:#a5b2c2; margin:.4rem 0; }
+  .wizard-toolbar { display:flex; gap:.5rem; margin-top:1rem; align-items:center; }
+  .wizard-toolbar .spacer { margin-left:auto; }
+  .wizard-skip-link { font-size:.8rem; color:#8fa3b8; }
+  .wizard-step-summary { background:#161c24; border:1px solid #2a3340; border-radius:6px;
+                         padding:.75rem 1rem; margin-bottom:.5rem; }
+  .wizard-step-summary .step-num { display:inline-block; min-width:1.5rem; color:#8fa3b8; }
+</style>
+
+<div class="wizard-frame">
+
+  {# ─── Welcome ─────────────────────────────────────────────────── #}
+  {% if view == "welcome" %}
+    <h1 style="margin-top:.2rem">Welcome to HomelabSage</h1>
+    <p class="muted">A short setup to get you to your first scan in under a minute.</p>
+
+    <div class="wizard-intro">
+      <h2>What HomelabSage does</h2>
+      <p>It reads what's running in your homelab (Docker, Home Assistant),
+         checks each piece against its upstream release feed, and uses an
+         LLM to tell you whether an update is <em>critical / high / medium / info</em>
+         for <em>your</em> setup — not "an update exists", but "this one
+         breaks a thing you have, and here's what to do".</p>
+      <p>You can write notes (e.g. "Plex 1.42 broke my hardware transcode,
+         versionlocked") and the LLM will weigh them when it grades the
+         next Plex update.</p>
+    </div>
+
+    <div class="wizard-intro">
+      <h2>What this wizard sets up</h2>
+      {% for s in steps %}
+        <div class="wizard-step-summary">
+          <span class="step-num">{{ loop.index }}.</span>
+          <strong>{{ s.title }}</strong>
+          {% if s.skippable %}<span class="muted">— optional</span>{% endif %}
+        </div>
+      {% endfor %}
+      <p class="muted" style="margin-top:.8rem">
+        Outputs (Notion, Telegram) and HACS / scripts sources can be
+        enabled afterwards from Settings — they're not needed for a
+        first scan.
+      </p>
+    </div>
+
+    <div class="wizard-toolbar">
+      <a class="btn" href="/wizard/{{ steps[0].slug }}">Start setup →</a>
+      <div class="spacer"></div>
+      <form method="post" action="/wizard/skip-all" style="display:inline">
+        <button type="submit" class="btn ghost"
+                title="Skip the wizard and go straight to Settings. You can run it again from /wizard.">
+          I'll configure manually
+        </button>
+      </form>
+    </div>
+    {% if not overlay_writable %}
+      <p class="muted" style="margin-top:1rem">
+        ⚠ Read-only mode — no writable config path. The wizard can't save changes
+        until <code>config.user.yaml</code> is writable.
+      </p>
+    {% endif %}
+
+  {# ─── Step page ───────────────────────────────────────────────── #}
+  {% elif view == "step" %}
+    <h1 style="margin-top:.2rem">{{ step.title }}</h1>
+
+    <div class="wizard-progress" title="Step {{ step_number }} of {{ total_steps }}">
+      {% for i in range(total_steps) %}
+        <div class="pip {% if i + 1 < step_number %}done{% elif i + 1 == step_number %}active{% endif %}"></div>
+      {% endfor %}
+    </div>
+
+    <div class="wizard-intro">
+      <p>{{ step.intro }}</p>
+    </div>
+
+    {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+    <form method="post" action="/wizard/{{ step.slug }}">
+      {# Hide revert buttons in the wizard — they POST to /settings/.../revert
+         with HTMX targeting #block-form, which doesn't exist on this page.
+         If the user wants to revert a wizard-set field, they can do it
+         from /settings after the wizard is done. #}
+      {% set show_revert = False %}
+      {% include "_settings_fields.html" with context %}
+
+      <div class="wizard-toolbar">
+        <button type="submit"
+                {% if not overlay_writable %}disabled title="Read-only mode"{% endif %}>
+          Save &amp; continue →
+        </button>
+        {% if step.skippable %}
+          <button type="submit" name="_wizard_skip" value="1" class="btn ghost"
+                  title="Move on without changing this block.">
+            Skip this step
+          </button>
+        {% endif %}
+        <div class="spacer"></div>
+        {% if step_number > 1 %}
+          <a class="wizard-skip-link"
+             href="/wizard/{{ steps[step_number - 2].slug if steps is defined else '' }}">← back</a>
+        {% endif %}
+      </div>
+    </form>
+
+    {# Provider-dependent defaults: reuses the same inline JS as the
+       settings form so picking a provider auto-fills endpoint+model. #}
+    <script>
+      (function () {
+        var select = document.querySelector('select[data-provider-presets]');
+        if (!select) return;
+        var presets;
+        try { presets = JSON.parse(select.dataset.providerPresets); }
+        catch (e) { return; }
+        var endpoint = document.getElementById('f-endpoint');
+        var model = document.getElementById('f-model');
+        if (!endpoint || !model) return;
+        var allValues = function (key) {
+          return Object.keys(presets).map(function (k) { return presets[k][key]; });
+        };
+        select.addEventListener('change', function () {
+          var p = presets[select.value];
+          if (!p) return;
+          if (!endpoint.value.trim() || allValues('endpoint').indexOf(endpoint.value) !== -1) {
+            endpoint.value = p.endpoint;
+          }
+          if (!model.value.trim() || allValues('model').indexOf(model.value) !== -1) {
+            model.value = p.model;
+          }
+        });
+      })();
+    </script>
+
+  {# ─── Done ────────────────────────────────────────────────────── #}
+  {% elif view == "done" %}
+    <h1 style="margin-top:.2rem">✅ You're set up</h1>
+
+    {% if already_complete %}
+      <div class="wizard-intro">
+        <p>The wizard is already marked complete. You can re-run any step
+           from <a href="/wizard">here</a> or jump to <a href="/settings">Settings</a>.</p>
+      </div>
+    {% else %}
+      <div class="wizard-intro">
+        <p>HomelabSage is ready for its first run. What happens next:</p>
+        <ul>
+          <li><strong>Updates</strong> page lists what each source found.
+              Empty at first — a scan needs to run.</li>
+          <li><strong>Notes</strong> page is where you write the "X broke
+              my setup" / "Y is versionlocked" hints the LLM will use.</li>
+          <li><strong>Settings → Outputs</strong> if you want Telegram /
+              Notion notifications on the next scan.</li>
+        </ul>
+      </div>
+
+      <form method="post" action="/wizard/done">
+        <div class="wizard-toolbar">
+          <button type="submit">Finish &amp; go to dashboard</button>
+          <div class="spacer"></div>
+          <a class="wizard-skip-link" href="/settings">Open settings instead</a>
+        </div>
+      </form>
+    {% endif %}
+  {% endif %}
+
+</div>
+{% endblock %}

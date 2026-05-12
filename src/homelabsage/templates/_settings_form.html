@@ -19,68 +19,7 @@
         hx-post="/settings/{{ block }}/update"
         hx-target="#block-form"
         hx-swap="outerHTML">
-    {% for f in fields %}
-      <div class="field {% if f.is_override %}is-override{% endif %}">
-        <div class="field-head">
-          <label for="f-{{ f.name }}">{{ f.title }}</label>
-          <span class="field-type">{{ f.type }}{% if f.is_secret %} · secret{% endif %}</span>
-          {% if f.is_override %}<span class="override-tag">override</span>{% endif %}
-        </div>
-        {% if f.description %}<div class="field-help">{{ f.description }}</div>{% endif %}
-
-        {% if f.widget == "cron" %}
-          {% include "_widget_cron.html" %}
-        {% elif f.widget == "timezone" %}
-          {% include "_widget_timezone.html" %}
-        {% elif f.widget == "path" %}
-          {% include "_widget_path.html" %}
-        {% elif f.is_enum %}
-          {# When the field is the LLM `provider` select AND the context
-             carries a presets map, expose it on the element so the inline
-             script at the bottom can auto-fill endpoint+model on change. #}
-          <select id="f-{{ f.name }}" name="{{ f.name }}"
-                  {% if f.name == "provider" and provider_presets %}data-provider-presets="{{ provider_presets | tojson }}"{% endif %}>
-            {% for opt in f.enum_values %}
-              <option value="{{ opt }}" {% if opt == f.value %}selected{% endif %}>{{ opt }}</option>
-            {% endfor %}
-          </select>
-        {% elif f.is_bool %}
-          <input type="hidden" name="{{ f.name }}" value="false">
-          <label style="display:flex; gap:.5rem; align-items:center; cursor:pointer">
-            <input type="checkbox" id="f-{{ f.name }}" name="{{ f.name }}" value="true"
-                   {% if f.bool_value %}checked{% endif %}>
-            <span class="muted">currently <code>{{ f.bool_value }}</code></span>
-          </label>
-        {% elif f.is_array %}
-          <textarea class="field-input" id="f-{{ f.name }}" name="{{ f.name }}"
-                    placeholder="one entry per line">{{ f.value }}</textarea>
-        {% elif f.is_object %}
-          <textarea class="field-input" id="f-{{ f.name }}" name="{{ f.name }}"
-                    placeholder="YAML mapping, e.g.&#10;key: value&#10;another: thing">{{ f.value }}</textarea>
-        {% elif f.is_secret %}
-          <input type="password" id="f-{{ f.name }}" name="{{ f.name }}"
-                 value=""
-                 placeholder="{{ f.placeholder }}"
-                 autocomplete="off">
-        {% elif f.is_int %}
-          <input type="number" id="f-{{ f.name }}" name="{{ f.name }}" value="{{ f.value }}">
-        {% else %}
-          <input type="text" id="f-{{ f.name }}" name="{{ f.name }}" value="{{ f.value }}">
-        {% endif %}
-
-        {% if f.is_override and overlay_writable %}
-          <div class="field-actions">
-            <button type="button" class="btn ghost"
-                    hx-post="/settings/{{ block }}/{{ f.name }}/revert"
-                    hx-target="#block-form"
-                    hx-swap="outerHTML"
-                    title="Remove this override; field falls back to the deploy default">
-              ↺ revert
-            </button>
-          </div>
-        {% endif %}
-      </div>
-    {% endfor %}
+    {% include "_settings_fields.html" %}
 
     <div class="form-toolbar">
       {% if overlay_writable %}
