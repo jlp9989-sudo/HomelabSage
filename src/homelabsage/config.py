@@ -211,8 +211,22 @@ class Config(BaseModel):
 
 
 def load_config(path: str | Path) -> Config:
-    """Load YAML config + .env from the same directory."""
+    """Load YAML config + .env + (optional) user-overlay from the same directory.
+
+    Precedence: `config.yaml` (deploy default) → `config.user.yaml` (written
+    by the web UI, optional). The overlay is deep-merged on top; absent
+    overlay is a no-op. See `homelabsage.config_overlay` for the merge rules.
+
+    Environment-variable interpolation runs AFTER the merge so the user
+    overlay can introduce `${VAR}` placeholders too.
+    """
+    from .config_overlay import deep_merge, load_overlay, user_overlay_path
+
     path = Path(path)
     _load_dotenv(path.parent / ".env")
     raw = yaml.safe_load(path.read_text()) or {}
-    return Config(**_expand(raw))
+    if not isinstance(raw, dict):
+        raw = {}
+    overlay = load_overlay(user_overlay_path(path))
+    merged = deep_merge(raw, overlay) if overlay else raw
+    return Config(**_expand(merged))
