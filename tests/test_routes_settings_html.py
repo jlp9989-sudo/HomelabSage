@@ -306,6 +306,48 @@ def test_scheduler_accepts_valid_iana_timezone(client, cfg_dir):
     assert overlay["scheduler"]["timezone"] == "Asia/Tokyo"
 
 
+def test_storage_renders_path_widget(client):
+    """`storage.database_path` opts into ui_widget='path' → text input plus
+    a file/directory-aware helper line."""
+    r = client.get("/settings/storage")
+    html = r.text
+    assert 'id="f-database_path"' in html
+    # The path widget shows file/directory-specific helper text
+    assert "File path." in html
+    # The cfg_dir fixture writes an absolute path, so the "Resolves to:"
+    # hint is suppressed (resolved == raw). The relative-path case is
+    # covered by test_path_widget_resolves_relative_path.
+
+
+def test_notes_dir_renders_directory_widget(client):
+    """`notes.notes_dir` is opted-in too, with ui_path_kind='directory'."""
+    r = client.get("/settings/notes")
+    html = r.text
+    assert 'id="f-notes_dir"' in html
+    assert "Directory path." in html
+
+
+def test_path_widget_resolves_relative_path(client, cfg_dir):
+    """A relative path in the overlay shows the absolute-resolved version
+    in a "Resolves to:" hint — the value the user typed stays as-is in the
+    input."""
+    # Write a relative path into the overlay so the form renders it
+    from homelabsage.config_overlay import atomic_write_yaml, user_overlay_path
+    atomic_write_yaml(
+        user_overlay_path(cfg_dir / "config.yaml"),
+        {"curator": {"output_dir": "./curator-notes"}},
+    )
+    r = client.get("/settings/curator")
+    html = r.text
+    assert 'id="f-output_dir"' in html
+    assert 'value="./curator-notes"' in html
+    # Resolution is anchored on the test's CWD (whatever pytest used).
+    # We only check that the hint is present and contains the leaf name —
+    # the prefix varies per environment but is irrelevant for the assertion.
+    assert "Resolves to:" in html
+    assert "curator-notes" in html
+
+
 def test_scheduler_renders_cron_widget(client):
     """The cron field has json_schema_extra={'ui_widget':'cron'} → preset select."""
     r = client.get("/settings/scheduler")

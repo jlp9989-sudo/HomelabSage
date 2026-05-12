@@ -277,7 +277,11 @@ class WebConfig(BaseModel):
 
 
 class StorageConfig(BaseModel):
-    database_path: str = "./data/state.sqlite"
+    database_path: str = Field(
+        "./data/state.sqlite",
+        description="SQLite file for run state. Absolute path or relative to the working directory.",
+        json_schema_extra={"ui_widget": "path", "ui_path_kind": "file"},
+    )
 
 
 class NotesConfig(BaseModel):
@@ -290,7 +294,11 @@ class NotesConfig(BaseModel):
     Keep these short — they cost tokens on every LLM call.
     """
 
-    notes_dir: str = ""
+    notes_dir: str = Field(
+        "",
+        description="Directory scanned for .md/.txt files. Leave empty to skip notes injection.",
+        json_schema_extra={"ui_widget": "path", "ui_path_kind": "directory"},
+    )
     extra_docs: list[str] = Field(default_factory=list)
     max_chars: int = 4000
 
@@ -317,8 +325,16 @@ class CuratorConfig(BaseModel):
     """
 
     enabled: bool = True
-    output_dir: str = ""
-    prompt_template_path: str = ""
+    output_dir: str = Field(
+        "",
+        description="Where curator notes are written. Leave empty to write into `notes.notes_dir`.",
+        json_schema_extra={"ui_widget": "path", "ui_path_kind": "directory"},
+    )
+    prompt_template_path: str = Field(
+        "",
+        description="Path to a custom prompt .txt. Leave empty to use the built-in default.",
+        json_schema_extra={"ui_widget": "path", "ui_path_kind": "file"},
+    )
     style_examples: list[str] = Field(default_factory=list)
     recent_releases: int = 5
     max_release_chars: int = 8000

@@ -197,6 +197,18 @@ def _block_form_context(
         # template chooses `_widget_<name>.html` when this is set; otherwise
         # the default type-based rendering applies.
         widget = prop.get("ui_widget", "")
+        path_kind = prop.get("ui_path_kind", "")
+
+        # For the path widget: show the absolute path the value resolves to,
+        # so the user knows where their data actually lives. `~` is NOT
+        # expanded here because Python doesn't expand it at config-load time
+        # either — keeping the preview honest about runtime behavior.
+        resolved_path = ""
+        if widget == "path" and isinstance(raw_value, str) and raw_value.strip():
+            try:
+                resolved_path = str(Path(raw_value).resolve(strict=False))
+            except (OSError, RuntimeError):
+                resolved_path = ""
 
         fields.append({
             "name": name,
@@ -204,6 +216,8 @@ def _block_form_context(
             "description": prop.get("description", ""),
             "type": prop_type or "string",
             "widget": widget,
+            "path_kind": path_kind,
+            "resolved_path": resolved_path,
             "is_secret": is_secret,
             "is_array": is_array,
             "is_object": is_object,

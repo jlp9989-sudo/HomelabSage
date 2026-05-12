@@ -29,6 +29,8 @@
           {% include "_widget_cron.html" %}
         {% elif f.widget == "timezone" %}
           {% include "_widget_timezone.html" %}
+        {% elif f.widget == "path" %}
+          {% include "_widget_path.html" %}
         {% elif f.is_enum %}
           <select id="f-{{ f.name }}" name="{{ f.name }}">
             {% for opt in f.enum_values %}

@@ -1,0 +1,29 @@
+{# Path helper widget — text input + absolute-path preview + hint.
+
+   No file picker (would need OS file dialog, not portable in a browser).
+   Just shows the user where their path *actually* resolves, so a typo
+   like `./data/` vs `data/` doesn't quietly write to the wrong place.
+
+   `f.path_kind` is "file" or "directory" — drives the helper wording so
+   the user knows what to type.
+
+   `~` is not expanded — `pathlib.Path` doesn't expanduser by default and
+   neither does the config loader, so showing the literal value here is
+   honest about runtime behavior.
+#}
+<div>
+  <input type="text" id="f-{{ f.name }}" name="{{ f.name }}"
+         value="{{ f.value }}"
+         placeholder="{% if f.path_kind == 'directory' %}/path/to/dir{% else %}/path/to/file{% endif %}">
+  {% if f.resolved_path and f.resolved_path != f.value %}
+    <div class="field-help" style="margin-top:.3rem">
+      Resolves to: <code>{{ f.resolved_path }}</code>
+    </div>
+  {% endif %}
+  <div class="field-help muted" style="margin-top:.2rem">
+    {% if f.path_kind == "directory" %}Directory path.{% else %}File path.{% endif %}
+    Absolute, or relative to the HomelabSage working directory.
+    Inside Docker, the path must be reachable from the container —
+    make sure the host directory is bind-mounted in your compose file.
+  </div>
+</div>
