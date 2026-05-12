@@ -98,6 +98,12 @@ Rules:
   literal warning "do not interrupt the first start after upgrade — let any
   database migration finish". Note this in the summary too. Interrupting these
   is the most common silent-corruption path for users.
+- If the context block contains "orphan_since_days" with a value ≥ 30, the
+  container has been stopped for that many days. Mention this fact in the
+  summary verbatim ("stopped <N> days ago") and set "recommended_action" to
+  "decide whether this container is still needed; if not, remove it instead of
+  upgrading". Do not raise severity solely on orphan status — security CVEs are
+  still the only "critical" trigger.
 
 # Update
 - Source: {source}

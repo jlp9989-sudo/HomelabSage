@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import UTC, datetime
 
 import docker
 from docker.models.containers import Container
@@ -15,6 +16,52 @@ from ..models import Update
 from . import Plugin
 
 log = logging.getLogger(__name__)
+
+
+def _parse_docker_timestamp(ts: str) -> datetime | None:
+    """Parse Docker's RFC3339 timestamps (potentially with nanosecond precision).
+
+    Docker returns ISO-8601 timestamps with up to 9 fractional digits
+    (`2025-04-12T10:33:45.123456789Z`); Python's fromisoformat handles 6 at most.
+    Truncate to microseconds and convert the trailing `Z` to a real offset.
+    Returns None for the sentinel values Docker uses when the field is unset
+    (e.g. `"0001-01-01T00:00:00Z"`).
+    """
+    if not ts or ts.startswith("0001-"):
+        return None
+    s = ts.rstrip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    # Truncate fractional seconds beyond 6 digits, if present.
+    m = re.match(r"^(.*\.\d{1,6})\d*(\+\d{2}:\d{2}|-\d{2}:\d{2})$", s)
+    if m:
+        s = m.group(1) + m.group(2)
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+def _orphan_days(
+    status: str,
+    finished_at: str,
+    *,
+    now: datetime | None = None,
+) -> int | None:
+    """Days a container has been in the `exited` state, or None if not orphaned.
+
+    The check is intentionally narrow: we only flag containers Docker has
+    actually marked exited (manual stop counts) and that have a parseable
+    `FinishedAt`. `created` / `paused` / `restarting` / `dead` are not
+    considered orphans — those need human attention faster than a 30-day window.
+    """
+    if status != "exited":
+        return None
+    finished = _parse_docker_timestamp(finished_at)
+    if finished is None:
+        return None
+    now = now or datetime.now(UTC)
+    return max(0, int((now - finished).total_seconds() // 86400))
 
 # `ghcr.io/owner/repo` or similar GHCR pattern
 _GHCR_RE = re.compile(r"^(?:ghcr\.io|gcr\.io)/([\w.-]+)/([\w.-]+)")
@@ -120,7 +167,9 @@ class DockerPlugin(Plugin):
         updates: list[Update] = []
         try:
             client = self._client()
-            containers = client.containers.list(all=False)
+            # all=True so orphan (exited) containers also surface — without this,
+            # a long-stopped container with a pending CVE just disappears.
+            containers = client.containers.list(all=True)
         except Exception as e:
             log.error("Docker daemon unreachable at %s: %s", self.cfg.socket, e)
             return []
@@ -150,6 +199,25 @@ class DockerPlugin(Plugin):
             image_short = image_tag.split("/")[-1].split(":")[0]
             keywords = [k for k in {repo, repo.split("/")[-1], image_short, compose_project} if k]
 
+            state = c.attrs.get("State", {}) or {}
+            ctx: dict[str, object] = {
+                "image": image_tag,
+                "repo": repo,
+                "compose_project": compose_project,
+                "ports": list((c.attrs.get("NetworkSettings", {}).get("Ports") or {}).keys()),
+                "restart_policy": c.attrs.get("HostConfig", {}).get(
+                    "RestartPolicy", {}
+                ).get("Name", ""),
+                "_note_keywords": keywords,
+            }
+            if self.cfg.orphan_min_days > 0:
+                days = _orphan_days(
+                    str(state.get("Status", "")),
+                    str(state.get("FinishedAt", "")),
+                )
+                if days is not None and days >= self.cfg.orphan_min_days:
+                    ctx["orphan_since_days"] = days
+
             updates.append(
                 Update(
                     source=self.id,
@@ -158,17 +226,7 @@ class DockerPlugin(Plugin):
                     new_version=new_version,
                     release_url=release.get("html_url"),
                     release_notes=release.get("body") or "",
-                    context={
-                        "image": image_tag,
-                        "repo": repo,
-                        "compose_project": compose_project,
-                        "ports": list((c.attrs.get("NetworkSettings", {}).get("Ports") or {}).keys()),
-                        "restart_policy": c.attrs.get("HostConfig", {}).get(
-                            "RestartPolicy", {}
-                        ).get("Name", ""),
-                        # Forwarded to NotesProvider for relevance matching
-                        "_note_keywords": keywords,
-                    },
+                    context=ctx,
                 )
             )
         return updates

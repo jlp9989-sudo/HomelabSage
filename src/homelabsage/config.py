@@ -60,6 +60,10 @@ class DockerSourceConfig(BaseModel):
     socket: str = "/var/run/docker.sock"
     overrides: dict[str, str] = Field(default_factory=dict)
     skip: list[str] = Field(default_factory=list)
+    # Containers `Status=exited` for at least this many days are flagged on each
+    # Update via `context.orphan_since_days`. The analyzer prompt can pick that
+    # up to suggest "is this container still needed?". Set to 0 to disable.
+    orphan_min_days: int = 30
 
 
 class HAConfig(BaseModel):
