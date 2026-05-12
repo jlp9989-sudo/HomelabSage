@@ -442,6 +442,28 @@ tests/              pytest, 35 tests
 - Tag-comparison is semver-only. Variant tags (`alpine`, `cuda`, `openvino`, `latest`) are explicitly *not* compared — they're skipped rather than risk false positives.
 - The `homeassistant` plugin needs a long-lived access token. HACS detection depends on the [HACS sensor](https://hacs.xyz/) being exposed.
 
+## Security notes
+
+HomelabSage is designed for the **single-user, self-hosted, LAN-or-VPN-only** threat model. If that matches your deployment, the defaults are fine. If you're exposing it publicly, read this.
+
+**What's protected out of the box:**
+
+- HTTP Basic Auth gates the whole UI (enable via `web.auth.enabled: true` + password).
+- **CSRF mitigation**: every state-changing request (POST / PATCH / DELETE) verifies the `Origin` (or `Referer` fallback) header against the request's `Host`. A logged-in user visiting an attacker-controlled site cannot trigger a settings change via their browser. The check honours `X-Forwarded-Proto` so it works correctly behind a TLS-terminating reverse proxy.
+- The notes editor refuses `..` path traversal and non-`.md` / non-`.txt` extensions.
+- The settings overlay file is written with mode `0o600` (owner read/write only).
+- The `/healthz` endpoint is intentionally unauthenticated — Docker / Uptime Kuma / Kubernetes probes need to reach it without credentials.
+
+**What's not, and what to add yourself if you need it:**
+
+- **Terminate TLS at a reverse proxy** (Caddy, Traefik, nginx, Cloudflare Tunnel). HomelabSage speaks plain HTTP; Basic Auth credentials in plaintext over the wire is the same problem it's been since 1996. Do not expose port 8000 directly to the public internet.
+- **For remote access, prefer a VPN** (Tailscale, WireGuard) over public exposure. Less attack surface, no auth-credential-on-the-wire concern, no rate-limit headache.
+- **Rate-limiting on auth attempts** is the reverse proxy's job, not the app's.
+- **Multi-user auth (per-user accounts, RBAC, MFA)** is out of scope. If you need it, front HomelabSage with Authelia or Cloudflare Access.
+- **The settings UI can write API keys to disk** (`config.user.yaml`, mode 0o600). Anyone with shell access to the host can read them — same as any homelab tool.
+
+If you find a vulnerability, open an issue with `[security]` in the title or email the project owner (see the `LICENSE` for the address).
+
 ---
 
 ## License

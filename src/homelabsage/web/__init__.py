@@ -26,6 +26,7 @@ from ..db import Database
 from ..engine import Engine
 from ..notes import NotesEditor
 from .auth import attach_basic_auth
+from .csrf import attach_csrf_guard
 from .lifecycle import register_lifecycle
 from .routes_health import register_health_routes
 from .routes_notes import register_notes_routes
@@ -55,8 +56,15 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
         autoescape=select_autoescape(["html"]),
     )
 
+    # Middleware ordering in Starlette: registered first runs INNERMOST,
+    # last runs OUTERMOST (it's `reversed(user_middleware)` in the build
+    # step). We want CSRF to run BEFORE auth on the inbound path so a
+    # cross-origin attacker gets a 403 regardless of authentication
+    # state — that means CSRF must be the OUTERMOST middleware, which
+    # means we register it AFTER auth.
     if cfg.web.auth.enabled and cfg.web.auth.password:
         attach_basic_auth(app, cfg.web.auth)
+    attach_csrf_guard(app)
 
     register_lifecycle(app, cfg, engine)
     register_updates_routes(app, db, engine, env)
