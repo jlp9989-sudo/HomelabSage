@@ -113,6 +113,15 @@ Rules:
   entirely if none of the alternatives is more popular than the current image
   by a margin you'd describe as "much more" (the gate filter already ensures
   that, but trust your reading of the data).
+- If the context block contains "repo_health" with status `"abandoned"`, the
+  upstream repo is archived or hasn't been pushed in over a year. Set
+  `recommended_action` to mention this fact ("upstream repo appears
+  abandoned (<reason>); evaluate a maintained fork before upgrading") and
+  raise severity by ONE step from what you would otherwise have chosen
+  (info→medium, medium→high, high→critical) — abandoned dependencies are a
+  real security liability over time. If status is `"stale"`, mention it in
+  the summary as "upstream activity has slowed (no push in <N> days)" but do
+  NOT change severity — slowdown is information, not a verdict.
 
 # Update
 - Source: {source}

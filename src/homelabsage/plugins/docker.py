@@ -11,7 +11,7 @@ from docker.models.containers import Container
 from packaging.version import InvalidVersion, Version
 
 from ..config import DockerSourceConfig
-from ..github import latest_release
+from ..github import classify_repo_health, latest_release, repo_metadata
 from ..images import find_alternatives
 from ..models import Update
 from . import Plugin
@@ -231,6 +231,16 @@ class DockerPlugin(Plugin):
                         ctx["alternatives"] = [a.to_context() for a in alts.candidates]
                 except Exception as e:
                     log.debug("find_alternatives failed for %s: %s", c.name, e)
+
+            if self.cfg.repo_health:
+                try:
+                    meta = await repo_metadata(repo)
+                    health = classify_repo_health(meta)
+                    # Only emit when we have a usable signal — "unknown" adds noise.
+                    if health.get("status") != "unknown":
+                        ctx["repo_health"] = health
+                except Exception as e:
+                    log.debug("repo_health failed for %s: %s", repo, e)
 
             updates.append(
                 Update(

@@ -71,6 +71,12 @@ class DockerSourceConfig(BaseModel):
     # and the scan continues normally. See `homelabsage.images.Criteria` for
     # the per-call thresholds (10x pulls ratio, 90-day freshness, …).
     find_alternatives: bool = False
+    # Classify each repo as alive/stale/abandoned (GitHub `pushed_at` and
+    # `archived` flag) and attach to Update.context.repo_health. Enabled by
+    # default because it's one extra GET per Update we'd already emit — the
+    # GitHub rate-limit budget covers this without raising costs. Set to
+    # false if you want to skip the extra request.
+    repo_health: bool = True
 
 
 class HAConfig(BaseModel):
