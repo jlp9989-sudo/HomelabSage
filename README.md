@@ -1,7 +1,7 @@
 # HomelabSage
 
 [![CI](https://github.com/jlp9989-sudo/HomelabSage/actions/workflows/ci.yml/badge.svg)](https://github.com/jlp9989-sudo/HomelabSage/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--alpha-orange)](#)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
 
@@ -446,4 +446,13 @@ tests/              pytest, 35 tests
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+**AGPL-3.0 with a Plugin Exception** — see [LICENSE](LICENSE) for the full text.
+
+In plain English:
+
+- You can self-host, fork, modify, and redistribute HomelabSage freely.
+- If you run a modified version as a network service, you must publish your modifications under the AGPL. The network-use clause is the whole point — it closes the SaaS loophole that lets companies take open source, host it commercially, and never contribute back.
+- The **Plugin Exception** means plugins that interact only through the documented public extension interfaces (the Plugin SDK, Output SDK, prompt templates, public HTTP API) are not "derivative works" and may be licensed under any terms you like — proprietary, permissive, or copyleft. You only need to comply with the AGPL if you modify HomelabSage's own source.
+- If you want commercial terms (e.g. embedding HomelabSage in proprietary software, or running a hosted SaaS without complying with AGPL's source-disclosure requirement), contact the copyright holder for a commercial license.
+
+Individual homelabbers — the people this project is built for — never have to think about any of this. Use it, modify it for your own homelab, share your tweaks with friends; you're already compliant.

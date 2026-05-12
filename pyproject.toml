@@ -3,13 +3,13 @@ name = "homelabsage"
 version = "0.0.1"
 description = "AI-powered homelab analyzer, update tracker and improvement advisor"
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-only" }
 requires-python = ">=3.11"
-authors = [{ name = "javi" }]
+authors = [{ name = "Javier López", email = "jlp9989@gmail.com" }]
 keywords = ["homelab", "docker", "homeassistant", "updates", "ai", "llm", "ollama"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: System :: Monitoring",
