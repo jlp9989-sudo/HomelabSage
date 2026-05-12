@@ -87,9 +87,31 @@ class HAConfig(BaseModel):
     include_addons: bool = True
 
 
+class ScriptsSourceConfig(BaseModel):
+    """Enumerate cron jobs / systemd timers / Unraid User Scripts on the host.
+
+    Universal across distros: every probe gracefully no-ops when its target
+    directory or binary is missing, so the same defaults work on Debian,
+    Fedora, Arch, Alpine, Unraid, macOS, etc.
+
+    `etc_root` / `cron_spool` / `unraid_scripts_root` exist for the rare
+    case where the relevant directories live under a non-default prefix
+    (e.g. a chroot or a mounted host filesystem at `/host/etc`).
+    """
+
+    enabled: bool = False
+    etc_root: str = "/etc"
+    cron_spool: str = "/var/spool/cron"
+    unraid_scripts_root: str = "/boot/config/plugins/user.scripts/scripts"
+    systemctl_path: str = "systemctl"
+    enable_systemd: bool = True
+    enable_unraid: bool = False
+
+
 class SourcesConfig(BaseModel):
     docker: DockerSourceConfig = Field(default_factory=DockerSourceConfig)
     homeassistant: HAConfig = Field(default_factory=HAConfig)
+    scripts: ScriptsSourceConfig = Field(default_factory=ScriptsSourceConfig)
     # Placeholders for future plugins — kept loose to not break configs.
     fedora: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
     llamacpp: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
