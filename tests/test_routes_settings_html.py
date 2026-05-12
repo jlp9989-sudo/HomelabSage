@@ -216,6 +216,53 @@ def test_block_form_renders_array_as_textarea(client):
     assert "foo" in html and "bar" in html
 
 
+def test_scheduler_renders_timezone_widget(client):
+    """`scheduler.timezone` is annotated `ui_widget='timezone'` and rolls into
+    a preset select + raw text input via `_widget_timezone.html`."""
+    r = client.get("/settings/scheduler")
+    html = r.text
+    assert 'class="tz-preset"' in html
+    assert 'id="f-timezone"' in html
+    # A handful of representative presets must be in the option list
+    for tz in ["UTC", "Europe/Madrid", "America/New_York", "Asia/Tokyo"]:
+        assert tz in html
+
+
+def test_scheduler_rejects_invalid_timezone(client, cfg_dir):
+    """Server-side validator must catch typos before we write the overlay
+    and crash the scheduler later."""
+    r = client.post(
+        "/settings/scheduler/update",
+        data={"enabled": "false", "cron": "0 9 * * *",
+              "timezone": "Europe/Madri",  # typo
+              "heartbeat_url": ""},
+    )
+    assert r.status_code == 200
+    # The form re-renders with the error visible
+    assert "unknown timezone" in r.text.lower() or "europe/madri" in r.text.lower()
+    # Nothing written to disk
+    from homelabsage.config_overlay import user_overlay_path
+    assert not user_overlay_path(cfg_dir / "config.yaml").exists()
+
+
+def test_scheduler_accepts_valid_iana_timezone(client, cfg_dir):
+    r = client.post(
+        "/settings/scheduler/update",
+        data={"enabled": "false", "cron": "0 9 * * *",
+              "timezone": "Asia/Tokyo",
+              "heartbeat_url": ""},
+    )
+    assert r.status_code == 200
+    # Overlay was written
+    import yaml
+
+    from homelabsage.config_overlay import user_overlay_path
+    overlay = yaml.safe_load(
+        user_overlay_path(cfg_dir / "config.yaml").read_text()
+    )
+    assert overlay["scheduler"]["timezone"] == "Asia/Tokyo"
+
+
 def test_scheduler_renders_cron_widget(client):
     """The cron field has json_schema_extra={'ui_widget':'cron'} → preset select."""
     r = client.get("/settings/scheduler")

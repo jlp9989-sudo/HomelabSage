@@ -27,6 +27,8 @@
 
         {% if f.widget == "cron" %}
           {% include "_widget_cron.html" %}
+        {% elif f.widget == "timezone" %}
+          {% include "_widget_timezone.html" %}
         {% elif f.is_bool %}
           <input type="hidden" name="{{ f.name }}" value="false">
           <label style="display:flex; gap:.5rem; align-items:center; cursor:pointer">

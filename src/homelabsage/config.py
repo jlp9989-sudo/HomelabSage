@@ -232,6 +232,7 @@ class SchedulerConfig(BaseModel):
     timezone: str = Field(
         "UTC",
         description="IANA timezone the cron runs against, e.g. `Europe/Madrid`, `America/New_York`.",
+        json_schema_extra={"ui_widget": "timezone"},
     )
     heartbeat_url: str = Field(
         "",
@@ -240,6 +241,26 @@ class SchedulerConfig(BaseModel):
             "an Uptime Kuma push monitor. Leave empty to disable."
         ),
     )
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_tz(cls, v: str) -> str:
+        """Reject typos at save time rather than at scheduler-start time.
+
+        Uses stdlib `zoneinfo`, which reads the system tzdata. We declare
+        the `tzdata` PyPI package as a dependency so minimal OS images
+        without an OS-level tz database (Alpine, distroless, Windows)
+        still resolve every IANA name including aliases like `US/Pacific`.
+        """
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError) as e:
+            raise ValueError(
+                f"unknown timezone {v!r} — must be a valid IANA name like "
+                f"'Europe/Madrid', 'America/New_York', or 'UTC'"
+            ) from e
+        return v
 
 
 class WebAuthConfig(BaseModel):
