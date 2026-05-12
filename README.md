@@ -26,6 +26,28 @@ The LLM doesn't analyze updates in a vacuum — you can point it at your own `no
 
 ---
 
+## Screenshots
+
+### Dashboard — every analyzed update at a glance
+
+The list groups by severity (critical / high / medium / info), with an explicit "action required" flag on rows that have a migration step, a deprecated env var, or anything else the LLM thinks you should look at before pulling the image.
+
+![Dashboard with analyzed updates](docs/assets/screenshots/dashboard.png)
+
+### First-run wizard — three steps to a working install
+
+Provider dropdown auto-fills the endpoint and a sensible model on change. Pick Groq or Gemini for a free cloud tier, Ollama for fully local, OpenAI / Anthropic / OpenRouter for everything else.
+
+![First-run wizard — LLM step](docs/assets/screenshots/wizard-llm.png)
+
+### Settings — schema-driven, no YAML editing
+
+Every block of the config is a card. Open a block to edit individual fields with type-aware widgets (cron preset picker, IANA timezone picker, path-with-resolved-hint), revert overrides field-by-field, and run a connection-test against the external service without leaving the page.
+
+![Settings index — block cards](docs/assets/screenshots/settings-index.png)
+
+---
+
 ## Quick start
 
 Two minutes from clone to web UI. Free cloud LLM, no GPU required:
