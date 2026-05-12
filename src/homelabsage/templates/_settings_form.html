@@ -35,7 +35,11 @@
         {% elif f.widget == "path" %}
           {% include "_widget_path.html" %}
         {% elif f.is_enum %}
-          <select id="f-{{ f.name }}" name="{{ f.name }}">
+          {# When the field is the LLM `provider` select AND the context
+             carries a presets map, expose it on the element so the inline
+             script at the bottom can auto-fill endpoint+model on change. #}
+          <select id="f-{{ f.name }}" name="{{ f.name }}"
+                  {% if f.name == "provider" and provider_presets %}data-provider-presets="{{ provider_presets | tojson }}"{% endif %}>
             {% for opt in f.enum_values %}
               <option value="{{ opt }}" {% if opt == f.value %}selected{% endif %}>{{ opt }}</option>
             {% endfor %}
@@ -107,4 +111,35 @@
       <a class="btn ghost" href="/settings">Back</a>
     </div>
   </form>
+
+  {# Provider-dependent defaults — only runs when the form has a `provider`
+     select with embedded preset data. On change: if endpoint/model are
+     empty or still match a default of some OTHER provider (i.e. the user
+     was auto-filled once and hasn't customized), overwrite with the new
+     provider's default. Custom values typed by the user are preserved. #}
+  <script>
+    (function () {
+      var select = document.querySelector('select[data-provider-presets]');
+      if (!select) return;
+      var presets;
+      try { presets = JSON.parse(select.dataset.providerPresets); }
+      catch (e) { return; }
+      var endpoint = document.getElementById('f-endpoint');
+      var model = document.getElementById('f-model');
+      if (!endpoint || !model) return;
+      var allValues = function (key) {
+        return Object.keys(presets).map(function (k) { return presets[k][key]; });
+      };
+      select.addEventListener('change', function () {
+        var p = presets[select.value];
+        if (!p) return;
+        if (!endpoint.value.trim() || allValues('endpoint').indexOf(endpoint.value) !== -1) {
+          endpoint.value = p.endpoint;
+        }
+        if (!model.value.trim() || allValues('model').indexOf(model.value) !== -1) {
+          model.value = p.model;
+        }
+      });
+    })();
+  </script>
 </div>

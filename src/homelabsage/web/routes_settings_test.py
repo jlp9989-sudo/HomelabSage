@@ -36,7 +36,7 @@ from ..config import (
     get_active_llm_config,
     load_config,
 )
-from ..llm import _resolve_chat_completions_url
+from ..llm import PROVIDER_PRESETS, _resolve_chat_completions_url
 
 log = logging.getLogger(__name__)
 
@@ -62,11 +62,12 @@ async def _test_llm(llm_cfg: LLMConfig) -> tuple[bool, str]:
     if not llm_cfg.endpoint:
         return False, "No endpoint configured."
 
-    if llm_cfg.provider == "ollama":
+    protocol = PROVIDER_PRESETS.get(llm_cfg.provider, {}).get("protocol")
+    if protocol == "ollama":
         url = llm_cfg.endpoint.rstrip("/") + "/api/generate"
         payload: dict = {"model": llm_cfg.model, "prompt": "ping", "stream": False}
         headers: dict = {}
-    else:  # openai / anthropic (OpenAI-compatible)
+    elif protocol == "openai_compat":
         url = _resolve_chat_completions_url(llm_cfg.endpoint)
         payload = {
             "model": llm_cfg.model,
@@ -74,6 +75,8 @@ async def _test_llm(llm_cfg: LLMConfig) -> tuple[bool, str]:
             "max_tokens": 4,
         }
         headers = {"Authorization": f"Bearer {llm_cfg.api_key}"} if llm_cfg.api_key else {}
+    else:
+        return False, f"Unknown provider {llm_cfg.provider!r}."
 
     try:
         async with httpx.AsyncClient(timeout=TEST_TIMEOUT_S) as client:

@@ -221,16 +221,55 @@ def test_enum_field_renders_as_select(client):
     the renderer picks a <select> over a free text input."""
     r = client.get("/settings/llm")
     html = r.text
-    # provider is Literal["ollama","openai","anthropic","disabled"]
+    # provider is Literal[ollama, openai, groq, gemini, openrouter, anthropic, disabled]
     assert 'id="f-provider"' in html
     # Should be a <select> not a text input
     assert "<select" in html
-    assert '<option value="ollama"' in html
-    assert '<option value="openai"' in html
-    assert '<option value="anthropic"' in html
-    assert '<option value="disabled"' in html
+    for opt in ("ollama", "openai", "groq", "gemini", "openrouter", "anthropic", "disabled"):
+        assert f'<option value="{opt}"' in html
     # The current value must be marked selected
     assert 'value="openai"' in html and "selected" in html
+
+
+def test_provider_select_carries_presets_for_autofill(client):
+    """The LLM block exposes the preset map on `data-provider-presets` so
+    the inline script can auto-fill endpoint+model on provider change."""
+    r = client.get("/settings/llm")
+    html = r.text
+    assert "data-provider-presets=" in html
+    # Spot-check a few preset URLs are embedded (HTML-escaped JSON)
+    assert "api.groq.com" in html
+    assert "generativelanguage.googleapis.com" in html
+    assert "localhost:11434" in html
+
+
+def test_other_blocks_dont_get_provider_presets(client):
+    """Only the LLM block should expose the preset map. Other blocks must
+    NOT pick it up just because they happen to have a `provider`-named
+    field in the future."""
+    r = client.get("/settings/outputs/notion")
+    assert "data-provider-presets=" not in r.text
+
+
+def test_new_providers_accept_at_save(client, cfg_dir):
+    """The widened enum (groq/gemini/openrouter) must round-trip via the form."""
+    r = client.post(
+        "/settings/llm/update",
+        data={
+            "provider": "groq",
+            "endpoint": "https://api.groq.com/openai",
+            "model": "llama-3.3-70b-versatile",
+            "api_key": "",
+            "context_size": "32768",
+            "timeout": "180",
+            "strict_json": "true",
+        },
+    )
+    assert r.status_code == 200
+    from homelabsage.config_overlay import user_overlay_path
+    overlay = yaml.safe_load(user_overlay_path(cfg_dir / "config.yaml").read_text())
+    assert overlay["llm"]["provider"] == "groq"
+    assert overlay["llm"]["model"] == "llama-3.3-70b-versatile"
 
 
 def test_enum_renders_for_notion_write_policy(client):

@@ -155,6 +155,62 @@ def build_prompt(update: Update, notes: str = "") -> str:
     )
 
 
+# Provider presets — sensible defaults for `endpoint` and `model` per
+# provider so the settings UI can auto-fill them when the user picks a
+# provider from the dropdown. The keys MUST match LLMConfig.provider's
+# Literal values; the renderer relies on that for the JS lookup.
+#
+# Conventions:
+#   - `endpoint` is the *base URL the user would paste*, not the fully
+#     qualified chat-completions URL — `_resolve_chat_completions_url`
+#     normalizes it at call time.
+#   - `model` is a known-stable, low-cost default per provider. Users
+#     pointed at a different model on the same provider just type theirs;
+#     the JS only auto-fills empty or known-default values, so a custom
+#     model is never clobbered.
+#   - `protocol` is the wire format. Anything that's not `ollama` or
+#     `disabled` speaks the OpenAI chat-completions shape; we still tag
+#     each one explicitly so the dispatch isn't a moving target as we
+#     add providers.
+PROVIDER_PRESETS: dict[str, dict[str, str]] = {
+    "ollama": {
+        "endpoint": "http://localhost:11434",
+        "model": "qwen3:30b",
+        "protocol": "ollama",
+    },
+    "openai": {
+        "endpoint": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+        "protocol": "openai_compat",
+    },
+    "groq": {
+        "endpoint": "https://api.groq.com/openai",
+        "model": "llama-3.3-70b-versatile",
+        "protocol": "openai_compat",
+    },
+    "gemini": {
+        "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-2.5-flash",
+        "protocol": "openai_compat",
+    },
+    "openrouter": {
+        "endpoint": "https://openrouter.ai/api/v1",
+        "model": "anthropic/claude-3.5-haiku",
+        "protocol": "openai_compat",
+    },
+    "anthropic": {
+        "endpoint": "https://api.anthropic.com/v1",
+        "model": "claude-haiku-4-5",
+        "protocol": "openai_compat",
+    },
+    "disabled": {
+        "endpoint": "",
+        "model": "",
+        "protocol": "disabled",
+    },
+}
+
+
 def _resolve_chat_completions_url(endpoint: str) -> str:
     """Build the full chat-completions URL from a user-supplied endpoint.
 
@@ -224,11 +280,15 @@ class LLMClient:
     async def _call(
         self, prompt: str, strict_json: bool, temperature: float = 0.2
     ) -> str:
-        if self.cfg.provider == "ollama":
+        # Dispatch by the provider's protocol so adding a new openai-compat
+        # provider (next Groq clone, next Gemini revision, …) doesn't need a
+        # branch here — only a PROVIDER_PRESETS entry.
+        protocol = PROVIDER_PRESETS.get(self.cfg.provider, {}).get("protocol")
+        if protocol == "ollama":
             raw = await self._call_ollama(
                 prompt, strict_json=strict_json, temperature=temperature
             )
-        elif self.cfg.provider in {"openai", "anthropic"}:
+        elif protocol == "openai_compat":
             raw = await self._call_openai_compat(
                 prompt, strict_json=strict_json, temperature=temperature
             )

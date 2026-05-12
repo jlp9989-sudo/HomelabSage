@@ -46,6 +46,7 @@ from ..config_overlay import (
     set_dotted,
     user_overlay_path,
 )
+from ..llm import PROVIDER_PRESETS
 from ..redact import _is_secret_key
 from .routes_settings import (
     SETTING_BLOCKS,
@@ -235,6 +236,21 @@ def _block_form_context(
                            else ("(not set)" if is_secret else ""),
         })
 
+    # When the block has a `provider` field that matches a known LLM provider
+    # set, expose the preset map so a tiny inline JS in the form template can
+    # auto-fill `endpoint` and `model` when the user picks a provider. The map
+    # is JSON-encoded into a `data-` attribute (via `tojson` filter in the
+    # template) — no fetch, no state, no Vue.
+    field_names = {f["name"] for f in fields}
+    provider_presets: dict[str, dict[str, str]] | None = None
+    if {"provider", "endpoint", "model"}.issubset(field_names):
+        # Confirm the provider field's enum matches our preset keys before
+        # exposing anything; protects against a future block reusing the
+        # `provider` name for something unrelated.
+        provider_field = next(f for f in fields if f["name"] == "provider")
+        if provider_field["is_enum"] and set(provider_field["enum_values"]) <= set(PROVIDER_PRESETS):
+            provider_presets = PROVIDER_PRESETS
+
     return {
         "block": block,
         "title": submodel.__name__,
@@ -244,6 +260,7 @@ def _block_form_context(
         # When set, the form renders a "Test connection" button targeting
         # this URL. None for blocks that don't talk to an external service.
         "test_endpoint": BLOCK_TEST_ENDPOINTS.get(block),
+        "provider_presets": provider_presets,
     }
 
 

@@ -46,12 +46,17 @@ def _load_dotenv(path: Path) -> None:
 
 
 class LLMConfig(BaseModel):
-    provider: Literal["ollama", "openai", "anthropic", "disabled"] = Field(
+    provider: Literal[
+        "ollama", "openai", "groq", "gemini", "openrouter", "anthropic", "disabled"
+    ] = Field(
         "ollama",
         description=(
-            "Backend protocol: `ollama` for raw Ollama API, `openai` for any "
-            "OpenAI-compatible endpoint (Groq, Gemini, llama.cpp server, LM "
-            "Studio), `anthropic` for Claude, `disabled` to skip the LLM step."
+            "Which backend to talk to. Picking a provider auto-fills `endpoint` "
+            "and `model` with that provider's standard values (only when those "
+            "fields are empty or still on a known default — your custom values "
+            "are preserved). `groq` / `gemini` / `openrouter` / `openai` all "
+            "speak the OpenAI chat-completions shape; `ollama` speaks the raw "
+            "Ollama API; `anthropic` uses Anthropic's OpenAI-compatible bridge."
         ),
     )
     endpoint: str = Field(

@@ -5,7 +5,10 @@ backends emit in the `content` field instead of `reasoning_content`."""
 
 import pytest
 
+from homelabsage.config import LLMConfig
 from homelabsage.llm import (
+    PROVIDER_PRESETS,
+    LLMClient,
     _parse_analysis,
     _resolve_chat_completions_url,
     _strip_think_blocks,
@@ -225,3 +228,56 @@ def test_strip_think_unclosed_prefix_with_json_after():
 )
 def test_resolve_chat_completions_url(endpoint, expected):
     assert _resolve_chat_completions_url(endpoint) == expected
+
+
+# ─── Provider presets ────────────────────────────────────────────────────
+
+
+def test_provider_presets_cover_every_literal_value():
+    """Every value in `LLMConfig.provider`'s Literal must have a preset
+    entry — otherwise the dispatcher in `_call` would raise on a value
+    Pydantic happily accepts."""
+    schema = LLMConfig.model_json_schema()
+    provider_enum = schema["properties"]["provider"]["enum"]
+    assert set(provider_enum) <= set(PROVIDER_PRESETS), (
+        f"Provider Literal has values without presets: "
+        f"{set(provider_enum) - set(PROVIDER_PRESETS)}"
+    )
+
+
+@pytest.mark.parametrize(
+    "provider, expected_protocol",
+    [
+        ("ollama", "ollama"),
+        ("openai", "openai_compat"),
+        ("groq", "openai_compat"),
+        ("gemini", "openai_compat"),
+        ("openrouter", "openai_compat"),
+        ("anthropic", "openai_compat"),
+        ("disabled", "disabled"),
+    ],
+)
+def test_preset_protocol_per_provider(provider, expected_protocol):
+    assert PROVIDER_PRESETS[provider]["protocol"] == expected_protocol
+
+
+async def test_client_dispatches_groq_to_openai_compat(monkeypatch):
+    """A new openai-compat provider must NOT need a code change in
+    `LLMClient._call` — the dispatcher reads PROVIDER_PRESETS."""
+    called: list[str] = []
+
+    async def fake_ollama(self, prompt, strict_json, temperature):
+        called.append("ollama")
+        return "{}"
+
+    async def fake_openai_compat(self, prompt, strict_json, temperature):
+        called.append("openai_compat")
+        return "{}"
+
+    monkeypatch.setattr(LLMClient, "_call_ollama", fake_ollama)
+    monkeypatch.setattr(LLMClient, "_call_openai_compat", fake_openai_compat)
+
+    cfg = LLMConfig(provider="groq", endpoint="https://api.groq.com/openai", api_key="x", model="m")
+    client = LLMClient(cfg)
+    await client._call("prompt", strict_json=False)
+    assert called == ["openai_compat"]
