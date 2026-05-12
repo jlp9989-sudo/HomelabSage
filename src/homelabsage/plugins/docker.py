@@ -38,6 +38,14 @@ class DockerPlugin(Plugin):
     def _should_skip(self, name: str) -> bool:
         return any(p.search(name) for p in self._skip_re)
 
+    def resolve_repo(self, c: Container) -> str | None:
+        """Public alias of `_find_github_repo` — used by the curator."""
+        return self._find_github_repo(c)
+
+    def extract_version(self, c: Container) -> str | None:
+        """Public alias of `_current_version` — used by the curator."""
+        return self._current_version(c)
+
     def _find_github_repo(self, c: Container) -> str | None:
         """Resolve a container to `owner/repo` on GitHub.
 

@@ -108,27 +108,41 @@ class LLMClient:
             return None
         prompt = build_prompt(update, notes=notes)
         try:
-            raw = await self._call(prompt)
+            raw = await self._call(prompt, strict_json=self.cfg.strict_json)
         except Exception as e:
             log.warning("LLM call failed for %s: %s", update.subject, e)
             return None
         return _parse_analysis(raw)
 
-    async def _call(self, prompt: str) -> str:
+    async def generate_text(self, prompt: str) -> str | None:
+        """Free-form text completion (no JSON schema enforcement).
+
+        Used by the curator, which expects Markdown back, not a JSON object.
+        Returns None if the LLM is disabled or the call fails.
+        """
+        if not self.is_enabled():
+            return None
+        try:
+            return await self._call(prompt, strict_json=False)
+        except Exception as e:
+            log.warning("LLM generate_text failed: %s", e)
+            return None
+
+    async def _call(self, prompt: str, strict_json: bool) -> str:
         if self.cfg.provider == "ollama":
-            return await self._call_ollama(prompt)
+            return await self._call_ollama(prompt, strict_json=strict_json)
         if self.cfg.provider in {"openai", "anthropic"}:
-            return await self._call_openai_compat(prompt)
+            return await self._call_openai_compat(prompt, strict_json=strict_json)
         raise ValueError(f"unknown LLM provider: {self.cfg.provider}")
 
-    async def _call_ollama(self, prompt: str) -> str:
+    async def _call_ollama(self, prompt: str, strict_json: bool) -> str:
         """Ollama-compat: POST /api/generate, format=json forces JSON output."""
         url = self.cfg.endpoint.rstrip("/") + "/api/generate"
         payload = {
             "model": self.cfg.model,
             "prompt": prompt,
             "stream": False,
-            "format": "json" if self.cfg.strict_json else None,
+            "format": "json" if strict_json else None,
             "options": {"num_ctx": self.cfg.context_size},
         }
         # Drop nullable to avoid backend confusion
@@ -138,7 +152,7 @@ class LLMClient:
             r.raise_for_status()
             return r.json().get("response", "")
 
-    async def _call_openai_compat(self, prompt: str) -> str:
+    async def _call_openai_compat(self, prompt: str, strict_json: bool) -> str:
         """OpenAI-compatible chat completions."""
         url = _resolve_chat_completions_url(self.cfg.endpoint)
         headers = {"Authorization": f"Bearer {self.cfg.api_key}"} if self.cfg.api_key else {}
@@ -146,7 +160,7 @@ class LLMClient:
             "model": self.cfg.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
-            "response_format": {"type": "json_object"} if self.cfg.strict_json else None,
+            "response_format": {"type": "json_object"} if strict_json else None,
         }
         payload = {k: v for k, v in payload.items() if v is not None}
         async with httpx.AsyncClient(timeout=self.cfg.timeout) as client:

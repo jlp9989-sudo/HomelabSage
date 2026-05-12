@@ -153,6 +153,35 @@ class NotesConfig(BaseModel):
     max_chars: int = 4000
 
 
+class CuratorConfig(BaseModel):
+    """Curator — generates one Markdown note per container so the rest of
+    the pipeline always has fresh, written-up context to feed the LLM.
+
+    `output_dir`: where notes are written. If empty, falls back to
+    `notes.notes_dir` (the same directory the analyzer reads from).
+
+    `prompt_template_path`: path to a custom .txt prompt template. If empty,
+    the built-in default is used. The template may include the placeholders
+    listed in `curator.PROMPT_PLACEHOLDERS`; unknown placeholders are kept
+    verbatim so missing data never crashes the run.
+
+    `style_examples`: paths to existing .md notes to inject as few-shot
+    examples (e.g. `notes/example.md`). Optional — leave empty to skip.
+
+    `recent_releases`: how many recent GitHub releases to forward to the LLM
+    as upstream context.
+
+    `max_release_chars`: per-prompt cap on combined release-notes text.
+    """
+
+    enabled: bool = True
+    output_dir: str = ""
+    prompt_template_path: str = ""
+    style_examples: list[str] = Field(default_factory=list)
+    recent_releases: int = 5
+    max_release_chars: int = 8000
+
+
 class Config(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
@@ -161,6 +190,7 @@ class Config(BaseModel):
     web: WebConfig = Field(default_factory=WebConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     notes: NotesConfig = Field(default_factory=NotesConfig)
+    curator: CuratorConfig = Field(default_factory=CuratorConfig)
 
 
 def load_config(path: str | Path) -> Config:

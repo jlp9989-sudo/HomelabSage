@@ -76,6 +76,14 @@ This is the most architecturally invasive item on the roadmap; spec it as a sepa
 
 ---
 
+## Distribution & packaging (post-v0.2.0)
+
+Once the detector layer ships and the project has more than a handful of users, broaden the ways people can install it. Not a priority while the audience is small — packaging churn is wasted effort if the API still shifts.
+
+- 🤔 **Unraid Community Apps template.** Convert the existing `compose.yaml` to an Unraid CA XML plugin so Unraid users can install with one click. Use [`unposer`](https://github.com/unraiders/unposer) — a docker-compose.yml → Unraid CA XML converter — instead of hand-writing the template. Defer until the project is past v0.2.0 (the detector layer changes env vars and mount expectations; converting earlier means redoing the template).
+
+---
+
 ## Backlog (uncertain ROI — revisit after user feedback)
 
 - 🤔 **PUID/PGID change detector.** Edge case; almost everyone is on LSIO images that handle this cleanly. Worth doing only if a real incident surfaces.
