@@ -125,33 +125,7 @@
       </div>
     </form>
 
-    {# Provider-dependent defaults: reuses the same inline JS as the
-       settings form so picking a provider auto-fills endpoint+model. #}
-    <script>
-      (function () {
-        var select = document.querySelector('select[data-provider-presets]');
-        if (!select) return;
-        var presets;
-        try { presets = JSON.parse(select.dataset.providerPresets); }
-        catch (e) { return; }
-        var endpoint = document.getElementById('f-endpoint');
-        var model = document.getElementById('f-model');
-        if (!endpoint || !model) return;
-        var allValues = function (key) {
-          return Object.keys(presets).map(function (k) { return presets[k][key]; });
-        };
-        select.addEventListener('change', function () {
-          var p = presets[select.value];
-          if (!p) return;
-          if (!endpoint.value.trim() || allValues('endpoint').indexOf(endpoint.value) !== -1) {
-            endpoint.value = p.endpoint;
-          }
-          if (!model.value.trim() || allValues('model').indexOf(model.value) !== -1) {
-            model.value = p.model;
-          }
-        });
-      })();
-    </script>
+    {% include "_provider_presets_script.html" %}
 
   {# ─── Done ────────────────────────────────────────────────────── #}
   {% elif view == "done" %}

@@ -52,9 +52,9 @@ class LLMConfig(BaseModel):
         "ollama",
         description=(
             "Which backend to talk to. Picking a provider auto-fills `endpoint` "
-            "and `model` with that provider's standard values (only when those "
-            "fields are empty or still on a known default — your custom values "
-            "are preserved). `groq` / `gemini` / `openrouter` / `openai` all "
+            "and `model` with that provider's standard values — if you had "
+            "custom values typed, change the provider first and then re-edit "
+            "those fields. `groq` / `gemini` / `openrouter` / `openai` all "
             "speak the OpenAI chat-completions shape; `ollama` speaks the raw "
             "Ollama API; `anthropic` uses Anthropic's OpenAI-compatible bridge."
         ),

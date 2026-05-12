@@ -233,14 +233,35 @@ def test_enum_field_renders_as_select(client):
 
 def test_provider_select_carries_presets_for_autofill(client):
     """The LLM block exposes the preset map on `data-provider-presets` so
-    the inline script can auto-fill endpoint+model on provider change."""
+    the inline script can auto-fill endpoint+model on provider change.
+
+    Critical detail: the attribute MUST be single-quoted because Jinja's
+    `tojson` filter escapes `'` but not `"` (JSON delimiters). If we used
+    double quotes the JSON's `"` would break the attribute, the browser
+    would silently truncate `data-provider-presets` to `{`, JSON.parse
+    would throw, and the auto-fill would do nothing. Tested here so we
+    don't regress that.
+    """
     r = client.get("/settings/llm")
     html = r.text
-    assert "data-provider-presets=" in html
-    # Spot-check a few preset URLs are embedded (HTML-escaped JSON)
+    # Single-quoted attribute opener — the regression we just fixed.
+    assert "data-provider-presets='" in html, (
+        "data-provider-presets must use single-quoted attribute value; "
+        "double quotes break the embedded JSON's `\"` delimiters."
+    )
+    # Spot-check a few preset URLs are embedded
     assert "api.groq.com" in html
     assert "generativelanguage.googleapis.com" in html
     assert "localhost:11434" in html
+    # And the JSON itself must round-trip: extract the attribute value and
+    # parse it. If this works, the browser's JSON.parse will too.
+    import json as _json
+    import re as _re
+    m = _re.search(r"data-provider-presets='([^']+)'", html)
+    assert m is not None, "data-provider-presets attribute not found"
+    parsed = _json.loads(m.group(1))
+    assert "groq" in parsed
+    assert parsed["groq"]["endpoint"] == "https://api.groq.com/openai"
 
 
 def test_other_blocks_dont_get_provider_presets(client):

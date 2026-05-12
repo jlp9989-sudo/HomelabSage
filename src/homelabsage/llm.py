@@ -164,10 +164,10 @@ def build_prompt(update: Update, notes: str = "") -> str:
 #   - `endpoint` is the *base URL the user would paste*, not the fully
 #     qualified chat-completions URL — `_resolve_chat_completions_url`
 #     normalizes it at call time.
-#   - `model` is a known-stable, low-cost default per provider. Users
-#     pointed at a different model on the same provider just type theirs;
-#     the JS only auto-fills empty or known-default values, so a custom
-#     model is never clobbered.
+#   - `model` is a known-stable, low-cost default per provider. The JS
+#     overwrites the model field whenever the user picks a new provider
+#     from the dropdown; if they want a different model on the same
+#     provider they just type it AFTER selecting the provider.
 #   - `protocol` is the wire format. Anything that's not `ollama` or
 #     `disabled` speaks the OpenAI chat-completions shape; we still tag
 #     each one explicitly so the dispatch isn't a moving target as we

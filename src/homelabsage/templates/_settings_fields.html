@@ -21,8 +21,12 @@
     {% elif f.widget == "path" %}
       {% include "_widget_path.html" %}
     {% elif f.is_enum %}
+      {# Attribute value is single-quoted: `tojson` produces JSON with
+         literal `"` (JSON-required) and ESCAPED `'` ('), so a
+         single-quoted attribute is the only safe wrapper. Double quotes
+         here would let the JSON's `"` break out of the attribute. #}
       <select id="f-{{ f.name }}" name="{{ f.name }}"
-              {% if f.name == "provider" and provider_presets %}data-provider-presets="{{ provider_presets | tojson }}"{% endif %}>
+              {% if f.name == "provider" and provider_presets %}data-provider-presets='{{ provider_presets | tojson }}'{% endif %}>
         {% for opt in f.enum_values %}
           <option value="{{ opt }}" {% if opt == f.value %}selected{% endif %}>{{ opt }}</option>
         {% endfor %}

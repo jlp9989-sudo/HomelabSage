@@ -1,0 +1,29 @@
+{# Provider-dependent defaults. Reads PROVIDER_PRESETS from the
+   `data-provider-presets` attribute on the provider <select> and, when
+   the user picks a new provider, overwrites the endpoint+model inputs
+   with that provider's standard values.
+
+   Always-overwrite on user-initiated change: if the user wanted to keep
+   their custom URL/model, they wouldn't be reaching for the dropdown.
+   The `change` event only fires on explicit user interaction, never on
+   page load — so a custom value typed and saved earlier is never
+   clobbered until the user themselves picks a different provider.
+#}
+<script>
+  (function () {
+    var select = document.querySelector('select[data-provider-presets]');
+    if (!select) return;
+    var presets;
+    try { presets = JSON.parse(select.dataset.providerPresets); }
+    catch (e) { console.warn('provider-presets: bad JSON', e); return; }
+    var endpoint = document.getElementById('f-endpoint');
+    var model = document.getElementById('f-model');
+    if (!endpoint || !model) return;
+    select.addEventListener('change', function () {
+      var p = presets[select.value];
+      if (!p) return;
+      endpoint.value = p.endpoint;
+      model.value = p.model;
+    });
+  })();
+</script>
