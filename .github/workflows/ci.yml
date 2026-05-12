@@ -64,3 +64,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
       - run: mypy src/homelabsage --ignore-missing-imports
+
+  dco:
+    name: DCO sign-off
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the full history of the PR branch so we can inspect every
+          # commit, not just the merge commit GitHub builds for `pull_request`.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify every commit has a Signed-off-by line
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          missing=$(git log --format='%H %s' "$base".."$head" | while read sha _; do
+            if ! git log -1 --format='%B' "$sha" | grep -qE '^Signed-off-by: .+ <.+@.+>'; then
+              echo "$sha"
+            fi
+          done)
+          if [ -n "$missing" ]; then
+            echo "::error::The following commits are missing a Signed-off-by trailer:"
+            echo "$missing"
+            echo
+            echo "Fix with: git rebase -i ${base} --signoff && git push --force-with-lease"
+            echo "See CONTRIBUTING.md → 'Developer Certificate of Origin (DCO)' for details."
+            exit 1
+          fi
+          echo "All commits signed off."
