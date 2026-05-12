@@ -216,6 +216,27 @@ def test_block_form_renders_array_as_textarea(client):
     assert "foo" in html and "bar" in html
 
 
+def test_scheduler_renders_cron_widget(client):
+    """The cron field has json_schema_extra={'ui_widget':'cron'} → preset select."""
+    r = client.get("/settings/scheduler")
+    html = r.text
+    assert 'class="cron-preset"' in html
+    # The default deploy value flows into the text input
+    assert 'id="f-cron"' in html
+    # A handful of known presets appear in the select options
+    assert "Every 6 hours" in html
+    assert "0 9 * * *" in html
+    # crontab.guru link is the canonical explainer; we surface it
+    assert "crontab.guru" in html
+
+
+def test_field_descriptions_render_as_help_text(client):
+    """Pydantic Field(description=...) lands in the schema, then in the form."""
+    r = client.get("/settings/llm")
+    # An LLM field has a non-empty description in config.py
+    assert "OpenAI-compatible" in r.text or "Bearer token" in r.text
+
+
 def test_block_form_renders_object_as_yaml_textarea(client):
     r = client.get("/settings/sources/docker")
     html = r.text

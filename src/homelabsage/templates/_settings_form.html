@@ -25,7 +25,9 @@
         </div>
         {% if f.description %}<div class="field-help">{{ f.description }}</div>{% endif %}
 
-        {% if f.is_bool %}
+        {% if f.widget == "cron" %}
+          {% include "_widget_cron.html" %}
+        {% elif f.is_bool %}
           <input type="hidden" name="{{ f.name }}" value="false">
           <label style="display:flex; gap:.5rem; align-items:center; cursor:pointer">
             <input type="checkbox" id="f-{{ f.name }}" name="{{ f.name }}" value="true"

@@ -1,0 +1,30 @@
+{# Cron expression widget — quick-pick select + raw input.
+
+   Why both: most users want "every 6 hours", "daily at 9", or "weekly", which
+   are awkward to type as `0 */6 * * *`. The select sets the value of the text
+   input on change; the text input is the only field actually submitted, so a
+   user editing the raw expression keeps full power.
+
+   No HTMX, no JS framework — one inline event handler and we're done.
+#}
+<div>
+  <select class="cron-preset" style="margin-bottom:.4rem"
+          onchange="if (this.value) document.getElementById('f-{{ f.name }}').value = this.value;">
+    <option value="">— quick pick —</option>
+    <option value="0 * * * *">Every hour at :00</option>
+    <option value="0 */3 * * *">Every 3 hours</option>
+    <option value="0 */6 * * *">Every 6 hours</option>
+    <option value="0 */12 * * *">Every 12 hours</option>
+    <option value="0 9 * * *">Daily at 09:00</option>
+    <option value="0 3 * * *">Daily at 03:00</option>
+    <option value="0 9 * * 0">Weekly (Sunday 09:00)</option>
+    <option value="0 9 1 * *">Monthly (1st at 09:00)</option>
+  </select>
+  <input type="text" id="f-{{ f.name }}" name="{{ f.name }}"
+         value="{{ f.value }}" placeholder="0 9 * * *">
+  <div class="field-help" style="margin-top:.3rem">
+    Format: <code>min hour day month weekday</code>.
+    <a href="https://crontab.guru/" target="_blank" rel="noopener" class="muted">crontab.guru</a>
+    explains and previews any expression.
+  </div>
+</div>

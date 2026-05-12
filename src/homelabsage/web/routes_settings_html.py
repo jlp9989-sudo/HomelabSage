@@ -188,11 +188,17 @@ def _block_form_context(
         else:
             display = "" if raw_value is None else str(raw_value)
 
+        # `ui_widget` lets a Pydantic Field opt into a custom renderer. The
+        # template chooses `_widget_<name>.html` when this is set; otherwise
+        # the default type-based rendering applies.
+        widget = prop.get("ui_widget", "")
+
         fields.append({
             "name": name,
             "title": prop.get("title", name),
             "description": prop.get("description", ""),
             "type": prop_type or "string",
+            "widget": widget,
             "is_secret": is_secret,
             "is_array": is_array,
             "is_object": is_object,

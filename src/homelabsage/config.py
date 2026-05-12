@@ -46,13 +46,42 @@ def _load_dotenv(path: Path) -> None:
 
 
 class LLMConfig(BaseModel):
-    provider: str = "ollama"
-    endpoint: str = "http://localhost:11434"
-    model: str = "qwen3:30b"
-    context_size: int = 32768
-    api_key: str = ""
-    timeout: int = 180
-    strict_json: bool = True
+    provider: str = Field(
+        "ollama",
+        description=(
+            "Backend protocol: `ollama` for raw Ollama API, `openai` for any "
+            "OpenAI-compatible endpoint (Groq, Gemini, llama.cpp server, LM "
+            "Studio), `anthropic` for Claude, `disabled` to skip the LLM step."
+        ),
+    )
+    endpoint: str = Field(
+        "http://localhost:11434",
+        description=(
+            "Base URL of the LLM API. Examples: `http://192.168.1.10:11434` "
+            "(local), `https://api.groq.com/openai`, "
+            "`https://generativelanguage.googleapis.com/v1beta/openai` (Gemini)."
+        ),
+    )
+    model: str = Field(
+        "qwen3:30b",
+        description="Model name as the backend expects it. For local models, ≥30B parameters recommended.",
+    )
+    context_size: int = Field(
+        32768,
+        description="Max prompt tokens the model can see in one call.",
+    )
+    api_key: str = Field(
+        "",
+        description="Bearer token for cloud providers; leave empty for local servers without auth.",
+    )
+    timeout: int = Field(
+        180,
+        description="Seconds before a single LLM call times out. Raise to 300+ if your local model loads on demand.",
+    )
+    strict_json: bool = Field(
+        True,
+        description="Force the model to return strict JSON (provider-specific). Disable only when the model rejects the response_format header.",
+    )
 
 
 class DockerSourceConfig(BaseModel):
@@ -81,10 +110,25 @@ class DockerSourceConfig(BaseModel):
 
 class HAConfig(BaseModel):
     enabled: bool = False
-    url: str = "http://homeassistant.local:8123"
-    token: str = ""
-    include_hacs: bool = True
-    include_addons: bool = True
+    url: str = Field(
+        "http://homeassistant.local:8123",
+        description="Base URL of Home Assistant. LAN: `http://homeassistant.local:8123` or `http://<ip>:8123`.",
+    )
+    token: str = Field(
+        "",
+        description=(
+            "Long-lived access token. Generate in HA: click your profile (bottom-left) → "
+            "Security tab → 'Long-lived access tokens' → Create."
+        ),
+    )
+    include_hacs: bool = Field(
+        True,
+        description="Include HACS-managed integrations (depends on the HACS sensor being exposed).",
+    )
+    include_addons: bool = Field(
+        True,
+        description="Include HA OS add-ons in the scan (requires Supervisor; non-OS installs return empty).",
+    )
 
 
 class ScriptsSourceConfig(BaseModel):
@@ -122,16 +166,45 @@ class SourcesConfig(BaseModel):
 
 class NotionOutputConfig(BaseModel):
     enabled: bool = False
-    api_key: str = ""
-    database_id: str = ""
-    write_policy: str = "always"  # always | only_action_required
+    api_key: str = Field(
+        "",
+        description=(
+            "Internal Integration Secret. Create one at "
+            "https://www.notion.so/profile/integrations, then SHARE the target "
+            "database with the integration (the secret alone is not enough)."
+        ),
+    )
+    database_id: str = Field(
+        "",
+        description=(
+            "32-char hex id from the database URL. Open the database in Notion, "
+            "click ⋯ → Copy link; the id is the 32 chars after the last `/` and "
+            "before the `?`."
+        ),
+    )
+    write_policy: str = Field(
+        "always",
+        description="`always` writes every analyzed update; `only_action_required` skips info-level ones.",
+    )
 
 
 class TelegramOutputConfig(BaseModel):
     enabled: bool = False
-    bot_token: str = ""
-    chat_id: str = ""
-    min_severity: str = "high"
+    bot_token: str = Field(
+        "",
+        description="Token from @BotFather. Talk to him in Telegram, /newbot, paste the token he gives you.",
+    )
+    chat_id: str = Field(
+        "",
+        description=(
+            "Numeric chat id. For personal chat: talk to @userinfobot and use the `Id` it returns. "
+            "For groups: add the bot, send `/start@yourbot`, then call `getUpdates`."
+        ),
+    )
+    min_severity: str = Field(
+        "high",
+        description="Only push updates at or above this severity. Use `critical` to get CVEs only.",
+    )
 
     @field_validator("min_severity")
     @classmethod
@@ -148,9 +221,25 @@ class OutputsConfig(BaseModel):
 
 class SchedulerConfig(BaseModel):
     enabled: bool = True
-    cron: str = "0 9 * * *"
-    timezone: str = "UTC"
-    heartbeat_url: str = ""
+    cron: str = Field(
+        "0 9 * * *",
+        description=(
+            "When to run an automatic scan. Pick a preset or set a custom "
+            "5-field cron expression (`min hour day month weekday`)."
+        ),
+        json_schema_extra={"ui_widget": "cron"},
+    )
+    timezone: str = Field(
+        "UTC",
+        description="IANA timezone the cron runs against, e.g. `Europe/Madrid`, `America/New_York`.",
+    )
+    heartbeat_url: str = Field(
+        "",
+        description=(
+            "Optional URL pinged with GET after every successful scan, e.g. "
+            "an Uptime Kuma push monitor. Leave empty to disable."
+        ),
+    )
 
 
 class WebAuthConfig(BaseModel):
