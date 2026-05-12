@@ -29,11 +29,34 @@
   .muted { color:#8fa3b8; }
   .actions form { display:inline; }
   code { background:#0a0d11; padding:0 .25rem; border-radius:3px; }
-  input[type=text], textarea { background:#0a0d11; color:#d9e1e8; border:1px solid #2a3340; padding:.5rem; border-radius:4px; font: 13px/1.45 ui-monospace, monospace; width:100%; box-sizing:border-box; }
-  textarea { min-height:60vh; resize:vertical; }
+  input[type=text], input[type=password], input[type=number], textarea, select { background:#0a0d11; color:#d9e1e8; border:1px solid #2a3340; padding:.5rem; border-radius:4px; font: 13px/1.45 ui-monospace, monospace; width:100%; box-sizing:border-box; }
+  textarea { resize:vertical; }
+  textarea.notes-editor { min-height:60vh; }
+  textarea.field-input { min-height:6rem; }
   .row { display:flex; gap:.5rem; margin-bottom:.5rem; align-items:center; }
   .row > label { min-width:6rem; color:#8fa3b8; }
+  /* settings UI */
+  .blocks-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(15rem, 1fr)); gap:.75rem; }
+  .block-card { background:#161c24; border:1px solid #2a3340; border-radius:6px; padding:1rem; text-decoration:none; color:inherit; }
+  .block-card:hover { border-color:#3b5168; }
+  .block-card h3 { margin:0 0 .25rem 0; font-size:.95rem; }
+  .block-card .desc { color:#8fa3b8; font-size:.78rem; font-family:ui-monospace, monospace; }
+  .override-badge { display:inline-block; background:#5a4218; color:#ffc77a; padding:.1rem .5rem; border-radius:999px; font-size:.7rem; margin-top:.5rem; }
+  .field { background:#161c24; border:1px solid #2a3340; border-radius:6px; padding:.85rem 1rem; margin-bottom:.6rem; }
+  .field.is-override { border-left:3px solid #ffc77a; }
+  .field-head { display:flex; gap:.5rem; align-items:baseline; margin-bottom:.4rem; }
+  .field-head label { font-weight:600; }
+  .field-head .field-type { color:#8fa3b8; font-size:.72rem; font-family:ui-monospace, monospace; }
+  .field-head .override-tag { color:#ffc77a; font-size:.7rem; }
+  .field-help { color:#8fa3b8; font-size:.78rem; margin-bottom:.4rem; }
+  .field-actions { display:flex; gap:.4rem; align-items:center; margin-top:.4rem; }
+  .field-actions form { display:inline; }
+  .flash { padding:.5rem .9rem; border-radius:4px; margin-bottom:.8rem; }
+  .flash.success { background:#1c4a26; color:#b6f5c1; }
+  .flash.error   { background:#5a1f1f; color:#f5b6b6; }
+  .form-toolbar { display:flex; gap:.5rem; margin:1rem 0; }
 </style>
+<script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
 <header>
@@ -41,6 +64,7 @@
   <nav>
     <a href="/" class="{% if nav == 'updates' %}active{% endif %}">Updates</a>
     <a href="/notes" class="{% if nav == 'notes' %}active{% endif %}">Notes</a>
+    <a href="/settings" class="{% if nav == 'settings' %}active{% endif %}">Settings</a>
   </nav>
   <div class="spacer"></div>
   {% block header_actions %}{% endblock %}

@@ -1,0 +1,34 @@
+{% extends "_base.html" %}
+{% set nav = "settings" %}
+{% block title %}Settings · HomelabSage{% endblock %}
+{% block header_actions %}
+  {% if total_overrides %}
+    <span class="pill">{{ total_overrides }} override{{ '' if total_overrides == 1 else 's' }}</span>
+  {% endif %}
+{% endblock %}
+{% block content %}
+
+{% if not overlay_writable %}
+  <div class="flash error">
+    Settings UI is read-only — no writable config path. Run <code>homelabsage serve -c &lt;path&gt;</code>.
+  </div>
+{% else %}
+  <p class="muted" style="margin-bottom:1rem">
+    Edits write to <code>{{ overlay_path }}</code> (the <em>user overlay</em>),
+    leaving the deploy default <code>config.yaml</code> untouched. Restart the
+    service to pick up changes in the engine.
+  </p>
+{% endif %}
+
+<div class="blocks-grid">
+  {% for b in blocks %}
+    <a class="block-card" href="/settings/{{ b.id }}">
+      <h3>{{ b.title }}</h3>
+      <div class="desc">{{ b.dotted_path }}</div>
+      {% if b.override_count %}
+        <span class="override-badge">{{ b.override_count }} override{{ '' if b.override_count == 1 else 's' }}</span>
+      {% endif %}
+    </a>
+  {% endfor %}
+</div>
+{% endblock %}

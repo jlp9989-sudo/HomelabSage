@@ -18,6 +18,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from ..config import Config
@@ -29,11 +30,13 @@ from .lifecycle import register_lifecycle
 from .routes_health import register_health_routes
 from .routes_notes import register_notes_routes
 from .routes_settings import register_settings_routes
+from .routes_settings_html import register_settings_html_routes
 from .routes_updates import register_updates_routes
 
 log = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
 def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
@@ -59,7 +62,14 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
     register_updates_routes(app, db, engine, env)
     register_notes_routes(app, editor, env)
     register_settings_routes(app, cfg, cfg_path)
+    register_settings_html_routes(app, cfg, cfg_path, env)
     register_health_routes(app)
+
+    # Static assets (HTMX, future CSS sprites). Mounted last so route handlers
+    # win on `/`-rooted paths.
+    if STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
     return app
 
 
