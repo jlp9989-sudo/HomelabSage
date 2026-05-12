@@ -74,6 +74,11 @@ Rules for the note:
 5. Keep the total note under 30 lines.
 6. Output ONLY the Markdown body. No code fences, no preamble, no closing remarks.
 7. If you do not have enough information to write the PURPOSE sentence, write exactly this single line and stop: `(no purpose stated yet — fill in)`. Do not invent reasons.
+8. NEVER invent facts. Do not assign meaning to container name suffixes, image tag variants, env var values, or settings unless the inputs above explicitly state that meaning. If the inputs do not support a bullet, omit the bullet entirely — fewer bullets are better than speculation. In particular:
+   - Do not guess what a name suffix like `-pnp`, `-lts`, `-edge`, etc. means.
+   - Do not speculate about whether a setting is "overridden", "unused", "ignored", or "deprecated" without evidence in the inputs.
+   - Do not invent network behavior, security posture, or integration details that are not in the inputs.
+9. NEVER quote specific version numbers, release dates, PR numbers, issue numbers, or commit hashes unless they appear verbatim in the inputs above (in the `# Container facts` block as `current version`, or inside the `# Recent upstream releases` block). Do not extrapolate "the next version", "the latest release", or "released on <date>" — if the input says current version is 2.19.5 and the recent releases block is empty, the only honest statement is "running 2.19.5; no upstream releases visible". Never compute a "+1 minor" or guess a future tag.
 
 # Container facts
 - name: {container_name}

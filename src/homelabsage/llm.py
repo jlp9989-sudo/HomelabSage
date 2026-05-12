@@ -114,28 +114,38 @@ class LLMClient:
             return None
         return _parse_analysis(raw)
 
-    async def generate_text(self, prompt: str) -> str | None:
+    async def generate_text(self, prompt: str, *, temperature: float = 0.0) -> str | None:
         """Free-form text completion (no JSON schema enforcement).
 
         Used by the curator, which expects Markdown back, not a JSON object.
+        Temperature defaults to 0.0 — the curator is a factual task and any
+        creativity quickly turns into invented "facts".
         Returns None if the LLM is disabled or the call fails.
         """
         if not self.is_enabled():
             return None
         try:
-            return await self._call(prompt, strict_json=False)
+            return await self._call(prompt, strict_json=False, temperature=temperature)
         except Exception as e:
             log.warning("LLM generate_text failed: %s", e)
             return None
 
-    async def _call(self, prompt: str, strict_json: bool) -> str:
+    async def _call(
+        self, prompt: str, strict_json: bool, temperature: float = 0.2
+    ) -> str:
         if self.cfg.provider == "ollama":
-            return await self._call_ollama(prompt, strict_json=strict_json)
+            return await self._call_ollama(
+                prompt, strict_json=strict_json, temperature=temperature
+            )
         if self.cfg.provider in {"openai", "anthropic"}:
-            return await self._call_openai_compat(prompt, strict_json=strict_json)
+            return await self._call_openai_compat(
+                prompt, strict_json=strict_json, temperature=temperature
+            )
         raise ValueError(f"unknown LLM provider: {self.cfg.provider}")
 
-    async def _call_ollama(self, prompt: str, strict_json: bool) -> str:
+    async def _call_ollama(
+        self, prompt: str, strict_json: bool, temperature: float
+    ) -> str:
         """Ollama-compat: POST /api/generate, format=json forces JSON output."""
         url = self.cfg.endpoint.rstrip("/") + "/api/generate"
         payload = {
@@ -143,7 +153,7 @@ class LLMClient:
             "prompt": prompt,
             "stream": False,
             "format": "json" if strict_json else None,
-            "options": {"num_ctx": self.cfg.context_size},
+            "options": {"num_ctx": self.cfg.context_size, "temperature": temperature},
         }
         # Drop nullable to avoid backend confusion
         payload = {k: v for k, v in payload.items() if v is not None}
@@ -152,14 +162,16 @@ class LLMClient:
             r.raise_for_status()
             return r.json().get("response", "")
 
-    async def _call_openai_compat(self, prompt: str, strict_json: bool) -> str:
+    async def _call_openai_compat(
+        self, prompt: str, strict_json: bool, temperature: float
+    ) -> str:
         """OpenAI-compatible chat completions."""
         url = _resolve_chat_completions_url(self.cfg.endpoint)
         headers = {"Authorization": f"Bearer {self.cfg.api_key}"} if self.cfg.api_key else {}
         payload = {
             "model": self.cfg.model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
+            "temperature": temperature,
             "response_format": {"type": "json_object"} if strict_json else None,
         }
         payload = {k: v for k, v in payload.items() if v is not None}
