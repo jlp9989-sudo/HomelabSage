@@ -79,6 +79,23 @@ def test_build_prompt_includes_all_context_fields():
     assert "image" in p  # context dict serialized
 
 
+def test_build_prompt_carries_env_var_rename_rule():
+    """Rule must be present so the LLM is instructed to call out renamed env vars."""
+    u = Update(source="docker", subject="x", current_version="1", new_version="2")
+    p = build_prompt(u)
+    assert "env" in p.lower() and "renamed" in p.lower()
+    # And the suggested phrasing must be there so the model knows the output shape.
+    assert "OLD_NAME" in p and "NEW_NAME" in p
+
+
+def test_build_prompt_carries_db_migration_rule():
+    u = Update(source="docker", subject="x", current_version="1", new_version="2")
+    p = build_prompt(u)
+    assert "migration" in p.lower()
+    # The verbatim warning string must be in the prompt so the model can mirror it.
+    assert "do not interrupt the first start after upgrade" in p
+
+
 def test_build_prompt_truncates_huge_release_notes():
     u = Update(
         source="docker", subject="x", current_version="1", new_version="2",
@@ -88,8 +105,9 @@ def test_build_prompt_truncates_huge_release_notes():
     # Release notes are capped at 15k chars in the template. We allow a small
     # margin for incidental "A" characters elsewhere in the template literal.
     assert 15000 <= p.count("A") <= 15020
-    # template overhead ~2k chars; allow some headroom but keep the bound real
-    assert len(p) < 17500
+    # template overhead ~2.5k chars (varies with rule count); bound is intentionally
+    # loose so adding a new rule doesn't fail this test as long as truncation still works
+    assert len(p) < 18500
 
 
 # ─── <think> stripper ────────────────────────────────────────────────────

@@ -85,6 +85,19 @@ Rules:
   by one step and mention the note in the summary.
 - If the user's notes indicate the update depends on / will break another service
   (e.g. an upstream library), reflect it in breaking_changes or recommended_action.
+- If the release notes mention that an environment variable was renamed, removed,
+  deprecated, or that a config key moved (look for "deprecated", "renamed",
+  "replaced by", "moved to", "no longer accepted", "use X instead"), list each
+  rename verbatim as a "breaking_changes" entry — these silently break setups
+  whose compose files still use the old name. Phrase as "env: OLD_NAME → NEW_NAME"
+  or "config: old.path removed, use new.path".
+- If the release notes mention schema migration, ALTER TABLE, an index rebuild,
+  a one-shot data backfill, or any phrase like "migration runs on first start",
+  "may take several minutes on large datasets", "do not interrupt": set
+  "action_required" to true and write a "recommended_action" that includes the
+  literal warning "do not interrupt the first start after upgrade — let any
+  database migration finish". Note this in the summary too. Interrupting these
+  is the most common silent-corruption path for users.
 
 # Update
 - Source: {source}
