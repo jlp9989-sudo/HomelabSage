@@ -49,7 +49,14 @@ class Database:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path, isolation_level=None)
+        # `check_same_thread=False`: the connection is created on the main
+        # thread (via `create_app`) but closed and read from APScheduler's
+        # worker threads and from FastAPI's shutdown event loop. WAL +
+        # autocommit (`isolation_level=None`) already make concurrent reads
+        # safe; we serialise writes at the engine level.
+        self._conn = sqlite3.connect(
+            self.path, isolation_level=None, check_same_thread=False
+        )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
