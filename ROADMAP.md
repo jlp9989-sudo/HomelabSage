@@ -30,6 +30,8 @@ All of these are additive: they enrich the `Update` payload that the LLM already
 - ✅ **Parity-aware notification gate.** On Unraid, check `/proc/mdstat` (or `mdcmd status` parsed) before pushing notifications. If a parity check / disk rebuild is running, queue notifications for after. Specific to Unraid users but trivial.
 - ⚠️ **Renamed/deprecated env-var detector.** Doable, but requires the LLM to parse the changelog rather than a deterministic diff (env vars aren't declared anywhere machine-readable). Implement as a **prompt rule** in `engine.py` ("if the changelog mentions env-var renames, list them as a `breaking_changes` entry"), not a separate detector. Cheaper, equally effective.
 - ⚠️ **Silent DB migration warning.** Same approach: prompt rule, not detector. Add to the LLM system prompt: *"If the release notes mention schema migration, ALTER TABLE, or one-shot data backfills, set `recommended_action` to a step that includes 'do not interrupt the first start after upgrade'."* Zero new code, big behavioural change.
+- ✅ **Unraid User Scripts + cron detection.** Two new plugins: `unraid_user_scripts` walks `/boot/config/plugins/user.scripts/scripts/` (each subdir = one script with `script` + `name` + `description` files), `cron` parses `/etc/cron.d/*` plus user crontabs. Both emit `CuratableTarget` items (rename of the curator's current `ContainerSnapshot` — the four existing fields generalise: `name`, `kind`, `discovery_source`, `payload`). Curator dispatches to a kind-specific prompt template. Cron entries that exec `docker exec <container>` cross-reference the container's note so we don't duplicate. Trap: `/boot` is FAT and host-side only — needs `nsenter` access from inside the container or an `unraid_path` host knob for non-Unraid setups. ~2 days; high value for the Unraid half of the audience.
+- ✅ **`<think>` block stripper in the curator response handler.** Some OpenAI-compat servers (Groq's `qwen/qwen3-32b`, Deepseek-R1, future reasoning models) return the chain-of-thought inline in `content` instead of an out-of-band `reasoning_content` field. Without sanitisation we write the entire `<think>...</think>` to `notes/<service>.md`. Strip on the way out of `LLMClient.generate_text`; one regex, big quality win for cloud users. Surfaced in the 2026-05-12 benchmark.
 
 ---
 
@@ -48,6 +50,7 @@ Bigger changes. Each one is a multi-day chunk.
 - ✅ **Dependency-cascade detector (compose-aware).** Parse `depends_on` and shared networks from `docker-compose.yml` files in a configurable scan path. When container A has a major update, list every B that depends on A in the analysis output. Most useful for Dockge users with many small stacks.
 - ✅ **HACS cascade for HA Python bumps.** Specific case of the above. When `homeassistant.core` releases, fetch the new `homeassistant/package_constraints.txt`, diff Python version. If bumped, query GitHub Issues across user's installed HACS repos for `python 3.x` mentions opened in the last 60 days. High value for HA-heavy setups.
 - ✅ **Sanitised stack export.** `homelabsage export --redact` produces a single-file dump of compose configs + container env + recent analyses with: IPs → `10.0.0.X`, hostnames → `host-N`, anything matching `*_PASSWORD|*_TOKEN|*_KEY` → `<redacted>`. For pasting into GitHub issues. Cheap, big community-friendliness win.
+- ✅ **Alternative-image detector.** New helper `homelabsage.images.find_alternatives(image)` that crosses three sources: Docker Hub search API (broad, noisy), the LSIO catalog `fleet.linuxserver.io/api/v1/images` (curated, narrow), and a GitHub code search for `FROM <image>` in popular compose files (slow, last resort). An "alternative" is only emitted when it satisfies ALL of: same primary purpose (Hub description similarity or explicit upstream link), last push within 90 days, ≥10× the pull count of the current image, and a stable tag matching the current semver shape. Surfaced to the analyzer as one extra `context` field — the LLM decides whether to mention it. No hard recommendation from the heuristic alone (same honesty bar as the curator rules). Composes cleanly with the existing GitHub helper. ~1–2 days, mostly cross-source dedup. Sibling of [Abandonware radar].
 
 ---
 
@@ -96,6 +99,59 @@ Implementation notes:
 
 Out of scope for this iteration: distributing one `system.md` across multiple hosts (e.g. a Tower + a separate Halo GPU box). When that becomes useful, split into `system-<hostname>.md` files.
 
+### Interview mode (v0.4.2) — critical path for v0.4 to actually work
+
+The curator's rule 7 (`(no purpose stated yet — fill in)`) is the honesty escape hatch. In practice, **30–40 % of containers in a typical homelab trip rule 7** (verified empirically on the 2026-05-12 benchmark — `tintes` and `FileBrowser-PNP` both lacked a purpose hint). If those placeholder notes never get filled in, v0.4's self-curating promise falls flat for non-technical users.
+
+Interview mode closes the gap. Whenever the curator would emit the rule-7 fallback line, it instead opens an `InterviewQuestion` row in SQLite. The web UI surfaces these as one-question prompts ("`tintes` — what does this service do for you?"). The user answers in 30 seconds; the curator regenerates that service's note with the answer injected as an additional input.
+
+**Backend (the simple piece):**
+
+- New SQLite table `interview_questions`: `id, target_kind, target_id, question_text, status (open|answered|dismissed), created_at, answered_at, answer_text`.
+- The curator detects the rule-7 fallback in its own output and writes an `InterviewQuestion` instead of (or alongside) the placeholder note.
+- One question at a time per target — re-running curate against the same target doesn't duplicate the question.
+- Generalises to any `CuratableTarget` kind — user scripts, cron jobs, anything where purpose is unclear.
+
+**Frontend (blocked on the v0.5 UI refactor):**
+
+- Unobtrusive banner at the top of the dashboard: *"3 services I don't fully understand. Answer in 30s →"*. Click expands inline (HTMX), one question per service, free-text input.
+- Submit writes the answer to SQLite, schedules a background `curate --target X --force` so the note is regenerated.
+
+**Why this is critical-path, not nice-to-have:** the entire v0.4 sales pitch is "the AI writes your notes for you so the analyzer gets sharper without manual work." Without interview mode, every service whose purpose isn't obvious from `docker inspect` ends up with a placeholder line that nobody fills in — and the analyzer's prompt gets a fraction of the context it would otherwise. With interview mode, the gap closes in a way that doesn't require the user to know what Markdown is.
+
+~3 days, two of them blocked on v0.5 steps 1–3 (settings UI refactor).
+
+---
+
+## v0.5 — UI extensibility + non-technical onboarding (post-v0.4)
+
+The current web layer is 172 lines of FastAPI + 180 lines of Jinja templates + zero JS/CSS files. It does what it does — list updates, edit notes, basic auth. The bottleneck for "easy for non-technical users" is not the templates; it's that **every behaviour that matters lives in `config.yaml` and `.env`**. A SPA pointed at the same backend would expose the same problem.
+
+The decision: **add backend hooks so configuration becomes a UI surface, but stay on server-rendered HTML + HTMX**. No React, no build step, no node_modules in a Python container. Full reasoning in `docs/2026-05-12-ui-and-roadmap-decisions.md`.
+
+Sequencing (each step ships independently — stop after any one and reassess):
+
+1. ✅ **Split `web.py` into a `web/` package.** One routes file per page: `routes_updates.py`, `routes_notes.py`, `routes_settings.py`, `routes_interview.py`. Mechanical refactor, ~1 hour, zero behaviour change. Blocker for everything below.
+2. ✅ **`/api/settings/*` read endpoints.** Returns the current YAML-merged config per Pydantic submodel (`/api/settings/llm`, `/api/settings/outputs/notion`, …). Read-only first — no write yet.
+3. ✅ **`/api/settings/*` write endpoints + `config.user.yaml` overlay.** Writes a sibling file next to `config.yaml`. Deploy default stays in `config.yaml`; user-edits go to `config.user.yaml`; latter wins on load. Diffable, version-controllable, no DB. Unlocks interview mode UI.
+4. ✅ **Schema-driven settings forms.** Render one HTMX form per Pydantic submodel from `model.model_json_schema()`. Adding a new config field becomes "add to the model, no template change" — which is the user's first goal ("add features without touching much code each time"). Includes the model selector + API-key editor.
+5. ✅ **Connection-test buttons.** "Test LLM endpoint", "Test Notion DB", "Test Telegram chat id" — each calls the existing client with a tiny no-op. Saves the user a debugging round-trip when they paste a bad key.
+6. ✅ **First-run wizard.** New `/setup` page shown when `config.user.yaml` doesn't exist. Three steps: pick LLM (test connection live), enable Docker/HA plugins, optional outputs. End state: writes `config.user.yaml`, drops a marker file, future visits go to `/`.
+7. ✅ **Interview mode UI** (from v0.4.2): banner + inline answer form, depends on steps 1–3.
+
+Adjacent improvements (cheap, slot in anywhere after step 1):
+
+- ✅ **Plugin enable/disable toggles.** Plugin and output system is already file-per-thing; surfacing on/off is trivial.
+- ✅ **Per-target dry-run preview.** UI button → "preview the note for this container" without writing. Closes the loop on curator honesty in a way the user can see.
+- ✅ **"What I see" diagnostics page.** Lists which containers HomelabSage detected, which were skipped (with the matching `skip:` regex), which have `repo:` resolved, which would be curated. Zero engine changes, huge first-run sanity boost.
+- ✅ **Settings export / import.** Once the UI writes `config.user.yaml`, expose download + load. Reduces "fear of clicking around" — they can always restore a known-good blob.
+
+### Explicitly NOT in v0.5
+
+- ❌ Rewrite in React/Vue. Current templates render in 180 lines total. A SPA + API split costs ~800 lines of TypeScript before adding any new behaviour, and HomelabSage is not an offline-first / real-time / mobile-app product.
+- ❌ User-settings database. Pydantic config + YAML is the right shape (diffable, restorable, version-controllable). A settings table is just worse YAML.
+- ❌ Multi-user login UI. HTTP Basic + reverse proxy is sufficient for a self-hosted single-user tool. Revisit when a real second user appears.
+
 ---
 
 ## Distribution & packaging (post-v0.2.0)
@@ -108,6 +164,7 @@ Once the detector layer ships and the project has more than a handful of users, 
 
 ## Backlog (uncertain ROI — revisit after user feedback)
 
+- 🤔 **New-software discovery (cross awesome-selfhosted with user notes).** Right shape, wrong moment. Honest implementation requires either embeddings over `awesome-selfhosted` (new dependency surface) or per-category curated lists (manual maintenance forever). Both are real work and the value depends on the curator having already written good notes per service — which is v0.4. Build v0.4 first, see whether curator-produced notes are rich enough to drive matching, then revisit. If we do it, the safe shape is: weekly crawl of `awesome-selfhosted` → categorised dataset; for each existing note the LLM extracts a `(category, primary_function)` tuple (cached); match function-to-function; only emit a suggestion when the alternative is in the same category, has more recent activity than the user's installed image, AND the LLM can write a one-line reason citing both inputs verbatim. Anything that can't satisfy the citation rule is dropped, not invented. ~1 week minimum. Park until v0.4.x lands.
 - 🤔 **PUID/PGID change detector.** Edge case; almost everyone is on LSIO images that handle this cleanly. Worth doing only if a real incident surfaces.
 - 🤔 **Rate-limit / polling-cadence diff for HA integrations.** Very narrow audience.
 - 🤔 **Hierarchical LLM pipeline (Extractor → Architect → Redactor) for long changelogs.** Add only when the current 32K-context single-pass is empirically insufficient. Don't pre-optimise.

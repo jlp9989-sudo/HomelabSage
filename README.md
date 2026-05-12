@@ -309,21 +309,33 @@ Updates are still detected and stored. No `summary`, no `breaking_changes`, no `
 
 ### Tested models
 
-The same prompt has been run head-to-head against three backends on a fixed set of 5 production containers (with `--dry-run` from the curator — the most sensitive consumer of the prompt; the analyzer is more forgiving because it gets structured release notes). Results below are first-hand, not vendor blurbs.
+The same prompt has been run head-to-head against several backends on a fixed set of 5 production containers (`a-eye`, `tintes`, `immich`, `n8n`, `FileBrowser-PNP`) with `--dry-run` from the curator — the most sensitive consumer of the prompt; the analyzer is more forgiving because it gets structured release notes. Results below are first-hand, not vendor blurbs.
 
-| Model | Provider | Cost | Latency/note | Curator quality | Honesty (rules 7–9) | Notes |
+**Curator quality** is a 1–5 score combining: (a) leads with the *why*, (b) surfaces non-obvious facts, (c) avoids restating `docker inspect`, (d) outputs clean Markdown (no leaked reasoning, no env-var dumps).
+**Honesty** is whether rule 7 (`(no purpose stated yet — fill in)`) fires on a thin-context container instead of inventing a purpose.
+
+| Model | Provider | Cost | Latency/note (5-container batch) | Curator quality | Honesty (rule 7) | Notes |
 |---|---|---|---|---|---|---|
-| **Qwen3.6-35B-Abl** (huihui_ai abliterated) | local llama.cpp (Vulkan / ROCm) | free, ~24 GiB VRAM warm | 5–8 s | **best** — uses `##` subsections, surfaces non-obvious facts (e.g. spotted the ImageGenius fork swapping `pgvecto.rs` for VectorChord, which neither other model picked up) | rules 8/9 OK; rule 7 rarely fires | the project's daily driver |
-| **Llama-3.3-70B-versatile** | Groq (free, OpenAI-compat) | free, ~1000 chat req/day | 1–2 s | acceptable — flat prose, no subsections, **violates rule 3 most often** (cites `PYTHON_SHA256` verbatim, copies entire env vars into bullets) | rule 9 OK; rule 7 never fires | fastest. Watch the HTTP 429 on bursts of 5+ targets |
-| **gemini-2.5-flash** | Google AI Studio (OpenAI-compat) | free, ~1500 req/day | 10–15 s | **most conservative** — when inputs are thin, emits the rule-7 fallback (`(no purpose stated yet — fill in)`) rather than invent; mis-fires rule 7 occasionally (writes the fallback line AND then bullets anyway); misses VectorChord-class details | rules 8/9 OK; rule 7 fires often (good signal) | endpoint must end in `/v1beta/openai` — see config example above |
+| **Qwen3.6-35B-Abl** (huihui_ai abliterated) | local llama.cpp (Vulkan / ROCm) | free, ~24 GiB VRAM warm | 5–8 s | **5/5** — uses `##` subsections, surfaces non-obvious facts (e.g. spotted the ImageGenius fork swapping `pgvecto.rs` for VectorChord, which neither commercial Gemini nor Llama picked up) | rule 7 rarely fires | the project's daily driver |
+| **Qwen3.6-27B-Think** | local llama.cpp (Vulkan / ROCm) | free, ~18 GiB VRAM warm | ~20 s | **4/5** — almost as good as 35B-Abl, similar `## Section` structure; thinking phase eats latency without proportionate quality gain | rule 7 fires honestly on thin inputs (good signal) | reasoning content stays server-side; nothing leaks into the note |
+| **Qwen3.5-4B-Compact** | local llama.cpp | free, ~3 GiB VRAM | ~6 s | **3/5** — punches above weight: caught the VectorChord switch and the openvino-variant detail on first pass. Hallucinates the purpose sentence ("Django web application for the tintes project") instead of firing rule 7. Some env-var bleed | rule 7 never fires | smallest model that's still useful. Tiny VRAM footprint — runs on a laptop |
+| **Llama-3.3-70B-versatile** | Groq (free, OpenAI-compat) | free, ~1000 chat req/day | 1–2 s | **2/5** — flat prose, no subsections, **violates rule 3 most often** (cites `PYTHON_SHA256` verbatim, copies entire env vars into bullets) | rule 7 never fires | fastest. Watch the HTTP 429 on bursts of 5+ targets |
+| **llama-3.1-8b-instant** | Groq (free) | free | ~1.3 s | **2/5** — same hallucination shape as the 70B sibling, just smaller. Still cites `PYTHON_SHA256`. Burns through Groq's per-minute quota quickly (hit 429 after 3 calls) | rule 7 never fires | only worth it for offline / one-shot curate on a single container |
+| **openai/gpt-oss-20b** | Groq (free) | free | ~3 s when not throttled | **3/5** — when it works, fires rule 7 cleanly on thin inputs and stays terse. But rate-limits aggressively — 3 of 5 calls failed with 429 in the batch test | rule 7 fires honestly | unusable for `--discover` on a real stack until Groq raises the per-model RPM cap, or you add inter-request sleeps |
+| **qwen/qwen3-32b** | Groq (free) | free | ~2 s when not throttled | **2/5** — produces the richest cloud note (caught VectorChord, distinguished image variants cleanly) **but leaks an unwrapped `<think>...</think>` block into the note body**. Would write reasoning trace to `notes/<service>.md` verbatim. 2 of 5 calls also 429'd | rule 7 never fires | **do not use until the curator strips `<think>` blocks** — open issue. Or use the Halo's Think model, which keeps reasoning server-side |
+| **gemini-2.5-flash-lite** | Google AI Studio | free, ~1500 req/day | ~21 s | **2/5** — slower than the full `2.5-flash`, similar over-eagerness to dump env vars; mis-fires rule 7 the same way (writes fallback then keeps going). Hit one transient 503 in the batch | rule 7 occasionally | no quality advantage over `2.5-flash` at higher latency |
+| **gemini-3.1-flash-lite** | Google AI Studio | free | **~1.4 s** | **4/5** — best cloud option tested. Concise prose, catches openvino variant, fires rule 7 cleanly on thin inputs. Closest match to local Qwen quality at cloud speed | rule 7 fires honestly | endpoint must end in `/v1beta/openai`. Free model id, no auth gymnastics |
+| **gemini-2.5-flash** | Google AI Studio (OpenAI-compat) | free, ~1500 req/day | 10–15 s | **3/5** — most conservative of the older Gemini line; mis-fires rule 7 occasionally (writes the fallback line AND then bullets anyway); misses VectorChord-class details | rule 7 fires often (good signal) | superseded by `3.1-flash-lite` for almost every use case |
 
 **How to read this table.** A note that you're going to paste into `notes/` is read by every subsequent analyzer run for years, so quality compounds. Hallucinations and `docker inspect` noise compound the wrong way. Honest "I don't know" (rule 7) is strictly better than a confident lie.
 
 **Recommendation.**
 
-- *Local GPU available?* Run **Qwen3.6-35B-Abl**. The quality gap is real and you only pay electricity.
-- *No GPU, prioritise speed?* **Groq Llama-3.3-70B** — but watch for trivia leaking into your notes. Strip env-var bullets before accepting.
-- *No GPU, prioritise honesty?* **Gemini 2.5 Flash** — it'll leave more "(fill in)" placeholders, which is annoying but safer than fabrication. Good fit if you plan to hand-review every note.
+- *Local GPU (≥16 GiB VRAM)?* **Qwen3.6-35B-Abl**. Quality gap is real and you only pay electricity. `Qwen3.6-27B-Think` is a fine substitute if you have less VRAM headroom.
+- *Low-VRAM box (4–8 GiB)?* **Qwen3.5-4B-Compact** is the most surprising result of this benchmark — it lands a 3/5 at 5.8 s/note on commodity hardware. Hand-review the first run, then trust it.
+- *No GPU, want speed and decent quality?* **gemini-3.1-flash-lite** is the new default cloud pick (1.4 s/note, 4/5 quality, honest rule-7 firing).
+- *No GPU, want maximum honesty?* **gemini-2.5-flash** or **gpt-oss-20b** — both lean toward `(fill in)` over fabrication, both annoying to hand-review.
+- *Avoid for now:* `qwen/qwen3-32b` on Groq (leaks `<think>` blocks), `Llama-3.3-70B`/`llama-3.1-8b` on Groq for any environment that pastes notes unreviewed (rule-3 violation rate is too high).
 
 The curator (`homelabsage curate`) is where you'll feel the model difference first. Run it once with `--show-prompt` and `--dry-run` on three of your containers and judge for yourself before piping the output into `notes/`.
 
