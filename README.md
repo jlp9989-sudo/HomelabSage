@@ -20,11 +20,68 @@ The LLM doesn't analyze updates in a vacuum — you can point it at your own `no
 
 ---
 
+## Quick start
+
+Two minutes from clone to web UI. Free cloud LLM, no GPU required:
+
+```bash
+mkdir -p notes data
+cat > config.yaml <<'EOF'
+llm:
+  provider: openai
+  endpoint: https://api.groq.com/openai
+  model: llama-3.3-70b-versatile
+  api_key: "PASTE_YOUR_GROQ_KEY_HERE"   # free at console.groq.com
+sources:
+  docker:
+    enabled: true
+notes:
+  notes_dir: /app/notes
+storage:
+  database_path: /app/data/state.sqlite
+EOF
+
+docker run --rm -d --name homelabsage \
+  -p 8000:8000 \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  -v "$PWD/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/notes:/app/notes" \
+  -v "$PWD/data:/app/data" \
+  ghcr.io/jlp9989-sudo/homelabsage:latest serve
+
+# Trigger a scan immediately (instead of waiting for the 09:00 cron)
+docker exec homelabsage homelabsage check
+```
+
+Open <http://localhost:8000>. You'll see one row per detected update, each with severity, summary, and a recommended action. Drop a `.md` file in `./notes` and the next scan will use it for context.
+
+For a real deploy (compose, scheduled scans, Notion/Telegram outputs, local LLM), see [Install](#install) and [Configuration](#configuration).
+
+---
+
 ## Why
 
-Most release-note watchers (Diun, WatchTower, Renovate) tell you *that* there is a new version. None of them read the changelog *and* your own constraints.
+Most release-note watchers (Diun, WatchTower, Renovate) tell you *that* there is a new version. None of them read the changelog *and* your own constraints. HomelabSage is the missing layer that does both — see [Architecture](#architecture) for how the pieces fit.
 
-HomelabSage is the missing layer:
+---
+
+## Features
+
+- **Plugin-based sources.** One file = one source. See [docs/plugin-sdk.md](docs/plugin-sdk.md).
+- **Local LLM by default.** Ollama-compatible API; works with [Ollama](https://ollama.com), [llama.cpp server](https://github.com/ggml-org/llama.cpp), LM Studio, or any OpenAI-compat endpoint. Falls back to OpenAI / Anthropic if you really want to.
+- **Tolerant JSON parser.** Strips markdown fences, surrounding prose, accepts case-insensitive severity, falls back to a `summary`-only best-effort when the model bends the schema.
+- **Your notes are the secret sauce.** Point `notes.notes_dir` at a folder of `.md` files (your CLAUDE.md, ARCHITECTURE.md, OPS.md, etc). For each update, only the sections that mention the subject get injected — no token bloat.
+- **Web UI with editor.** Read the analyzed list and edit notes from the browser (HTMX-style, no SPA). HTTP Basic Auth optional but recommended.
+- **Path-traversal safe.** Notes editor refuses `..` and non-`.md`/`.txt` extensions.
+- **Stable IDs.** `source:subject:new_version` — re-running a scan doesn't create duplicates.
+- **Heartbeat-friendly.** Pings an Uptime Kuma push monitor (or any URL) after each successful scan.
+- **Outputs are pluggable too.** Notion + Telegram today; webhooks/email easy to add.
+
+---
+
+## Architecture
+
+Each layer is one file. The whole thing is ~2,500 lines of Python.
 
 ```
    ┌──────────────────────────────────────────────────────────────┐
@@ -60,21 +117,7 @@ HomelabSage is the missing layer:
    └──────────────────────────────────────────────────────────────┘
 ```
 
-Each layer is one file. The whole thing is ~1,900 lines of Python.
-
----
-
-## Features
-
-- **Plugin-based sources.** One file = one source. See [docs/plugin-sdk.md](docs/plugin-sdk.md).
-- **Local LLM by default.** Ollama-compatible API; works with [Ollama](https://ollama.com), [llama.cpp server](https://github.com/ggml-org/llama.cpp), LM Studio, or any OpenAI-compat endpoint. Falls back to OpenAI / Anthropic if you really want to.
-- **Tolerant JSON parser.** Strips markdown fences, surrounding prose, accepts case-insensitive severity, falls back to a `summary`-only best-effort when the model bends the schema.
-- **Your notes are the secret sauce.** Point `notes.notes_dir` at a folder of `.md` files (your CLAUDE.md, ARCHITECTURE.md, OPS.md, etc). For each update, only the sections that mention the subject get injected — no token bloat.
-- **Web UI with editor.** Read the analyzed list and edit notes from the browser (HTMX-style, no SPA). HTTP Basic Auth optional but recommended.
-- **Path-traversal safe.** Notes editor refuses `..` and non-`.md`/`.txt` extensions.
-- **Stable IDs.** `source:subject:new_version` — re-running a scan doesn't create duplicates.
-- **Heartbeat-friendly.** Pings an Uptime Kuma push monitor (or any URL) after each successful scan.
-- **Outputs are pluggable too.** Notion + Telegram today; webhooks/email easy to add.
+The **curator** (`homelabsage curate`) is a sibling pipeline that writes the notes the analyzer reads — see [ROADMAP.md](ROADMAP.md) → v0.4.
 
 ---
 
@@ -263,6 +306,28 @@ llm:
 ```
 
 Updates are still detected and stored. No `summary`, no `breaking_changes`, no `recommended_action`. Useful for first-run sanity checks.
+
+### Tested models
+
+The same prompt has been run head-to-head against three backends on a fixed set of 5 production containers (with `--dry-run` from the curator — the most sensitive consumer of the prompt; the analyzer is more forgiving because it gets structured release notes). Results below are first-hand, not vendor blurbs.
+
+| Model | Provider | Cost | Latency/note | Curator quality | Honesty (rules 7–9) | Notes |
+|---|---|---|---|---|---|---|
+| **Qwen3.6-35B-Abl** (huihui_ai abliterated) | local llama.cpp (Vulkan / ROCm) | free, ~24 GiB VRAM warm | 5–8 s | **best** — uses `##` subsections, surfaces non-obvious facts (e.g. spotted the ImageGenius fork swapping `pgvecto.rs` for VectorChord, which neither other model picked up) | rules 8/9 OK; rule 7 rarely fires | the project's daily driver |
+| **Llama-3.3-70B-versatile** | Groq (free, OpenAI-compat) | free, ~1000 chat req/day | 1–2 s | acceptable — flat prose, no subsections, **violates rule 3 most often** (cites `PYTHON_SHA256` verbatim, copies entire env vars into bullets) | rule 9 OK; rule 7 never fires | fastest. Watch the HTTP 429 on bursts of 5+ targets |
+| **gemini-2.5-flash** | Google AI Studio (OpenAI-compat) | free, ~1500 req/day | 10–15 s | **most conservative** — when inputs are thin, emits the rule-7 fallback (`(no purpose stated yet — fill in)`) rather than invent; mis-fires rule 7 occasionally (writes the fallback line AND then bullets anyway); misses VectorChord-class details | rules 8/9 OK; rule 7 fires often (good signal) | endpoint must end in `/v1beta/openai` — see config example above |
+
+**How to read this table.** A note that you're going to paste into `notes/` is read by every subsequent analyzer run for years, so quality compounds. Hallucinations and `docker inspect` noise compound the wrong way. Honest "I don't know" (rule 7) is strictly better than a confident lie.
+
+**Recommendation.**
+
+- *Local GPU available?* Run **Qwen3.6-35B-Abl**. The quality gap is real and you only pay electricity.
+- *No GPU, prioritise speed?* **Groq Llama-3.3-70B** — but watch for trivia leaking into your notes. Strip env-var bullets before accepting.
+- *No GPU, prioritise honesty?* **Gemini 2.5 Flash** — it'll leave more "(fill in)" placeholders, which is annoying but safer than fabrication. Good fit if you plan to hand-review every note.
+
+The curator (`homelabsage curate`) is where you'll feel the model difference first. Run it once with `--show-prompt` and `--dry-run` on three of your containers and judge for yourself before piping the output into `notes/`.
+
+Want to add a benchmark? Run `homelabsage curate --discover --dry-run --limit 5` on your stack and open a PR appending a row to this table.
 
 ---
 

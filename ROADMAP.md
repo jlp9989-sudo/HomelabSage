@@ -74,6 +74,28 @@ Pattern is borrowed from how Claude Code maintains its `MEMORY.md` — same shap
 
 This is the most architecturally invasive item on the roadmap; spec it as a separate design doc before coding.
 
+### System-level curator note (v0.4.1)
+
+Sibling feature of the per-container curator. One auto-generated `notes/system.md` that captures the **host environment** the containers run inside, so every subsequent LLM call (analyzer and per-container curator) has shared baseline context without paying the token cost of re-discovering it for each update.
+
+Contents to capture:
+
+- Kernel: `uname -r`, distro + version (`/etc/os-release`).
+- Docker daemon: version, storage driver, cgroup driver, default runtime (`docker info` JSON).
+- Network topology: which bridges / macvlan / host-mode networks exist, presence of Tailscale / WireGuard, exposed reverse-proxy hostnames (Caddy / Traefik / Cloudflare Tunnel).
+- Host resources: total RAM, CPU model, primary disk usage, GPU(s) and runtime (`nvidia` / `rocm` / `vulkan`), zpool list if ZFS.
+- Unraid-specific (auto-detect): plugin list, array status (parity / pending check), share layout (cache pool vs array).
+- Last regeneration timestamp, same `<!-- curator: system@<host-fingerprint> -->` footer pattern for dedup.
+
+Implementation notes:
+
+- New `Curator.curate_system()` that calls a separate prompt template (`curator.system_prompt_template_path` — falls back to a built-in default like the per-container one).
+- Probes are best-effort and pluggable: each probe (`_probe_kernel`, `_probe_docker_info`, `_probe_unraid`) returns `None` on absence and the prompt builder simply omits the corresponding block. No probe should crash the run if its target tool is missing.
+- The note matcher in `NotesProvider` already does substring matching on subject + keywords, so `system.md` will be injected on every analyzer call where the update touches kernel modules, network stack, or host resources — exactly the cases where it matters.
+- CLI: `homelabsage curate --system` (one-shot). Footer fingerprint stable across reruns unless the host actually changes, so re-runs are idempotent.
+
+Out of scope for this iteration: distributing one `system.md` across multiple hosts (e.g. a Tower + a separate Halo GPU box). When that becomes useful, split into `system-<hostname>.md` files.
+
 ---
 
 ## Distribution & packaging (post-v0.2.0)
