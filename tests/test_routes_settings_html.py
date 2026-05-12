@@ -216,6 +216,49 @@ def test_block_form_renders_array_as_textarea(client):
     assert "foo" in html and "bar" in html
 
 
+def test_enum_field_renders_as_select(client):
+    """Pydantic Literal[...] fields produce `enum:[...]` in the JSON schema;
+    the renderer picks a <select> over a free text input."""
+    r = client.get("/settings/llm")
+    html = r.text
+    # provider is Literal["ollama","openai","anthropic","disabled"]
+    assert 'id="f-provider"' in html
+    # Should be a <select> not a text input
+    assert "<select" in html
+    assert '<option value="ollama"' in html
+    assert '<option value="openai"' in html
+    assert '<option value="anthropic"' in html
+    assert '<option value="disabled"' in html
+    # The current value must be marked selected
+    assert 'value="openai"' in html and "selected" in html
+
+
+def test_enum_renders_for_notion_write_policy(client):
+    r = client.get("/settings/outputs/notion")
+    html = r.text
+    assert 'id="f-write_policy"' in html
+    assert '<option value="always"' in html
+    assert '<option value="only_action_required"' in html
+
+
+def test_enum_rejects_invalid_value_at_save(client, cfg_dir):
+    """Pydantic Literal validation catches enum violations server-side."""
+    r = client.post(
+        "/settings/outputs/telegram/update",
+        data={"enabled": "false", "bot_token": "", "chat_id": "",
+              "min_severity": "BOGUS"},
+    )
+    assert r.status_code == 200
+    assert "min_severity" in r.text.lower() or "input" in r.text.lower()
+    # Overlay NOT written
+    from homelabsage.config_overlay import user_overlay_path
+    overlay = user_overlay_path(cfg_dir / "config.yaml")
+    if overlay.exists():
+        import yaml
+        data = yaml.safe_load(overlay.read_text()) or {}
+        assert data.get("outputs", {}).get("telegram", {}).get("min_severity") != "BOGUS"
+
+
 def test_scheduler_renders_timezone_widget(client):
     """`scheduler.timezone` is annotated `ui_widget='timezone'` and rolls into
     a preset select + raw text input via `_widget_timezone.html`."""

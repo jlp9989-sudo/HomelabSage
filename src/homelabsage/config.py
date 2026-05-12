@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -46,7 +46,7 @@ def _load_dotenv(path: Path) -> None:
 
 
 class LLMConfig(BaseModel):
-    provider: str = Field(
+    provider: Literal["ollama", "openai", "anthropic", "disabled"] = Field(
         "ollama",
         description=(
             "Backend protocol: `ollama` for raw Ollama API, `openai` for any "
@@ -182,7 +182,7 @@ class NotionOutputConfig(BaseModel):
             "before the `?`."
         ),
     )
-    write_policy: str = Field(
+    write_policy: Literal["always", "only_action_required"] = Field(
         "always",
         description="`always` writes every analyzed update; `only_action_required` skips info-level ones.",
     )
@@ -201,17 +201,10 @@ class TelegramOutputConfig(BaseModel):
             "For groups: add the bot, send `/start@yourbot`, then call `getUpdates`."
         ),
     )
-    min_severity: str = Field(
+    min_severity: Literal["critical", "high", "medium", "info"] = Field(
         "high",
         description="Only push updates at or above this severity. Use `critical` to get CVEs only.",
     )
-
-    @field_validator("min_severity")
-    @classmethod
-    def _check_sev(cls, v: str) -> str:
-        if v not in {"critical", "high", "medium", "info"}:
-            raise ValueError(f"min_severity must be critical|high|medium|info, got {v!r}")
-        return v
 
 
 class OutputsConfig(BaseModel):

@@ -175,6 +175,11 @@ def _block_form_context(
         is_object = prop_type == "object"
         is_bool = prop_type == "boolean"
         is_int = prop_type == "integer"
+        # Pydantic emits `enum: [...]` for `Literal[...]` fields. When present,
+        # the renderer picks a <select> instead of a free text input — gives
+        # the form server-side validated values without a custom widget.
+        enum_values = prop.get("enum") or []
+        is_enum = bool(enum_values) and not is_bool
 
         # The textbox value for arrays/objects is the YAML/lines representation.
         if is_array and isinstance(raw_value, list):
@@ -204,6 +209,8 @@ def _block_form_context(
             "is_object": is_object,
             "is_bool": is_bool,
             "is_int": is_int,
+            "is_enum": is_enum,
+            "enum_values": enum_values,
             "is_override": name in local_overrides,
             "value": display,
             # Raw value useful for the bool checkbox state
