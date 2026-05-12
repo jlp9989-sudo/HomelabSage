@@ -10,10 +10,15 @@ other images that:
   * are actively maintained (last push within the last 90 days), AND
   * publish stable semver-shaped tags (so they're upgradeable, not "latest"-only).
 
-Sources of candidates, in increasing trust:
+Sources of candidates:
 
-  1. Docker Hub repository search — broad, noisy. The cheap entry point.
-  2. LinuxServer.io fleet catalog — curated, narrow. High signal when it matches.
+  1. Docker Hub repository search — broad, noisy. The cheap entry point. Each
+     hit is enriched with a per-repo lookup when `last_updated` is missing
+     (the search endpoint frequently omits it).
+  2. LinuxServer.io direct probe — `hub.docker.com/v2/repositories/linuxserver/
+     <short_name>/`. LSIO publishes every image to that namespace, and the
+     standalone catalog (`fleet.linuxserver.io/api/v1/images`) was discontinued
+     mid-2024. The direct Hub path is the only stable handle.
 
 A planned third source (GitHub code search for `FROM <image>`) is out of scope
 for this iteration; we'd add it only if the first two produce too few hits.
@@ -172,7 +177,11 @@ def _has_recent_semver_tag(tags: list[str]) -> str | None:
 
 DOCKER_HUB_SEARCH = "https://hub.docker.com/v2/search/repositories/"
 DOCKER_HUB_REPO = "https://hub.docker.com/v2/repositories/"
-LSIO_CATALOG = "https://fleet.linuxserver.io/api/v1/images"
+# Enrichment fan-out cap. Hub's search endpoint omits `last_updated` on most
+# rows; we fall back to the per-repo endpoint for the top-N to fill it in.
+# Five is a defensible budget: enough to reach `Criteria.max_results` survivors
+# in normal cases, low enough that a 5x latency multiplier doesn't blow up.
+_ENRICH_TOP_N = 5
 
 
 async def _query_docker_hub(
@@ -223,26 +232,32 @@ async def _query_docker_hub_tags(
         return []
 
 
-async def _query_lsio_catalog(*, client: httpx.AsyncClient) -> list[dict[str, Any]]:
-    """Pull the full LinuxServer.io image catalog. One small JSON."""
+async def _query_docker_hub_repo(
+    repo: str, *, client: httpx.AsyncClient
+) -> dict[str, Any] | None:
+    """Fetch a single Hub repo's metadata (the same shape used by `_query_docker_hub_pulls`).
+
+    Used to fill in `last_updated` when the search endpoint omits it.
+    """
     try:
-        r = await client.get(LSIO_CATALOG, timeout=20)
+        r = await client.get(f"{DOCKER_HUB_REPO}{repo}/", timeout=15)
         if r.status_code != 200:
-            return []
-        data = r.json()
-        # LSIO API has historically returned the list either at the top level
-        # or under "data". Tolerate both shapes.
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
-            for k in ("data", "images", "results"):
-                v = data.get(k)
-                if isinstance(v, list):
-                    return v
-        return []
-    except httpx.HTTPError as e:
-        log.debug("LSIO catalog fetch failed: %s", e)
-        return []
+            return None
+        return r.json()
+    except httpx.HTTPError:
+        return None
+
+
+async def _query_lsio_direct(
+    short_name: str, *, client: httpx.AsyncClient
+) -> dict[str, Any] | None:
+    """Probe `hub.docker.com/v2/repositories/linuxserver/<short_name>/`.
+
+    LSIO publishes every image to that namespace. Two-line replacement for the
+    `fleet.linuxserver.io/api/v1/images` catalog, which was retired mid-2024.
+    Returns the raw Hub repo metadata or None.
+    """
+    return await _query_docker_hub_repo(f"linuxserver/{short_name}", client=client)
 
 
 # ─── shape normalisation ───────────────────────────────────────────────────
@@ -265,40 +280,41 @@ def _parse_dt(text: str | None) -> datetime | None:
     return dt
 
 
-def _hub_result_to_alt(row: dict[str, Any]) -> Alternative | None:
-    """Convert a Docker Hub search row to an Alternative, or None if unusable."""
+def _hub_search_row_to_partial(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Pull `(name, pulls, short_description)` out of a Hub search row.
+
+    Does NOT build an `Alternative` — search rows usually have no
+    `last_updated`, so we defer that to enrichment.
+    """
     name = row.get("repo_name") or row.get("name") or ""
+    if not name:
+        return None
     if "/" not in name:
         # Implicit "library/" namespace (Docker official images).
         name = f"library/{name}"
-    pushed = _parse_dt(row.get("last_updated"))
+    return {
+        "name": name,
+        "pulls": int(row.get("pull_count") or 0),
+        "short_description": str(row.get("short_description") or ""),
+        "last_updated": row.get("last_updated"),
+    }
+
+
+def _hub_repo_to_alt(
+    name: str, repo: dict[str, Any], *, source: str = "docker-hub"
+) -> Alternative | None:
+    """Convert a per-repo Hub metadata blob (the shape returned by /v2/repositories/<name>/)
+    into an Alternative. Returns None if `last_updated` is unparseable.
+    """
+    pushed = _parse_dt(repo.get("last_updated"))
     if pushed is None:
         return None
     return Alternative(
         image=name,
-        pulls=int(row.get("pull_count") or 0),
+        pulls=int(repo.get("pull_count") or 0),
         last_pushed=pushed,
-        source="docker-hub",
-        short_description=str(row.get("short_description") or ""),
-    )
-
-
-def _lsio_row_to_alt(row: dict[str, Any]) -> Alternative | None:
-    name = row.get("name") or row.get("image") or ""
-    if not name:
-        return None
-    # LSIO publishes to `linuxserver/<name>` on Docker Hub.
-    image = name if "/" in name else f"linuxserver/{name}"
-    pushed = _parse_dt(row.get("updated_at") or row.get("last_updated"))
-    if pushed is None:
-        return None
-    return Alternative(
-        image=image,
-        pulls=int(row.get("pulls") or row.get("pull_count") or 0),
-        last_pushed=pushed,
-        source="lsio",
-        short_description=str(row.get("description") or row.get("short_description") or ""),
-        github_url=row.get("github_url") or row.get("project_url"),
+        source=source,
+        short_description=str(repo.get("description") or repo.get("short_description") or ""),
     )
 
 
@@ -400,19 +416,52 @@ async def find_alternatives(
 
         # Parallel source queries.
         hub_task = _query_docker_hub(short, client=client)
-        lsio_task = _query_lsio_catalog(client=client)
-        hub_rows, lsio_rows = await asyncio.gather(hub_task, lsio_task)
+        lsio_task = _query_lsio_direct(short, client=client)
+        hub_rows, lsio_repo = await asyncio.gather(hub_task, lsio_task)
 
-        candidates_raw: list[Alternative] = []
+        # Stage 1: collect partial info from Hub search (no last_updated yet).
+        partials: list[dict[str, Any]] = []
         for row in hub_rows:
-            if alt := _hub_result_to_alt(row):
-                candidates_raw.append(alt)
-        for row in lsio_rows:
-            if alt := _lsio_row_to_alt(row):
+            if p := _hub_search_row_to_partial(row):
+                partials.append(p)
+        # Sort by pulls so the per-repo enrichment fan-out targets the most
+        # promising candidates.
+        partials.sort(key=lambda p: p["pulls"], reverse=True)
+
+        # Stage 2: build Alternatives. For each partial, if last_updated is
+        # present we can build directly; otherwise fall back to a per-repo
+        # lookup, capped at _ENRICH_TOP_N to bound HTTP fan-out.
+        candidates_raw: list[Alternative] = []
+        enrichment_budget = _ENRICH_TOP_N
+        for p in partials:
+            if _parse_dt(p["last_updated"]) is not None:
+                alt = _hub_repo_to_alt(p["name"], {
+                    "pull_count": p["pulls"],
+                    "last_updated": p["last_updated"],
+                    "short_description": p["short_description"],
+                })
+                if alt:
+                    candidates_raw.append(alt)
+                continue
+            if enrichment_budget <= 0:
+                continue
+            enrichment_budget -= 1
+            repo = await _query_docker_hub_repo(p["name"], client=client)
+            if not repo:
+                continue
+            alt = _hub_repo_to_alt(p["name"], repo)
+            if alt:
                 candidates_raw.append(alt)
 
-        # Sort by pulls descending so the most popular survivors win when we
-        # hit `max_results`.
+        # LSIO direct hit (if the image exists under linuxserver/<short>).
+        if lsio_repo is not None:
+            lsio_alt = _hub_repo_to_alt(
+                f"linuxserver/{short}", lsio_repo, source="lsio"
+            )
+            if lsio_alt:
+                candidates_raw.append(lsio_alt)
+
+        # Sort again by pulls now that we have the full set.
         candidates_raw.sort(key=lambda a: a.pulls, reverse=True)
 
         kept: list[Alternative] = []
@@ -435,9 +484,8 @@ async def find_alternatives(
         # the LLM can cite something stable. Bounded fan-out: at most
         # max_results extra requests.
         for cand in kept:
-            if cand.source == "docker-hub":
-                tags = await _query_docker_hub_tags(cand.image, client=client)
-                cand.sample_tag = _has_recent_semver_tag(tags)
+            tags = await _query_docker_hub_tags(cand.image, client=client)
+            cand.sample_tag = _has_recent_semver_tag(tags)
 
         return FindAlternativesResult(
             candidates=kept,
