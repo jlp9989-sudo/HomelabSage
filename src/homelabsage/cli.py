@@ -305,7 +305,9 @@ def serve(config: Path = CONFIG_OPT, verbose: bool = VERBOSE_OPT) -> None:
     # Lazy import to keep CLI startup fast.
     from .web import run_web
 
-    run_web(cfg)
+    # Pass the config path through so the settings API knows where to write
+    # the user overlay (`config.user.yaml`).
+    run_web(cfg, cfg_path=config)
 
 
 @app.command()
