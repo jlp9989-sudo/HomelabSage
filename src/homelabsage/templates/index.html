@@ -8,6 +8,26 @@
   </form>
 {% endblock %}
 {% block content %}
+
+{% if llm_profiles %}
+<div style="display:flex; gap:.5rem; align-items:center; margin-bottom:1rem">
+  <form method="post" action="/llm/active"
+        hx-post="/llm/active" hx-target="#llm-active-flash" hx-swap="innerHTML"
+        style="display:flex; gap:.5rem; align-items:center">
+    <label for="llm-active-select" class="muted">Active LLM:</label>
+    <select id="llm-active-select" name="active" onchange="this.form.requestSubmit()">
+      <option value="" {% if not llm_active %}selected{% endif %}>(legacy llm)</option>
+      {% for name in llm_profiles %}
+        <option value="{{ name }}" {% if llm_active == name %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+    <noscript><button type="submit">Switch</button></noscript>
+  </form>
+  <a href="/settings/llm/profiles" class="muted" style="text-decoration:none">manage profiles →</a>
+  <span id="llm-active-flash" class="muted"></span>
+</div>
+{% endif %}
+
 <div style="display:flex;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
   {% for status, n in counts.items() if n %}
     <span class="pill">{{ status }}: {{ n }}</span>

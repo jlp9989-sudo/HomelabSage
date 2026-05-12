@@ -312,6 +312,25 @@ class CuratorConfig(BaseModel):
 
 class Config(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    # Optional multi-profile setup. `llm_profiles` maps a human-friendly
+    # name to an LLMConfig; `llm_active` selects which one is in use. When
+    # `llm_active` is empty OR doesn't match any profile, `llm` is used as
+    # the fallback — so single-config setups keep working unchanged.
+    #
+    # Example YAML:
+    #   llm_active: halo
+    #   llm_profiles:
+    #     halo:
+    #       provider: openai
+    #       endpoint: http://192.168.31.19:11434
+    #       model: Qwen3.6-35B-Abl
+    #     groq:
+    #       provider: openai
+    #       endpoint: https://api.groq.com/openai
+    #       api_key: ${GROQ_API_KEY}
+    #       model: llama-3.3-70b-versatile
+    llm_profiles: dict[str, LLMConfig] = Field(default_factory=dict)
+    llm_active: str = ""
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     outputs: OutputsConfig = Field(default_factory=OutputsConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
@@ -319,6 +338,22 @@ class Config(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     notes: NotesConfig = Field(default_factory=NotesConfig)
     curator: CuratorConfig = Field(default_factory=CuratorConfig)
+
+
+def get_active_llm_config(cfg: Config) -> LLMConfig:
+    """Resolve which LLMConfig is in effect right now.
+
+    Precedence:
+      1. If `cfg.llm_active` names a key in `cfg.llm_profiles`, return that.
+      2. Else fall back to the legacy single `cfg.llm`.
+
+    This is intentionally permissive — a misspelled active name silently
+    falls back rather than failing the run. The dashboard shows the
+    effective profile name so the user notices.
+    """
+    if cfg.llm_active and cfg.llm_active in cfg.llm_profiles:
+        return cfg.llm_profiles[cfg.llm_active]
+    return cfg.llm
 
 
 def load_config(path: str | Path) -> Config:

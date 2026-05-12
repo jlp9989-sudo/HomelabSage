@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 
 import httpx
 from pydantic import ValidationError
@@ -171,8 +172,24 @@ def _resolve_chat_completions_url(endpoint: str) -> str:
 
 
 class LLMClient:
-    def __init__(self, cfg: LLMConfig):
-        self.cfg = cfg
+    """Thin wrapper around the chat-completions HTTP call.
+
+    `cfg_provider` can be either a fixed `LLMConfig` (the simple case used
+    by tests and one-shot scripts) or a callable that returns one on every
+    access (used by the engine so changing `llm_active` or editing the
+    overlay takes effect on the next call without restarting the process).
+    """
+
+    def __init__(self, cfg_provider: LLMConfig | Callable[[], LLMConfig]):
+        if callable(cfg_provider):
+            self._provider = cfg_provider
+        else:
+            fixed = cfg_provider
+            self._provider = lambda: fixed
+
+    @property
+    def cfg(self) -> LLMConfig:
+        return self._provider()
 
     def is_enabled(self) -> bool:
         return self.cfg.provider != "disabled"

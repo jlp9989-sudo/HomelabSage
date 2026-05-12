@@ -157,6 +157,31 @@ def test_atomic_write_does_not_leave_tmp_files(tmp_path):
     assert stragglers == []
 
 
+def test_atomic_write_falls_back_on_ebusy(tmp_path, monkeypatch):
+    """When `path` is bind-mounted as a single file (common with
+    `docker run -v host.yaml:/app/...`), `os.replace` raises EBUSY.
+    We must fall back to a non-atomic in-place write rather than fail."""
+    target = tmp_path / "out.yaml"
+    target.write_text("prev: value\n")
+
+    real_replace = __import__("os").replace
+
+    def replace_ebusy(src, dst, *args, **kwargs):
+        import errno
+        if str(dst) == str(target):
+            raise OSError(errno.EBUSY, "Device or resource busy", str(dst))
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr("homelabsage.config_overlay.os.replace", replace_ebusy)
+
+    atomic_write_yaml(target, {"new": 2})
+
+    assert yaml.safe_load(target.read_text()) == {"new": 2}
+    # And no .tmp straggler left behind even on the fallback path
+    stragglers = list(tmp_path.glob(".out.yaml.*"))
+    assert stragglers == []
+
+
 # ─── dotted-path helpers ───────────────────────────────────────────────────
 
 def test_set_dotted_creates_path():

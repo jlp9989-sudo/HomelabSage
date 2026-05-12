@@ -63,7 +63,7 @@ def check(config: Path = CONFIG_OPT, verbose: bool = VERBOSE_OPT) -> None:
     """Run a single scan + analyze + output cycle."""
     _setup_logging(verbose)
     cfg = load_config(config)
-    stats = run_blocking(cfg)
+    stats = run_blocking(cfg, cfg_path=config)
     console.print(f"[green]Done.[/green] {stats}")
 
 

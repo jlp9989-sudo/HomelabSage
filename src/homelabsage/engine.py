@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
+from pathlib import Path
 
 import httpx
 
@@ -42,10 +43,33 @@ def build_outputs(cfg: Config, db: Database) -> list[Output]:
 
 
 class Engine:
-    def __init__(self, cfg: Config, db: Database):
+    def __init__(
+        self,
+        cfg: Config,
+        db: Database,
+        *,
+        cfg_path: Path | None = None,
+    ):
         self.cfg = cfg
         self.db = db
-        self.llm = LLMClient(cfg.llm)
+        self._cfg_path = cfg_path
+
+        # Resolve the active LLM profile on every call so a UI-driven switch
+        # of `llm_active` (or any other overlay edit) takes effect on the
+        # NEXT LLM call without restarting the process. When `cfg_path` is
+        # None (tests, programmatic callers), we resolve against the
+        # in-memory cfg — still correct, just not hot-reloaded.
+        from .config import get_active_llm_config, load_config
+
+        def _resolve_llm():
+            if cfg_path is not None:
+                try:
+                    return get_active_llm_config(load_config(cfg_path))
+                except Exception:
+                    pass  # fall through to the startup cfg on a bad read
+            return get_active_llm_config(self.cfg)
+
+        self.llm = LLMClient(_resolve_llm)
         self.notes = NotesProvider(
             notes_dir=cfg.notes.notes_dir or None,
             extra_docs=cfg.notes.extra_docs,
@@ -117,14 +141,14 @@ class Engine:
 
 
 # Convenience for one-shot CLI use
-async def run_once(cfg: Config) -> dict[str, int]:
+async def run_once(cfg: Config, *, cfg_path: Path | None = None) -> dict[str, int]:
     db = Database(cfg.storage.database_path)
-    engine = Engine(cfg, db)
+    engine = Engine(cfg, db, cfg_path=cfg_path)
     try:
         return await engine.run_once()
     finally:
         engine.close()
 
 
-def run_blocking(cfg: Config) -> dict[str, int]:
-    return asyncio.run(run_once(cfg))
+def run_blocking(cfg: Config, *, cfg_path: Path | None = None) -> dict[str, int]:
+    return asyncio.run(run_once(cfg, cfg_path=cfg_path))

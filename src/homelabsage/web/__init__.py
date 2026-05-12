@@ -29,6 +29,7 @@ from .auth import attach_basic_auth
 from .csrf import attach_csrf_guard
 from .lifecycle import register_lifecycle
 from .routes_health import register_health_routes
+from .routes_llm_profiles import register_llm_profiles_routes
 from .routes_notes import register_notes_routes
 from .routes_settings import register_settings_routes
 from .routes_settings_html import register_settings_html_routes
@@ -49,7 +50,7 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
     """
     app = FastAPI(title="HomelabSage", version="0.0.1", docs_url=None, redoc_url=None)
     db = Database(cfg.storage.database_path)
-    engine = Engine(cfg, db)
+    engine = Engine(cfg, db, cfg_path=cfg_path)
     editor = NotesEditor(cfg.notes.notes_dir or None)
     env = Environment(
         loader=FileSystemLoader(TEMPLATES_DIR),
@@ -70,6 +71,11 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
     register_updates_routes(app, db, engine, env)
     register_notes_routes(app, editor, env)
     register_settings_routes(app, cfg, cfg_path)
+    # LLM profiles owns `/settings/llm/profiles*` and the dashboard switch
+    # `/llm/active`. Register BEFORE the schema-driven settings HTML routes,
+    # which include a catch-all `/settings/{block:path}` that would otherwise
+    # match `/settings/llm/profiles` and 404 (not a known block).
+    register_llm_profiles_routes(app, cfg, cfg_path, env)
     register_settings_html_routes(app, cfg, cfg_path, env)
     register_health_routes(app)
 

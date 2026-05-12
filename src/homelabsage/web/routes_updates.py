@@ -29,9 +29,24 @@ def register_updates_routes(
         counts = {s.value: 0 for s in UpdateStatus}
         for it in items:
             counts[it.status.value] += 1
+        # Re-read cfg from disk so the profile dropdown reflects the
+        # current state (the engine's hot-reload already covers LLM calls;
+        # this is purely a UI freshness concern).
+        fresh = engine.cfg
+        if engine._cfg_path and engine._cfg_path.exists():
+            try:
+                from ..config import load_config
+                fresh = load_config(engine._cfg_path)
+            except Exception:
+                pass
         tmpl = env.get_template("index.html")
         return HTMLResponse(
-            tmpl.render(items=items, counts=counts, llm_enabled=engine.llm.is_enabled())
+            tmpl.render(
+                items=items, counts=counts,
+                llm_enabled=engine.llm.is_enabled(),
+                llm_profiles=list(fresh.llm_profiles.keys()),
+                llm_active=fresh.llm_active,
+            )
         )
 
     @app.post("/run")

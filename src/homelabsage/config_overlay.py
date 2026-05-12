@@ -23,6 +23,7 @@ UI. No DB needed — YAML is the right shape.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import tempfile
@@ -102,14 +103,25 @@ def load_overlay(path: Path) -> dict[str, Any]:
 
 
 def atomic_write_yaml(path: Path, data: dict[str, Any]) -> None:
-    """Serialise `data` to `path` atomically.
+    """Serialise `data` to `path` atomically when possible.
 
-    Uses a temp file in the same directory (so the final rename is a single
-    syscall and crash-safe) plus `os.replace` which is atomic across Linux
-    and Windows. Permissions are 0o600 — the overlay can hold the user's
-    API keys, so it should not be world-readable.
+    Default path: write to `<path>.<rand>.tmp` in the same directory, then
+    `os.replace` to the final name. That's atomic on Linux and Windows.
+
+    Fallback path: when `path` is bind-mounted as a single file inside a
+    container (common with Docker `-v host.yaml:/app/config.user.yaml`),
+    `os.replace` raises EBUSY because the inode is pinned. In that case
+    we fall back to a non-atomic in-place write to the same fd. The
+    atomicity guarantee is lost, but the write still succeeds. We warn
+    so users running in that configuration know to mount the PARENT
+    directory if they need atomic overlay writes.
+
+    Permissions are 0o600 — the overlay can hold the user's API keys,
+    so it should not be world-readable.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    serialised = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
+
     with tempfile.NamedTemporaryFile(
         mode="w",
         dir=path.parent,
@@ -118,16 +130,33 @@ def atomic_write_yaml(path: Path, data: dict[str, Any]) -> None:
         delete=False,
         encoding="utf-8",
     ) as tmp:
-        yaml.safe_dump(data, tmp, sort_keys=False, default_flow_style=False)
+        tmp.write(serialised)
         tmp.flush()
         os.fsync(tmp.fileno())
         tmp_path = Path(tmp.name)
     try:
         os.chmod(tmp_path, 0o600)
         os.replace(tmp_path, path)
-    except Exception:
-        # Don't leave a stray .tmp around if replace failed
+    except OSError as e:
+        # Don't leave a stray .tmp behind regardless of which path we take.
         tmp_path.unlink(missing_ok=True)
+        if getattr(e, "errno", None) == 16:  # EBUSY — bind-mounted single file
+            log.warning(
+                "atomic_write_yaml: %s is bind-mounted (EBUSY on rename); "
+                "falling back to non-atomic in-place write. Mount the parent "
+                "directory instead of the file alone to restore atomicity.",
+                path,
+            )
+            # Open the existing inode and overwrite in-place. Truncate first
+            # so the new (potentially shorter) content doesn't leave trailing
+            # bytes from the previous write.
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(serialised)
+                f.flush()
+                os.fsync(f.fileno())
+            with contextlib.suppress(OSError):
+                os.chmod(path, 0o600)
+            return
         raise
 
 

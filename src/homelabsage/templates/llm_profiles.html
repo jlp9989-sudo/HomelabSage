@@ -1,0 +1,113 @@
+{% extends "_base.html" %}
+{% set nav = "settings" %}
+{% block title %}LLM profiles · Settings · HomelabSage{% endblock %}
+{% block content %}
+
+<div style="margin-bottom:.8rem">
+  <a href="/settings" class="muted" style="text-decoration:none">← Settings</a>
+  <h2 style="margin:.4rem 0">LLM profiles</h2>
+  <p class="muted" style="margin-top:.2rem">
+    Define multiple named LLM configs (one per provider or per model) and switch
+    the active one from the dashboard or here. The legacy single <code>llm</code>
+    config still works as a fallback when no profile is active.
+  </p>
+</div>
+
+{% if flash %}<div class="flash success">{{ flash }}</div>{% endif %}
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+<h3 style="margin-top:1.5rem">Existing profiles</h3>
+{% if profiles %}
+<table>
+  <thead><tr>
+    <th>Name</th><th>Provider</th><th>Endpoint</th><th>Model</th><th></th>
+  </tr></thead>
+  <tbody>
+  {% for name, p in profiles.items() %}
+    <tr>
+      <td>
+        <code>{{ name }}</code>
+        {% if active == name %}<span class="override-badge" style="margin-left:.4rem">active</span>{% endif %}
+      </td>
+      <td><code>{{ p.provider }}</code></td>
+      <td><code style="font-size:.8em">{{ p.endpoint }}</code></td>
+      <td><code>{{ p.model }}</code></td>
+      <td class="actions" style="white-space:nowrap">
+        <a class="btn ghost" href="/settings/llm/profiles?edit={{ name }}">Edit</a>
+        {% if active != name and overlay_writable %}
+          <form method="post" action="/settings/llm/profiles/{{ name }}/activate">
+            <button type="submit">Make active</button>
+          </form>
+        {% endif %}
+        {% if overlay_writable %}
+          <form method="post" action="/settings/llm/profiles/{{ name }}/delete"
+                onsubmit="return confirm('Delete profile {{ name }}?')">
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No profiles yet. Add one below.</p>
+{% endif %}
+
+<h3 style="margin-top:1.5rem">
+  {% if edit_is_new and edit_name %}Add profile: <code>{{ edit_name }}</code>
+  {% elif edit_is_new %}Add new profile
+  {% else %}Edit profile: <code>{{ edit_name }}</code>{% endif %}
+</h3>
+
+{% if overlay_writable %}
+<form method="post" action="/settings/llm/profiles/save">
+  <div class="field">
+    <div class="field-head">
+      <label for="f-__profile_name">Profile name</label>
+      <span class="field-type">required · letters / digits / - / _</span>
+    </div>
+    <input type="text" id="f-__profile_name" name="__profile_name"
+           value="{{ edit_name }}"
+           {% if not edit_is_new %}readonly{% endif %}
+           placeholder="e.g. halo, groq, gemini-flash">
+  </div>
+
+  {% for f in edit_fields %}
+    <div class="field">
+      <div class="field-head">
+        <label for="f-{{ f.name }}">{{ f.title }}</label>
+        <span class="field-type">{{ f.type }}{% if f.is_secret %} · secret{% endif %}</span>
+      </div>
+      {% if f.description %}<div class="field-help">{{ f.description }}</div>{% endif %}
+
+      {% if f.widget == "cron" %}
+        {% include "_widget_cron.html" %}
+      {% elif f.is_bool %}
+        <input type="hidden" name="{{ f.name }}" value="false">
+        <label style="display:flex; gap:.5rem; align-items:center; cursor:pointer">
+          <input type="checkbox" id="f-{{ f.name }}" name="{{ f.name }}" value="true"
+                 {% if f.bool_value %}checked{% endif %}>
+          <span class="muted">currently <code>{{ f.bool_value }}</code></span>
+        </label>
+      {% elif f.is_secret %}
+        <input type="password" id="f-{{ f.name }}" name="{{ f.name }}"
+               value="" placeholder="{{ f.placeholder }}" autocomplete="off">
+      {% elif f.is_int %}
+        <input type="number" id="f-{{ f.name }}" name="{{ f.name }}" value="{{ f.value }}">
+      {% else %}
+        <input type="text" id="f-{{ f.name }}" name="{{ f.name }}" value="{{ f.value }}">
+      {% endif %}
+    </div>
+  {% endfor %}
+
+  <div class="form-toolbar">
+    <button type="submit">{% if edit_is_new %}Add profile{% else %}Save changes{% endif %}</button>
+    <a class="btn ghost" href="/settings/llm/profiles">Cancel</a>
+  </div>
+</form>
+{% else %}
+<div class="flash error">Read-only mode — no writable config path.</div>
+{% endif %}
+
+{% endblock %}
