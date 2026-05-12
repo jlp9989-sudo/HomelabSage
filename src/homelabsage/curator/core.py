@@ -1,101 +1,33 @@
-"""Curator — turns each running container into a written Markdown note.
-
-The curator complements the analyzer side of HomelabSage. The analyzer consumes
-the user's notes when judging upcoming updates. The curator's job is to MAKE
-those notes in the first place, so the next analyzer run has something to read.
-
-Design choices for the MVP:
-  - One note per container, written to `curator.output_dir` (defaults to
-    `notes.notes_dir` so the analyzer picks them up automatically).
-  - The note's filename is `{container_name}.md`.
-  - Each generated note ends with a deterministic footer marker like
-    `<!-- curator: <container>@<image_digest_short> -->`.
-  - Dedup rules on re-runs:
-      * footer present + same digest    → skip (already current).
-      * footer present + digest changed → regenerate (image rebuilt).
-      * file exists without footer      → skip (user wrote it by hand).
-      * `--force` bypasses all of the above.
-  - The prompt template is configurable via `curator.prompt_template_path`.
-    Built-in default is intentionally provider-agnostic — no JSON mode, no
-    function calling, no model-specific phrasing. Plain instructions only.
-"""
+"""Curator orchestrator: discovery, snapshot, prompt assembly, dedup, write."""
 
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import docker
 from docker.models.containers import Container
 
-from .config import CuratorConfig, DockerSourceConfig
-from .github import list_releases
-from .llm import LLMClient
-from .plugins.docker import DockerPlugin
+from ..config import CuratorConfig, DockerSourceConfig
+from ..github import list_releases
+from ..llm import LLMClient
+from ..plugins.docker import DockerPlugin
+from .helpers import (
+    FOOTER_RE,
+    digest_short,
+    existing_footer,
+    filter_labels,
+    format_mounts,
+    format_ports,
+    redact_env,
+    safe_filename,
+    strip_fences,
+    truncate,
+)
+from .prompts import DEFAULT_PROMPT_TEMPLATE, SafePromptDict
 
 log = logging.getLogger(__name__)
-
-
-# ─── Public surface ──────────────────────────────────────────────────────
-
-
-PROMPT_PLACEHOLDERS: frozenset[str] = frozenset(
-    {
-        "container_name",
-        "image",
-        "repo",
-        "current_version",
-        "ports",
-        "mounts",
-        "env_vars",
-        "labels",
-        "release_notes",
-        "style_examples",
-    }
-)
-
-
-DEFAULT_PROMPT_TEMPLATE = """\
-You are documenting a service running in the user's homelab. Your job is to write a short Markdown note that captures the important facts about this container so a future maintainer (or another tool) can read it in under a minute.
-
-Rules for the note:
-
-1. Open with ONE sentence stating the PURPOSE of this service for the user (the "why" it exists), not what its software does in general.
-2. Then add 2 to 5 short bullet points. Each bullet should be a fact a future maintainer would actually need:
-   - Version pins, versionlocks, or specific versions known to be broken
-   - Critical environment variables, mount paths, or ports
-   - Dependencies on other services in the homelab
-   - Known traps, workarounds, or quirks
-3. Do not restate facts that `docker inspect` would already show (image name, full port list, full env list). Only mention them if they carry a non-obvious meaning.
-4. You may group bullets under `## Section Name` headers if it helps reading. Headers are optional.
-5. Keep the total note under 30 lines.
-6. Output ONLY the Markdown body. No code fences, no preamble, no closing remarks.
-7. If you do not have enough information to write the PURPOSE sentence, write exactly this single line and stop: `(no purpose stated yet — fill in)`. Do not invent reasons.
-8. NEVER invent facts. Do not assign meaning to container name suffixes, image tag variants, env var values, or settings unless the inputs above explicitly state that meaning. If the inputs do not support a bullet, omit the bullet entirely — fewer bullets are better than speculation. In particular:
-   - Do not guess what a name suffix like `-pnp`, `-lts`, `-edge`, etc. means.
-   - Do not speculate about whether a setting is "overridden", "unused", "ignored", or "deprecated" without evidence in the inputs.
-   - Do not invent network behavior, security posture, or integration details that are not in the inputs.
-9. NEVER quote specific version numbers, release dates, PR numbers, issue numbers, or commit hashes unless they appear verbatim in the inputs above (in the `# Container facts` block as `current version`, or inside the `# Recent upstream releases` block). Do not extrapolate "the next version", "the latest release", or "released on <date>" — if the input says current version is 2.19.5 and the recent releases block is empty, the only honest statement is "running 2.19.5; no upstream releases visible". Never compute a "+1 minor" or guess a future tag.
-
-# Container facts
-- name: {container_name}
-- image: {image}
-- repo: {repo}
-- current version: {current_version}
-- ports (published): {ports}
-- mounts: {mounts}
-- environment variables (secrets redacted): {env_vars}
-- labels of interest: {labels}
-
-# Recent upstream releases
-{release_notes}
-
-# Style examples from the user (study the tone and structure, do not copy the content)
-{style_examples}
-"""
 
 
 @dataclass
@@ -122,134 +54,6 @@ class CurateResult:
     path: Path | None = None
     body: str | None = None
     note: str | None = None  # human-readable reason, optional
-
-
-# ─── Helpers ─────────────────────────────────────────────────────────────
-
-
-_SECRET_NAME_RE = re.compile(
-    r"(token|key|password|secret|auth|credential|dsn|api[_-]?key|access[_-]?key)",
-    re.IGNORECASE,
-)
-
-_FOOTER_RE = re.compile(
-    r"<!--\s*curator:\s*(?P<name>[^@\s]+)@(?P<digest>[A-Za-z0-9]+)\s*-->"
-)
-
-# Labels worth showing the LLM — everything else is noise (auto-generated
-# Docker internals, build metadata, etc).
-_LABEL_ALLOW_PREFIX = (
-    "com.docker.compose.project",
-    "com.docker.compose.service",
-    "org.opencontainers.image.source",
-    "org.opencontainers.image.version",
-    "org.opencontainers.image.title",
-    "homepage.",
-    "net.unraid.docker.",
-    "traefik.",
-    "diun.",
-)
-
-
-def _redact_env(env: list[str]) -> list[str]:
-    """Return env vars with secret-looking values replaced by `[REDACTED]`."""
-    out: list[str] = []
-    for entry in env or []:
-        if "=" not in entry:
-            out.append(entry)
-            continue
-        name, _, value = entry.partition("=")
-        if _SECRET_NAME_RE.search(name):
-            out.append(f"{name}=[REDACTED]")
-        else:
-            out.append(f"{name}={value}")
-    return out
-
-
-def _format_ports(attrs: dict[str, Any]) -> list[str]:
-    """`"8080/tcp -> 0.0.0.0:8080"` style strings; empty list if none."""
-    ports = (attrs.get("NetworkSettings") or {}).get("Ports") or {}
-    out: list[str] = []
-    for container_port, bindings in ports.items():
-        if not bindings:
-            continue
-        for b in bindings:
-            host = f"{b.get('HostIp', '')}:{b.get('HostPort', '')}".lstrip(":")
-            out.append(f"{container_port} -> {host}")
-    return out
-
-
-def _format_mounts(attrs: dict[str, Any]) -> list[str]:
-    """`"<source> -> <destination> (rw|ro)"` per mount."""
-    out: list[str] = []
-    for m in attrs.get("Mounts") or []:
-        src = m.get("Source") or m.get("Name") or "?"
-        dst = m.get("Destination") or "?"
-        mode = "ro" if m.get("RW") is False else "rw"
-        out.append(f"{src} -> {dst} ({mode})")
-    return out
-
-
-def _filter_labels(labels: dict[str, str] | None) -> dict[str, str]:
-    if not labels:
-        return {}
-    return {k: v for k, v in labels.items() if k.startswith(_LABEL_ALLOW_PREFIX)}
-
-
-def _digest_short(c: Container) -> str:
-    """First 12 hex chars of the image id, sha256-prefix stripped."""
-    image_id = (c.image.id or "").removeprefix("sha256:")
-    return image_id[:12] or "unknown"
-
-
-def _safe_filename(name: str) -> str:
-    """Filesystem-safe `.md` filename for a container.
-
-    Keep alphanumerics, dot, dash, underscore. Everything else → `_`.
-    """
-    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", name).strip("._-") or "container"
-    return f"{cleaned}.md"
-
-
-def _strip_fences(text: str) -> str:
-    """Drop ```markdown / ``` wrappers some models add despite the instruction."""
-    s = text.strip()
-    if s.startswith("```"):
-        # First fence line: ```, ```markdown, ```md, …
-        first_nl = s.find("\n")
-        if first_nl > 0:
-            s = s[first_nl + 1 :]
-        if s.endswith("```"):
-            s = s[:-3]
-    return s.strip()
-
-
-def _existing_footer(text: str) -> tuple[str, str] | None:
-    """Return `(name, digest)` from the curator footer, or None if absent."""
-    m = _FOOTER_RE.search(text)
-    if not m:
-        return None
-    return m.group("name"), m.group("digest")
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return text[: max_chars - 16] + "\n…[truncated]…"
-
-
-# ─── Curator class ───────────────────────────────────────────────────────
-
-
-class _SafePromptDict(dict):
-    """`str.format_map` helper that leaves unknown `{placeholders}` untouched.
-
-    Lets custom prompt templates ignore placeholders they don't care about
-    without raising KeyError.
-    """
-
-    def __missing__(self, key: str) -> str:
-        return "{" + key + "}"
 
 
 class Curator:
@@ -342,13 +146,13 @@ class Curator:
         return ContainerSnapshot(
             name=c.name,
             image=image_tag,
-            image_digest_short=_digest_short(c),
+            image_digest_short=digest_short(c),
             repo=self._docker_plugin.resolve_repo(c),
             current_version=self._docker_plugin.extract_version(c),
-            ports=_format_ports(attrs),
-            mounts=_format_mounts(attrs),
-            env_vars=_redact_env(env),
-            labels=_filter_labels(labels),
+            ports=format_ports(attrs),
+            mounts=format_mounts(attrs),
+            env_vars=redact_env(env),
+            labels=filter_labels(labels),
         )
 
     # ── Note generation ──
@@ -416,7 +220,7 @@ class Curator:
             labels = "\n  - " + "\n  - ".join(f"{k}={v}" for k, v in snapshot.labels.items())
         else:
             labels = "(none)"
-        values = _SafePromptDict(
+        values = SafePromptDict(
             container_name=snapshot.name,
             image=snapshot.image or "(unknown)",
             repo=snapshot.repo or "(none)",
@@ -425,7 +229,7 @@ class Curator:
             mounts=mounts,
             env_vars=envs,
             labels=labels,
-            release_notes=_truncate(release_notes, self.cfg.max_release_chars),
+            release_notes=truncate(release_notes, self.cfg.max_release_chars),
             style_examples=style_examples,
         )
         return tpl.format_map(values)
@@ -435,7 +239,7 @@ class Curator:
     def _note_path(self, snapshot: ContainerSnapshot) -> Path | None:
         if self.output_dir is None:
             return None
-        return self.output_dir / _safe_filename(snapshot.name)
+        return self.output_dir / safe_filename(snapshot.name)
 
     def _existing_state(self, snapshot: ContainerSnapshot) -> tuple[str, Path | None]:
         """Decide what to do with the existing file (if any).
@@ -453,7 +257,7 @@ class Curator:
             existing = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return ("none", path)
-        footer = _existing_footer(existing)
+        footer = existing_footer(existing)
         if footer is None:
             return ("manual", path)
         _name, digest = footer
@@ -491,10 +295,10 @@ class Curator:
         body_raw = await self.llm.generate_text(prompt)
         if not body_raw:
             return CurateResult(snapshot=snapshot, status="llm_failed", note="LLM returned empty")
-        body = _strip_fences(body_raw)
+        body = strip_fences(body_raw)
         footer = f"<!-- curator: {snapshot.name}@{snapshot.image_digest_short} -->"
         # If the LLM somehow emitted a stale footer, strip it before appending ours.
-        body = _FOOTER_RE.sub("", body).rstrip()
+        body = FOOTER_RE.sub("", body).rstrip()
         final = f"{body}\n\n{footer}\n"
 
         if dry_run:
