@@ -54,6 +54,7 @@ from .routes_settings import (
     _resolve_block,
     _validate_overlay,
 )
+from .routes_settings_test import BLOCK_TEST_ENDPOINTS
 
 log = logging.getLogger(__name__)
 
@@ -240,6 +241,9 @@ def _block_form_context(
         "fields": fields,
         "any_override": bool(local_overrides),
         "overlay_writable": cfg_path is not None,
+        # When set, the form renders a "Test connection" button targeting
+        # this URL. None for blocks that don't talk to an external service.
+        "test_endpoint": BLOCK_TEST_ENDPOINTS.get(block),
     }
 
 

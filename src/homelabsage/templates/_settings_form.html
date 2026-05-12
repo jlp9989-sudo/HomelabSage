@@ -10,6 +10,9 @@
 <div id="block-form">
   {% if flash %}<div class="flash success">{{ flash }}</div>{% endif %}
   {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  {# Placeholder for the connection-test result (HTMX swap target). Kept
+     inside #block-form so a subsequent Save also wipes the test message. #}
+  <div id="test-result"></div>
 
   <form method="post"
         action="/settings/{{ block }}/update"
@@ -89,6 +92,17 @@
         {% endif %}
       {% else %}
         <button type="submit" disabled title="Read-only mode (no writable config path)">Save</button>
+      {% endif %}
+      {% if test_endpoint %}
+        {# Test button hits the saved config — NOT the form's current
+           in-progress values. Tells the user to Save first if they edited. #}
+        <button type="button" class="btn"
+                hx-post="{{ test_endpoint }}"
+                hx-target="#test-result"
+                hx-swap="outerHTML"
+                title="Send one request to the external service using the SAVED config — save your changes first to include them.">
+          Test connection
+        </button>
       {% endif %}
       <a class="btn ghost" href="/settings">Back</a>
     </div>

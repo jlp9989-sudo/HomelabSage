@@ -33,6 +33,7 @@ from .routes_llm_profiles import register_llm_profiles_routes
 from .routes_notes import register_notes_routes
 from .routes_settings import register_settings_routes
 from .routes_settings_html import register_settings_html_routes
+from .routes_settings_test import register_settings_test_routes
 from .routes_updates import register_updates_routes
 
 log = logging.getLogger(__name__)
@@ -76,6 +77,10 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
     # which include a catch-all `/settings/{block:path}` that would otherwise
     # match `/settings/llm/profiles` and 404 (not a known block).
     register_llm_profiles_routes(app, cfg, cfg_path, env)
+    # The connection-test routes use sibling URLs of the catch-all
+    # `/settings/{block:path}` from settings_html, so they MUST be registered
+    # FIRST — otherwise the catch-all wins and the test endpoints 404.
+    register_settings_test_routes(app, cfg, cfg_path, env)
     register_settings_html_routes(app, cfg, cfg_path, env)
     register_health_routes(app)
 

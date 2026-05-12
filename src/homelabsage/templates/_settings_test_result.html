@@ -1,0 +1,10 @@
+{# Fragment returned by the /settings/.../test endpoints.
+
+   Designed for an HTMX swap into a `#test-result` placeholder inside the
+   settings form. The wrapping `<div id="test-result">` is kept so a second
+   test click swaps the result cleanly without leaving stale chrome.
+#}
+<div id="test-result" class="flash {% if ok %}success{% else %}error{% endif %}">
+  <strong>{% if ok %}✓ Test passed{% else %}✗ Test failed{% endif %}</strong>
+  — {{ message }}
+</div>
