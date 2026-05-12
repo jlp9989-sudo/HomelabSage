@@ -12,6 +12,7 @@ from packaging.version import InvalidVersion, Version
 
 from ..config import DockerSourceConfig
 from ..github import latest_release
+from ..images import find_alternatives
 from ..models import Update
 from . import Plugin
 
@@ -217,6 +218,19 @@ class DockerPlugin(Plugin):
                 )
                 if days is not None and days >= self.cfg.orphan_min_days:
                     ctx["orphan_since_days"] = days
+
+            if self.cfg.find_alternatives and image_tag:
+                try:
+                    alts = await find_alternatives(
+                        image_tag,
+                        description=labels.get(
+                            "org.opencontainers.image.description", ""
+                        ),
+                    )
+                    if alts.candidates:
+                        ctx["alternatives"] = [a.to_context() for a in alts.candidates]
+                except Exception as e:
+                    log.debug("find_alternatives failed for %s: %s", c.name, e)
 
             updates.append(
                 Update(

@@ -64,6 +64,13 @@ class DockerSourceConfig(BaseModel):
     # Update via `context.orphan_since_days`. The analyzer prompt can pick that
     # up to suggest "is this container still needed?". Set to 0 to disable.
     orphan_min_days: int = 30
+    # Look up alternative images on Docker Hub + LSIO and attach them to each
+    # Update's context. Disabled by default — costs 2-3 HTTP calls per
+    # container per scan (Docker Hub search + LSIO catalog + tag enrichment).
+    # When the network is rate-limited or unreachable the call returns empty
+    # and the scan continues normally. See `homelabsage.images.Criteria` for
+    # the per-call thresholds (10x pulls ratio, 90-day freshness, …).
+    find_alternatives: bool = False
 
 
 class HAConfig(BaseModel):

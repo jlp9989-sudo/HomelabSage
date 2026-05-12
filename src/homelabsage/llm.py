@@ -104,6 +104,15 @@ Rules:
   "decide whether this container is still needed; if not, remove it instead of
   upgrading". Do not raise severity solely on orphan status — security CVEs are
   still the only "critical" trigger.
+- If the context block contains "alternatives" (a list of other images that
+  cover the same purpose with higher adoption and recent maintenance), you MAY
+  surface at most ONE of them in "new_features_relevant" or
+  "recommended_action". Cite the alternative's `image` field VERBATIM (do not
+  reformat) and include its `github_url` if present. Never include more than
+  one alternative — listing several is noise, not signal. Skip the suggestion
+  entirely if none of the alternatives is more popular than the current image
+  by a margin you'd describe as "much more" (the gate filter already ensures
+  that, but trust your reading of the data).
 
 # Update
 - Source: {source}

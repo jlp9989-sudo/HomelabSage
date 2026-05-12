@@ -105,9 +105,12 @@ def test_build_prompt_truncates_huge_release_notes():
     # Release notes are capped at 15k chars in the template. We allow a small
     # margin for incidental "A" characters elsewhere in the template literal.
     assert 15000 <= p.count("A") <= 15020
-    # template overhead ~2.5k chars (varies with rule count); bound is intentionally
-    # loose so adding a new rule doesn't fail this test as long as truncation still works
-    assert len(p) < 18500
+    # The bound is total = 15k (capped release notes) + ≤5k (template overhead +
+    # accumulated prompt rules). The point of the check is that release-note
+    # truncation IS happening — without it the prompt would be ≥50k chars.
+    # Bumping the overhead allowance is fine; bumping past the cap (i.e. >20k
+    # total when release_notes were 50k) is not.
+    assert len(p) < 20000
 
 
 # ─── <think> stripper ────────────────────────────────────────────────────
