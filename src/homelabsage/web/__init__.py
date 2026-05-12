@@ -18,9 +18,11 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from .. import __version__
 from ..config import Config
 from ..db import Database
 from ..engine import Engine
@@ -50,7 +52,7 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
     by telling them where to write the `config.user.yaml` overlay. Tests can
     omit it and still exercise everything except those write endpoints.
     """
-    app = FastAPI(title="HomelabSage", version="0.0.1", docs_url=None, redoc_url=None)
+    app = FastAPI(title="HomelabSage", version=__version__, docs_url=None, redoc_url=None)
     db = Database(cfg.storage.database_path)
     engine = Engine(cfg, db, cfg_path=cfg_path)
     editor = NotesEditor(cfg.notes.notes_dir or None)
@@ -86,10 +88,19 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
     register_wizard_routes(app, cfg, cfg_path, env)
     register_health_routes(app)
 
-    # Static assets (HTMX, future CSS sprites). Mounted last so route handlers
-    # win on `/`-rooted paths.
+    # Static assets (HTMX, favicon, future CSS sprites). Mounted last so
+    # route handlers win on `/`-rooted paths.
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    # Browsers request `/favicon.ico` automatically before reading the
+    # `<link rel=icon>` tag. Serve the PNG asset for both URLs to keep the
+    # logs clean and the icon visible on first paint.
+    favicon_png = STATIC_DIR / "favicon.png"
+    if favicon_png.exists():
+        @app.get("/favicon.ico", include_in_schema=False)
+        async def favicon() -> FileResponse:
+            return FileResponse(favicon_png, media_type="image/png")
 
     return app
 

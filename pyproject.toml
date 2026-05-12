@@ -1,6 +1,6 @@
 [project]
 name = "homelabsage"
-version = "0.0.1"
+version = "0.2.0"
 description = "AI-powered homelab analyzer, update tracker and improvement advisor"
 readme = "README.md"
 license = { text = "AGPL-3.0-only" }

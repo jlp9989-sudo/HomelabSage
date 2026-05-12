@@ -1,9 +1,15 @@
-# HomelabSage
+<p align="center">
+  <img src="docs/assets/logo.png" alt="HomelabSage" width="160">
+</p>
 
-[![CI](https://github.com/jlp9989-sudo/HomelabSage/actions/workflows/ci.yml/badge.svg)](https://github.com/jlp9989-sudo/HomelabSage/actions/workflows/ci.yml)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-pre--alpha-orange)](#)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
+<h1 align="center">HomelabSage</h1>
+
+<p align="center">
+  <a href="https://github.com/jlp9989-sudo/HomelabSage/actions/workflows/ci.yml"><img src="https://github.com/jlp9989-sudo/HomelabSage/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
+  <a href="#"><img src="https://img.shields.io/badge/status-pre--alpha-orange" alt="Status"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python"></a>
+</p>
 
 **AI-powered homelab analyzer, update tracker and improvement advisor.**
 

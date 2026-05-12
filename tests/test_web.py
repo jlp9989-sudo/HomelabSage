@@ -58,6 +58,32 @@ def test_healthz_responds(tmp_path):
     assert r.json() == {"ok": True}
 
 
+def test_favicon_served_as_png(tmp_path):
+    """Both the `<link>`-driven `/static/favicon.png` and the implicit
+    browser request to `/favicon.ico` must return the PNG bytes."""
+    app = web.create_app(_cfg(tmp_path))
+    with TestClient(app) as client:
+        r1 = client.get("/static/favicon.png")
+        r2 = client.get("/favicon.ico")
+    assert r1.status_code == 200
+    assert r1.headers["content-type"] == "image/png"
+    assert r1.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert r2.status_code == 200
+    assert r2.headers["content-type"] == "image/png"
+    assert r2.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_base_template_links_favicon(tmp_path):
+    """Browsers honor `<link rel=icon>` over the implicit /favicon.ico
+    fallback, so the link must be present on every rendered page."""
+    app = web.create_app(_cfg(tmp_path))
+    with TestClient(app) as client:
+        r = client.get("/")
+    assert r.status_code == 200
+    assert 'rel="icon"' in r.text
+    assert "/static/favicon.png" in r.text
+
+
 def test_auth_blocks_unauthenticated(tmp_path):
     """When auth is on, the dashboard requires creds; healthz stays open."""
     app = web.create_app(_cfg(tmp_path, auth=True))
