@@ -1,9 +1,16 @@
 """LLM parser must be tolerant of common model misbehaviors:
-markdown fences, prose around JSON, extra fields, wrong severity case…"""
+markdown fences, prose around JSON, extra fields, wrong severity case,
+and inline reasoning blocks (`<think>...</think>`) that some Qwen / Deepseek
+backends emit in the `content` field instead of `reasoning_content`."""
 
 import pytest
 
-from homelabsage.llm import _parse_analysis, _resolve_chat_completions_url, build_prompt
+from homelabsage.llm import (
+    _parse_analysis,
+    _resolve_chat_completions_url,
+    _strip_think_blocks,
+    build_prompt,
+)
 from homelabsage.models import Severity, Update
 
 JSON_GOOD = """{
@@ -83,6 +90,90 @@ def test_build_prompt_truncates_huge_release_notes():
     assert 15000 <= p.count("A") <= 15020
     # template overhead ~2k chars; allow some headroom but keep the bound real
     assert len(p) < 17500
+
+
+# ─── <think> stripper ────────────────────────────────────────────────────
+
+def test_strip_think_passthrough_when_no_tag():
+    txt = "Just a regular response with no special tags."
+    assert _strip_think_blocks(txt) == txt
+
+
+def test_strip_think_passthrough_empty():
+    assert _strip_think_blocks("") == ""
+
+
+def test_strip_think_removes_single_block():
+    raw = (
+        "<think>\nOkay let's tackle this. Container is mealie, "
+        "image ghcr.io/...\n</think>\n\n"
+        "Self-hosted recipe manager for the household."
+    )
+    out = _strip_think_blocks(raw)
+    assert "<think" not in out.lower()
+    assert "Okay let's tackle" not in out
+    assert out == "Self-hosted recipe manager for the household."
+
+
+def test_strip_think_removes_multiple_blocks():
+    raw = (
+        "<think>first reasoning</think>"
+        "Purpose line.\n"
+        "<think>second pass</think>\n"
+        "- bullet one"
+    )
+    out = _strip_think_blocks(raw)
+    assert "<think" not in out.lower()
+    assert "first reasoning" not in out and "second pass" not in out
+    assert "Purpose line." in out
+    assert "- bullet one" in out
+
+
+def test_strip_think_tolerates_attributes():
+    # Some backends emit <think type="reasoning"> or similar.
+    raw = '<think type="reasoning">noise</think>\nReal content'
+    assert _strip_think_blocks(raw) == "Real content"
+
+
+def test_strip_think_is_case_insensitive():
+    raw = "<Think>Pondering</Think>\nAnswer"
+    assert _strip_think_blocks(raw) == "Answer"
+
+
+def test_strip_think_handles_multiline_block():
+    raw = """<think>
+Let me consider:
+- option A
+- option B
+- option C
+The user wants…
+</think>
+
+Final answer here."""
+    out = _strip_think_blocks(raw)
+    assert "<think" not in out.lower()
+    assert "option A" not in out
+    assert out == "Final answer here."
+
+
+def test_strip_think_preserves_json_after_block():
+    """Critical for the analyzer code path: the JSON must survive intact."""
+    raw = '<think>weighing severity</think>\n{"severity":"high","summary":"x"}'
+    out = _strip_think_blocks(raw)
+    assert out == '{"severity":"high","summary":"x"}'
+    # And the parser then accepts it
+    a = _parse_analysis(out)
+    assert a is not None and a.severity is Severity.HIGH
+
+
+def test_strip_think_unclosed_prefix_with_json_after():
+    """Truncated stream: <think> opens, never closes, then real JSON follows."""
+    raw = '<think>started reasoning but stream cut\n{"severity":"high","summary":"x"}'
+    out = _strip_think_blocks(raw)
+    # The prefix regex should eat up to the first '{' so the JSON parser still works.
+    assert out.startswith("{")
+    a = _parse_analysis(out)
+    assert a is not None and a.severity is Severity.HIGH
 
 
 @pytest.mark.parametrize(

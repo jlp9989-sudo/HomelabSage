@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 import httpx
 from pydantic import ValidationError
@@ -16,6 +17,42 @@ from .config import LLMConfig
 from .models import Analysis, Severity, Update
 
 log = logging.getLogger(__name__)
+
+
+# Reasoning models (Deepseek-R1, Qwen3 *-Think, Groq's qwen/qwen3-32b, …) sometimes
+# inline their chain-of-thought as a `<think>...</think>` block in the response
+# `content` field instead of using an out-of-band `reasoning_content`. Without
+# stripping, the entire trace lands in the curator's note or breaks the JSON parser.
+# Be liberal about whitespace and accept malformed close tags defensively.
+_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think\s*>", re.DOTALL | re.IGNORECASE)
+# Defensive: if a model opens <think> but never closes (truncated stream), drop
+# everything up to the first sane downstream content marker so we don't keep
+# pages of reasoning. We only fire this when the unclosed <think> sits at the
+# very beginning of the response, to avoid eating real output.
+_UNCLOSED_THINK_PREFIX_RE = re.compile(
+    r"\A\s*<think\b[^>]*>.*?(?=\n\s*(?:[{\[#\-*]|[A-Z][a-z]))",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _strip_think_blocks(text: str) -> str:
+    """Remove `<think>...</think>` reasoning blocks from an LLM response.
+
+    Behaviour:
+      - Removes every well-formed `<think>...</think>` pair, case-insensitive,
+        attributes tolerated (`<think type="reasoning">`).
+      - If the response opens with an *unclosed* `<think>` tag (truncated
+        stream), drop the prefix up to the next plausible content start.
+      - Trims surrounding whitespace introduced by the removal.
+      - Returns the input unchanged when no tag is present.
+    """
+    if not text or "<think" not in text.lower():
+        return text
+    stripped = _THINK_BLOCK_RE.sub("", text)
+    if "<think" in stripped.lower():
+        # Still has an opener — must be unclosed. Try the defensive prefix cut.
+        stripped = _UNCLOSED_THINK_PREFIX_RE.sub("", stripped)
+    return stripped.strip()
 
 
 PROMPT_TEMPLATE = """\
@@ -134,14 +171,16 @@ class LLMClient:
         self, prompt: str, strict_json: bool, temperature: float = 0.2
     ) -> str:
         if self.cfg.provider == "ollama":
-            return await self._call_ollama(
+            raw = await self._call_ollama(
                 prompt, strict_json=strict_json, temperature=temperature
             )
-        if self.cfg.provider in {"openai", "anthropic"}:
-            return await self._call_openai_compat(
+        elif self.cfg.provider in {"openai", "anthropic"}:
+            raw = await self._call_openai_compat(
                 prompt, strict_json=strict_json, temperature=temperature
             )
-        raise ValueError(f"unknown LLM provider: {self.cfg.provider}")
+        else:
+            raise ValueError(f"unknown LLM provider: {self.cfg.provider}")
+        return _strip_think_blocks(raw)
 
     async def _call_ollama(
         self, prompt: str, strict_json: bool, temperature: float
