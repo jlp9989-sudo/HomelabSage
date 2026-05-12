@@ -39,6 +39,8 @@ All of these are additive: they enrich the `Update` payload that the LLM already
 
 Bigger changes. Each one is a multi-day chunk.
 
+- ✅ **Watched repos plugin.** New source (`plugins/github_watched.py`) that analyzes GitHub repos the user explicitly marks for tracking, the same way the docker plugin analyzes running containers. Expands HomelabSage's scope beyond Docker: toolboxes (e.g. `kyuz0/amd-strix-halo-toolboxes`), scripts, dotfiles, firmware repos, anything the user runs in production that isn't a container. Authentication via `GITHUB_TOKEN` (already in `.env.example`); the plugin reuses the existing `homelabsage.github.latest_release` and `repo_metadata` helpers, so the actual scan logic is ~30 lines. The interesting part is **scoping**: we deliberately do NOT auto-import the user's full `starred` or `watching` list (too noisy — most people star things they'll never run). Instead, the user opts in per-repo. Storage: a new `watched_repos` table (owner/name + nickname + active flag + added_at). Management surface lives in the v0.5 UI (`/watched` page: add by `owner/name`, toggle active/inactive, delete) so non-technical users can curate without editing YAML. CLI access via `homelabsage watched add|list|remove|toggle` for power users. Same prompt rules that today fire on `repo_health` apply here without changes — the analyzer already knows what to do with a stale/abandoned repo. ~2 days for the plugin + CLI; the UI piece slots into v0.5 step 7 alongside interview-mode.
+
 - ✅ **CSI mode (post-mortem assistant).** New CLI subcommand `homelabsage csi <container>` that:
   1. Greps SQLite for the latest update applied to that container,
   2. Pulls `docker logs --since=<that timestamp>`,
