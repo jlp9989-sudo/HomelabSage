@@ -28,7 +28,7 @@ from .helpers import (
     strip_fences,
     truncate,
 )
-from .prompts import DEFAULT_PROMPT_TEMPLATE, SafePromptDict
+from .prompts import DEFAULT_PROMPT_TEMPLATE, SUGGESTION_PROMPT_TEMPLATE, SafePromptDict
 
 log = logging.getLogger(__name__)
 
@@ -250,6 +250,50 @@ class Curator:
         )
         return tpl.format_map(values)
 
+    async def generate_suggestion(self, snapshot: ContainerSnapshot) -> str | None:
+        """Best-effort one-sentence guess used to prefill the interview answer.
+
+        Returns None if the LLM declined ("(no guess)"), looped back into
+        the Rule 7 fallback, or produced something obviously empty. The
+        caller persists None as-is so the UI shows an empty textarea.
+        """
+        ports = "\n  - " + "\n  - ".join(snapshot.ports) if snapshot.ports else "(none)"
+        mounts = "\n  - " + "\n  - ".join(snapshot.mounts) if snapshot.mounts else "(none)"
+        envs = "\n  - " + "\n  - ".join(snapshot.env_vars) if snapshot.env_vars else "(none)"
+        if snapshot.labels:
+            labels = "\n  - " + "\n  - ".join(f"{k}={v}" for k, v in snapshot.labels.items())
+        else:
+            labels = "(none)"
+        values = SafePromptDict(
+            container_name=snapshot.name,
+            image=snapshot.image or "(unknown)",
+            repo=snapshot.repo or "(none)",
+            current_version=snapshot.current_version or "(unknown)",
+            ports=ports,
+            mounts=mounts,
+            env_vars=envs,
+            labels=labels,
+        )
+        prompt = SUGGESTION_PROMPT_TEMPLATE.format_map(values)
+        try:
+            raw = await self.llm.generate_text(prompt)
+        except Exception:
+            log.exception("curator: suggestion LLM call failed for %s", snapshot.name)
+            return None
+        if not raw:
+            return None
+        text = strip_fences(raw).strip().strip("`'\"").strip()
+        if not text:
+            return None
+        # The LLM may have emitted the explicit decline marker, or fallen
+        # back into the Rule 7 wording despite this prompt being narrower.
+        # In either case we have nothing useful to prefill with.
+        if text.lower() == "(no guess)" or is_purpose_fallback(text):
+            return None
+        # First sentence only — some models still write a paragraph.
+        first_line = text.splitlines()[0].strip()
+        return first_line or None
+
     # ── State on disk ──
 
     def _note_path(self, snapshot: ContainerSnapshot) -> Path | None:
@@ -321,6 +365,25 @@ class Curator:
         # we have a DB) and let the user answer it. A re-curate with
         # `user_purpose` will skip this path.
         if is_purpose_fallback(body) and not user_purpose:
+            # If the same question is already pending (cron re-run with no
+            # rebuild), skip the suggestion LLM call — the user has the
+            # earlier suggestion already, regenerating wastes ~5s per
+            # container per run.
+            already_pending = False
+            if self.db is not None:
+                existing = [
+                    q
+                    for q in self.db.list_interview_questions()
+                    if q.container_name == snapshot.name
+                    and q.image_digest_short == snapshot.image_digest_short
+                ]
+                already_pending = bool(existing)
+
+            suggestion: str | None = None
+            if not already_pending:
+                # Best-effort: returns None on failure, the UI handles that.
+                suggestion = await self.generate_suggestion(snapshot)
+
             qid: int | None = None
             if self.db is not None:
                 question = (
@@ -332,6 +395,7 @@ class Curator:
                         container_name=snapshot.name,
                         image_digest_short=snapshot.image_digest_short,
                         question_text=question,
+                        suggested_text=suggestion,
                     )
                 )
             return CurateResult(

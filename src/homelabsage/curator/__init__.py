@@ -24,6 +24,7 @@ from .helpers import (
 from .prompts import (
     DEFAULT_PROMPT_TEMPLATE,
     PROMPT_PLACEHOLDERS,
+    SUGGESTION_PROMPT_TEMPLATE,
     SafePromptDict,
 )
 
@@ -49,5 +50,6 @@ __all__ = [
     "Curator",
     "DEFAULT_PROMPT_TEMPLATE",
     "PROMPT_PLACEHOLDERS",
+    "SUGGESTION_PROMPT_TEMPLATE",
     "is_purpose_fallback",
 ]

@@ -24,13 +24,18 @@
       </div>
       <div class="field-help">{{ q.question_text }}</div>
       <form method="post" action="/interview/{{ q.id }}/answer" style="display:flex; flex-direction:column; gap:.5rem">
+        {% if q.suggested_text %}
+          <div style="font-size:.78rem; color:#cbb3ff; display:flex; align-items:center; gap:.4rem">
+            <span>💡 Suggested by LLM — confirm or edit</span>
+          </div>
+        {% endif %}
         <textarea
           name="text"
           class="field-input"
           rows="3"
           placeholder="One short sentence — used as the PURPOSE line of the note."
           required
-        ></textarea>
+        >{{ q.suggested_text or "" }}</textarea>
         <div class="field-actions">
           <button type="submit">Save answer & re-curate</button>
           <button type="submit" formaction="/interview/{{ q.id }}/dismiss" class="ghost">Dismiss</button>

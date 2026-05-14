@@ -66,6 +66,28 @@ Rules for the note:
 """
 
 
+# Used after a Rule 7 fallback to generate a one-sentence guess that prefills
+# the interview answer textarea. Deliberately narrower than the main prompt:
+# we are NOT trying to write the user's note here, just to give them a head
+# start they can confirm or edit. The "Likely" / "Appears to be" framing
+# tells the LLM (and the reader) this is speculation, not asserted fact.
+SUGGESTION_PROMPT_TEMPLATE = """\
+You are helping a homelab user document a service. Based ONLY on the inputs below, write a SINGLE sentence describing what this software typically does. Begin with a hedge word: "Likely", "Appears to be", "Probably". Output the sentence and nothing else — no preamble, no bullets, no markdown, no quotes.
+
+If you genuinely cannot guess from the inputs, output exactly: `(no guess)`
+
+# Container facts
+- name: {container_name}
+- image: {image}
+- repo: {repo}
+- current version: {current_version}
+- ports (published): {ports}
+- mounts: {mounts}
+- environment variables (secrets redacted): {env_vars}
+- labels of interest: {labels}
+"""
+
+
 class SafePromptDict(dict):
     """`str.format_map` helper that leaves unknown `{placeholders}` untouched.
 

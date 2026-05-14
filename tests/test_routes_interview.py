@@ -151,3 +151,31 @@ def test_nav_includes_interview_link(tmp_path):
     with TestClient(app) as client:
         r = client.get("/")
     assert 'href="/interview"' in r.text
+
+
+def test_textarea_prefilled_when_suggestion_present(tmp_path):
+    cfg = _cfg(tmp_path)
+    _seed_question(
+        cfg,
+        container_name="cool-tool",
+        suggested_text="Likely a Telegram bot framework.",
+    )
+    app = web.create_app(cfg)
+    with TestClient(app) as client:
+        r = client.get("/interview")
+    assert r.status_code == 200
+    assert "Likely a Telegram bot framework." in r.text
+    assert "Suggested by LLM" in r.text
+
+
+def test_textarea_empty_when_no_suggestion(tmp_path):
+    cfg = _cfg(tmp_path)
+    _seed_question(cfg, container_name="bare", suggested_text=None)
+    app = web.create_app(cfg)
+    with TestClient(app) as client:
+        r = client.get("/interview")
+    assert r.status_code == 200
+    # The "💡 Suggested by LLM" badge is gated on a non-empty suggestion
+    assert "Suggested by LLM" not in r.text
+    # The textarea is present and has no prefill content (empty between tags)
+    assert "<textarea" in r.text

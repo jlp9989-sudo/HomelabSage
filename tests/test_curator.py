@@ -264,6 +264,181 @@ def test_curate_one_without_db_still_works_on_fallback(tmp_path: Path):
     assert result.interview_question_id is None
 
 
+# ─── Suggestion generation ──────────────────────────────────────────────
+
+
+class _ScriptedLLM:
+    """LLM stub that returns a different body for each call in order.
+
+    Used to differentiate the curator's main prompt response from the
+    follow-up suggestion prompt — the curator calls generate_text twice
+    when a Rule 7 fallback fires (once for the note, once for the guess).
+    """
+
+    def __init__(self, bodies: list[str]) -> None:
+        self.bodies = list(bodies)
+        self.calls: list[str] = []
+
+    def is_enabled(self) -> bool:
+        return True
+
+    async def generate_text(self, prompt: str) -> str:
+        self.calls.append(prompt)
+        if not self.bodies:
+            return ""
+        return self.bodies.pop(0)
+
+
+def test_curate_one_persists_suggestion_with_question(tmp_path: Path):
+    from homelabsage.db import Database
+
+    llm = _ScriptedLLM(
+        [
+            "(no purpose stated yet — fill in)",  # main curate prompt
+            "Likely a Telegram bot framework wrapping LangChain.",  # suggestion
+        ]
+    )
+    db = Database(tmp_path / "state.sqlite")
+    c = Curator(
+        cfg=CuratorConfig(),
+        llm=llm,
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+        db=db,
+    )
+
+    result = asyncio.run(c.curate_one(_snapshot()))
+
+    assert result.status == "interview_pending"
+    pending = db.list_interview_questions()
+    assert len(pending) == 1
+    assert pending[0].suggested_text == (
+        "Likely a Telegram bot framework wrapping LangChain."
+    )
+    # Suggestion prompt must NOT include the heavy Rule 7 instructions.
+    assert any("(no guess)" in p for p in llm.calls)
+
+
+def test_suggestion_skipped_when_question_already_pending(tmp_path: Path):
+    """Cron re-runs against the same image must not waste an LLM call
+    regenerating the suggestion the user has already seen."""
+    from homelabsage.db import Database
+
+    # Only ONE response — the suggestion call would consume a second.
+    # If the optimisation breaks, .pop on an empty list returns "" and the
+    # test still passes; the meaningful check is the call count below.
+    llm = _ScriptedLLM(
+        ["(no purpose stated yet — fill in)"] * 4  # 2 curate + 2 suggestion if buggy
+    )
+    db = Database(tmp_path / "state.sqlite")
+    c = Curator(
+        cfg=CuratorConfig(),
+        llm=llm,
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+        db=db,
+    )
+
+    # First call: 1 curate + 1 suggestion = 2 LLM calls
+    asyncio.run(c.curate_one(_snapshot()))
+    after_first = len(llm.calls)
+
+    # Second call (force=True, same digest): 1 curate + 0 suggestion = 1 call
+    asyncio.run(c.curate_one(_snapshot(), force=True))
+    after_second = len(llm.calls)
+
+    assert after_first == 2
+    assert after_second - after_first == 1, (
+        f"expected exactly one new call (curate only), got {after_second - after_first}"
+    )
+
+
+def test_suggestion_decline_marker_yields_none(tmp_path: Path):
+    from homelabsage.db import Database
+
+    llm = _ScriptedLLM(
+        ["(no purpose stated yet — fill in)", "(no guess)"]
+    )
+    db = Database(tmp_path / "state.sqlite")
+    c = Curator(
+        cfg=CuratorConfig(),
+        llm=llm,
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+        db=db,
+    )
+
+    asyncio.run(c.curate_one(_snapshot()))
+    pending = db.list_interview_questions()
+    assert pending[0].suggested_text is None
+
+
+def test_suggestion_fallback_loop_yields_none(tmp_path: Path):
+    """If the suggestion model also emits the Rule 7 fallback wording, we
+    treat it as 'no useful guess' rather than prefilling with garbage."""
+    from homelabsage.db import Database
+
+    llm = _ScriptedLLM(
+        [
+            "(no purpose stated yet — fill in)",
+            "(no purpose stated yet — fill in)",
+        ]
+    )
+    db = Database(tmp_path / "state.sqlite")
+    c = Curator(
+        cfg=CuratorConfig(),
+        llm=llm,
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+        db=db,
+    )
+    asyncio.run(c.curate_one(_snapshot()))
+    pending = db.list_interview_questions()
+    assert pending[0].suggested_text is None
+
+
+def test_suggestion_first_line_only_kept(tmp_path: Path):
+    """Some models add explanatory paragraphs after the lead sentence — we
+    only show the first line so the textarea stays usable."""
+    from homelabsage.db import Database
+
+    llm = _ScriptedLLM(
+        [
+            "(no purpose stated yet — fill in)",
+            "Likely a search indexer.\n\nIt uses Elasticsearch under the hood.",
+        ]
+    )
+    db = Database(tmp_path / "state.sqlite")
+    c = Curator(
+        cfg=CuratorConfig(),
+        llm=llm,
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+        db=db,
+    )
+    asyncio.run(c.curate_one(_snapshot()))
+    pending = db.list_interview_questions()
+    assert pending[0].suggested_text == "Likely a search indexer."
+
+
+def test_generate_suggestion_returns_none_on_llm_exception(tmp_path: Path):
+    class _BoomLLM:
+        def is_enabled(self) -> bool:
+            return True
+
+        async def generate_text(self, prompt: str) -> str:
+            raise RuntimeError("boom")
+
+    c = Curator(
+        cfg=CuratorConfig(),
+        llm=_BoomLLM(),
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+    )
+    result = asyncio.run(c.generate_suggestion(_snapshot()))
+    assert result is None
+
+
 # ─── Curator state machine ──────────────────────────────────────────────
 
 

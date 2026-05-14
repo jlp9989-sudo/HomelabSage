@@ -418,14 +418,14 @@ def interview_list(
         table.add_column("ID", justify="right")
         table.add_column("Container")
         table.add_column("Status")
-        table.add_column("Question", overflow="fold", max_width=50)
+        table.add_column("Suggestion", overflow="fold", max_width=40)
         table.add_column("Answer", overflow="fold", max_width=40)
         for q in questions:
             table.add_row(
                 str(q.id),
                 q.container_name,
                 q.status.value,
-                q.question_text,
+                q.suggested_text or "[dim](none)[/dim]",
                 (q.answer_text or "")[:140],
             )
         console.print(table)
