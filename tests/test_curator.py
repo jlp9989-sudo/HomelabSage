@@ -439,6 +439,103 @@ def test_generate_suggestion_returns_none_on_llm_exception(tmp_path: Path):
     assert result is None
 
 
+# ─── Enrichment integration ─────────────────────────────────────────────
+
+
+def test_build_prompt_renders_enrichment_sections(tmp_path: Path):
+    from homelabsage.enrichment import Enrichment
+
+    cfg = CuratorConfig()
+    c = Curator(
+        cfg=cfg,
+        llm=_FakeLLM(),
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+    )
+    enr = Enrichment(
+        readme="# Wallos\n\nWallos tracks subscriptions.",
+        docker_hub="A SaaS subscription tracker.",
+        logs="2026-05-14 listening on 0.0.0.0:8282",
+    )
+    prompt = c.build_prompt(_snapshot(), "(none)", "(none)", enrichment=enr)
+
+    assert "Wallos tracks subscriptions." in prompt
+    assert "A SaaS subscription tracker." in prompt
+    assert "listening on 0.0.0.0:8282" in prompt
+    # Section headers must be present so the LLM knows what's what
+    assert "Upstream README excerpt" in prompt
+    assert "Docker Hub description" in prompt
+    assert "Recent container logs" in prompt
+
+
+def test_build_prompt_renders_none_when_enrichment_missing(tmp_path: Path):
+    cfg = CuratorConfig()
+    c = Curator(
+        cfg=cfg,
+        llm=_FakeLLM(),
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+    )
+    prompt = c.build_prompt(_snapshot(), "(none)", "(none)")
+    # No enrichment passed → sections render as "(none)" so the LLM doesn't
+    # see headers with empty bodies.
+    assert "Upstream README excerpt" in prompt
+    assert prompt.count("(none)") >= 3
+
+
+def test_gather_enrichment_respects_flags(tmp_path: Path):
+    cfg = CuratorConfig(
+        fetch_readme=False, fetch_docker_hub=False, include_logs=False
+    )
+    c = Curator(
+        cfg=cfg,
+        llm=_FakeLLM(),
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+    )
+    enr = asyncio.run(c.gather_enrichment(_snapshot()))
+    # Everything disabled — no fetches, no log probe.
+    assert enr.readme is None
+    assert enr.docker_hub is None
+    assert enr.logs is None
+
+
+def test_curate_one_passes_enrichment_to_main_prompt(tmp_path: Path, monkeypatch):
+    """End-to-end: curate_one gathers enrichment and the values end up in
+    the prompt the LLM actually sees."""
+    from homelabsage import curator as curator_module
+
+    async def _fake_readme(repo, *, max_chars=8000, client=None):
+        return "REPO_README_MARKER"
+
+    async def _fake_hub(image, *, max_chars=6000, client=None):
+        return "DOCKER_HUB_MARKER"
+
+    monkeypatch.setattr(curator_module.core, "fetch_github_readme", _fake_readme)
+    monkeypatch.setattr(curator_module.core, "fetch_docker_hub_description", _fake_hub)
+    monkeypatch.setattr(
+        curator_module.core, "fetch_container_logs", lambda *a, **kw: "LOG_MARKER"
+    )
+
+    llm = _FakeLLM("## Purpose\n\nA real container note.")
+    c = Curator(
+        cfg=CuratorConfig(include_logs=True),
+        llm=llm,
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+    )
+    # Bypass the docker SDK probe for logs — gather_enrichment swallows the
+    # exception and the monkeypatched fetch_container_logs returns the marker.
+    asyncio.run(c.curate_one(_snapshot()))
+
+    # The (only) prompt the LLM saw must carry all three enrichment markers.
+    assert llm.calls, "curate_one should have called the LLM"
+    seen = llm.calls[-1]
+    assert "REPO_README_MARKER" in seen
+    assert "DOCKER_HUB_MARKER" in seen
+    assert "LOG_MARKER" in seen
+
+
 # ─── Curator state machine ──────────────────────────────────────────────
 
 

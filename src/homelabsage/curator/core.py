@@ -11,6 +11,12 @@ from docker.models.containers import Container
 
 from ..config import CuratorConfig, DockerSourceConfig
 from ..db import Database
+from ..enrichment import (
+    Enrichment,
+    fetch_container_logs,
+    fetch_docker_hub_description,
+    fetch_github_readme,
+)
 from ..github import list_releases
 from ..llm import LLMClient
 from ..models import InterviewQuestion
@@ -166,6 +172,44 @@ class Curator:
 
     # ── Note generation ──
 
+    async def gather_enrichment(self, snapshot: ContainerSnapshot) -> Enrichment:
+        """Collect README / Docker Hub / logs context for a container.
+
+        Each source is independent; one failure never blocks the others.
+        The two HTTP fetches run concurrently because they hit different
+        hosts. Logs are sync (docker SDK) — runs after to keep the code
+        readable; the savings would be tiny.
+        """
+        import asyncio as _asyncio
+
+        readme_task = (
+            fetch_github_readme(snapshot.repo, max_chars=self.cfg.max_readme_chars)
+            if self.cfg.fetch_readme
+            else _asyncio.sleep(0, result=None)
+        )
+        docker_hub_task = (
+            fetch_docker_hub_description(
+                snapshot.image, max_chars=self.cfg.max_docker_hub_chars
+            )
+            if self.cfg.fetch_docker_hub
+            else _asyncio.sleep(0, result=None)
+        )
+        readme, docker_hub = await _asyncio.gather(readme_task, docker_hub_task)
+
+        logs: str | None = None
+        if self.cfg.include_logs:
+            try:
+                client = self._docker_client()
+                container = client.containers.get(snapshot.name)
+            except Exception:
+                container = None
+            logs = fetch_container_logs(
+                container,
+                tail=self.cfg.log_tail_lines,
+                max_chars=self.cfg.max_logs_chars,
+            )
+        return Enrichment(readme=readme, docker_hub=docker_hub, logs=logs)
+
     async def fetch_release_context(self, repo: str | None) -> str:
         """Concatenate the bodies of the N most recent releases, capped."""
         if not repo or self.cfg.recent_releases <= 0:
@@ -213,6 +257,39 @@ class Curator:
             parts.append(f"### {p.name}\n{p.read_text(encoding='utf-8')}")
         return "\n\n".join(parts) if parts else "(none provided)"
 
+    def _base_values(
+        self,
+        snapshot: ContainerSnapshot,
+        enrichment: Enrichment | None = None,
+    ) -> SafePromptDict:
+        """Build the snapshot-derived fields that both prompts share.
+
+        Centralised so the main note prompt and the suggestion prompt see
+        the same readme / docker hub / logs sections — no risk of one
+        drifting from the other.
+        """
+        ports = "\n  - " + "\n  - ".join(snapshot.ports) if snapshot.ports else "(none)"
+        mounts = "\n  - " + "\n  - ".join(snapshot.mounts) if snapshot.mounts else "(none)"
+        envs = "\n  - " + "\n  - ".join(snapshot.env_vars) if snapshot.env_vars else "(none)"
+        if snapshot.labels:
+            labels = "\n  - " + "\n  - ".join(f"{k}={v}" for k, v in snapshot.labels.items())
+        else:
+            labels = "(none)"
+        enr = enrichment or Enrichment()
+        return SafePromptDict(
+            container_name=snapshot.name,
+            image=snapshot.image or "(unknown)",
+            repo=snapshot.repo or "(none)",
+            current_version=snapshot.current_version or "(unknown)",
+            ports=ports,
+            mounts=mounts,
+            env_vars=envs,
+            labels=labels,
+            readme_excerpt=enr.readme or "(none)",
+            docker_hub_description=enr.docker_hub or "(none)",
+            recent_logs=enr.logs or "(none)",
+        )
+
     def build_prompt(
         self,
         snapshot: ContainerSnapshot,
@@ -220,60 +297,36 @@ class Curator:
         style_examples: str,
         template: str | None = None,
         user_purpose: str | None = None,
+        enrichment: Enrichment | None = None,
     ) -> str:
         """Render the prompt template with the snapshot data.
 
         `user_purpose`, when supplied, is the user's verbatim answer to a
         prior interview question. The template's Rule 7 exception ensures
         the LLM uses it as the PURPOSE sentence and skips the fallback.
+
+        `enrichment`, when supplied, fills the README / Docker Hub / logs
+        sections. Each field is optional; missing sources render "(none)".
         """
         tpl = template if template is not None else self.load_template()
-        ports = "\n  - " + "\n  - ".join(snapshot.ports) if snapshot.ports else "(none)"
-        mounts = "\n  - " + "\n  - ".join(snapshot.mounts) if snapshot.mounts else "(none)"
-        envs = "\n  - " + "\n  - ".join(snapshot.env_vars) if snapshot.env_vars else "(none)"
-        if snapshot.labels:
-            labels = "\n  - " + "\n  - ".join(f"{k}={v}" for k, v in snapshot.labels.items())
-        else:
-            labels = "(none)"
-        values = SafePromptDict(
-            container_name=snapshot.name,
-            image=snapshot.image or "(unknown)",
-            repo=snapshot.repo or "(none)",
-            current_version=snapshot.current_version or "(unknown)",
-            ports=ports,
-            mounts=mounts,
-            env_vars=envs,
-            labels=labels,
-            release_notes=truncate(release_notes, self.cfg.max_release_chars),
-            style_examples=style_examples,
-            user_purpose=(user_purpose or "").strip() or "(none provided)",
-        )
+        values = self._base_values(snapshot, enrichment)
+        values["release_notes"] = truncate(release_notes, self.cfg.max_release_chars)
+        values["style_examples"] = style_examples
+        values["user_purpose"] = (user_purpose or "").strip() or "(none provided)"
         return tpl.format_map(values)
 
-    async def generate_suggestion(self, snapshot: ContainerSnapshot) -> str | None:
+    async def generate_suggestion(
+        self,
+        snapshot: ContainerSnapshot,
+        enrichment: Enrichment | None = None,
+    ) -> str | None:
         """Best-effort one-sentence guess used to prefill the interview answer.
 
         Returns None if the LLM declined ("(no guess)"), looped back into
         the Rule 7 fallback, or produced something obviously empty. The
         caller persists None as-is so the UI shows an empty textarea.
         """
-        ports = "\n  - " + "\n  - ".join(snapshot.ports) if snapshot.ports else "(none)"
-        mounts = "\n  - " + "\n  - ".join(snapshot.mounts) if snapshot.mounts else "(none)"
-        envs = "\n  - " + "\n  - ".join(snapshot.env_vars) if snapshot.env_vars else "(none)"
-        if snapshot.labels:
-            labels = "\n  - " + "\n  - ".join(f"{k}={v}" for k, v in snapshot.labels.items())
-        else:
-            labels = "(none)"
-        values = SafePromptDict(
-            container_name=snapshot.name,
-            image=snapshot.image or "(unknown)",
-            repo=snapshot.repo or "(none)",
-            current_version=snapshot.current_version or "(unknown)",
-            ports=ports,
-            mounts=mounts,
-            env_vars=envs,
-            labels=labels,
-        )
+        values = self._base_values(snapshot, enrichment)
         prompt = SUGGESTION_PROMPT_TEMPLATE.format_map(values)
         try:
             raw = await self.llm.generate_text(prompt)
@@ -351,8 +404,13 @@ class Curator:
 
         release_notes = await self.fetch_release_context(snapshot.repo)
         style_examples = self.load_style_examples()
+        enrichment = await self.gather_enrichment(snapshot)
         prompt = self.build_prompt(
-            snapshot, release_notes, style_examples, user_purpose=user_purpose
+            snapshot,
+            release_notes,
+            style_examples,
+            user_purpose=user_purpose,
+            enrichment=enrichment,
         )
 
         body_raw = await self.llm.generate_text(prompt)
@@ -382,7 +440,8 @@ class Curator:
             suggestion: str | None = None
             if not already_pending:
                 # Best-effort: returns None on failure, the UI handles that.
-                suggestion = await self.generate_suggestion(snapshot)
+                # Reuse the enrichment we already gathered for the main prompt.
+                suggestion = await self.generate_suggestion(snapshot, enrichment)
 
             qid: int | None = None
             if self.db is not None:

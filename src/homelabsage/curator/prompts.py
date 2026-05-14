@@ -19,6 +19,9 @@ PROMPT_PLACEHOLDERS: frozenset[str] = frozenset(
         "release_notes",
         "style_examples",
         "user_purpose",
+        "readme_excerpt",
+        "docker_hub_description",
+        "recent_logs",
     }
 )
 
@@ -58,6 +61,15 @@ Rules for the note:
 # Recent upstream releases
 {release_notes}
 
+# Upstream README excerpt (authoritative description of the software)
+{readme_excerpt}
+
+# Docker Hub description (fallback when no README is available)
+{docker_hub_description}
+
+# Recent container logs (live signal — last lines stdout+stderr)
+{recent_logs}
+
 # User-provided purpose (authoritative — overrides Rule 7 fallback)
 {user_purpose}
 
@@ -85,6 +97,15 @@ If you genuinely cannot guess from the inputs, output exactly: `(no guess)`
 - mounts: {mounts}
 - environment variables (secrets redacted): {env_vars}
 - labels of interest: {labels}
+
+# Upstream README excerpt
+{readme_excerpt}
+
+# Docker Hub description
+{docker_hub_description}
+
+# Recent container logs
+{recent_logs}
 """
 
 
