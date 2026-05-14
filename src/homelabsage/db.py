@@ -11,7 +11,15 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from .models import Analysis, AnalyzedUpdate, Severity, Update, UpdateStatus
+from .models import (
+    Analysis,
+    AnalyzedUpdate,
+    InterviewQuestion,
+    InterviewStatus,
+    Severity,
+    Update,
+    UpdateStatus,
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS updates (
@@ -35,6 +43,20 @@ CREATE TABLE IF NOT EXISTS updates (
 CREATE INDEX IF NOT EXISTS idx_updates_status   ON updates(status);
 CREATE INDEX IF NOT EXISTS idx_updates_source   ON updates(source);
 CREATE INDEX IF NOT EXISTS idx_updates_severity ON updates(severity);
+
+CREATE TABLE IF NOT EXISTS interview_questions (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    container_name     TEXT NOT NULL,
+    image_digest_short TEXT NOT NULL,
+    question_text      TEXT NOT NULL,
+    answer_text        TEXT,
+    status             TEXT NOT NULL DEFAULT 'pending',
+    created_at         TEXT NOT NULL,
+    answered_at        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_interview_status    ON interview_questions(status);
+CREATE INDEX IF NOT EXISTS idx_interview_container ON interview_questions(container_name);
 """
 
 
@@ -140,6 +162,91 @@ class Database:
             "UPDATE updates SET status = ? WHERE id = ?", (status.value, update_id)
         )
 
+    # ─── interview questions ────────────────────────────────────
+
+    def add_interview_question(self, q: InterviewQuestion) -> int:
+        """Insert a pending question and return its assigned id.
+
+        If a pending question already exists for the same `(container_name,
+        image_digest_short)` pair, return its id instead of creating a
+        duplicate. The caller should not have to dedupe.
+        """
+        existing = self._conn.execute(
+            """
+            SELECT id FROM interview_questions
+            WHERE container_name = ? AND image_digest_short = ? AND status = 'pending'
+            ORDER BY id DESC LIMIT 1
+            """,
+            (q.container_name, q.image_digest_short),
+        ).fetchone()
+        if existing is not None:
+            return int(existing["id"])
+        cursor = self._conn.execute(
+            """
+            INSERT INTO interview_questions
+                (container_name, image_digest_short, question_text,
+                 answer_text, status, created_at, answered_at)
+            VALUES (?,?,?,?,?,?,?)
+            """,
+            (
+                q.container_name,
+                q.image_digest_short,
+                q.question_text,
+                q.answer_text,
+                q.status.value,
+                q.created_at.isoformat(),
+                q.answered_at.isoformat() if q.answered_at else None,
+            ),
+        )
+        # `lastrowid` is set on the connection for the most recent INSERT.
+        return int(cursor.lastrowid or 0)
+
+    def list_interview_questions(
+        self,
+        status: InterviewStatus | None = InterviewStatus.PENDING,
+        limit: int = 200,
+    ) -> list[InterviewQuestion]:
+        sql = "SELECT * FROM interview_questions WHERE 1=1"
+        args: list[object] = []
+        if status is not None:
+            sql += " AND status = ?"
+            args.append(status.value)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        return [_row_to_question(r) for r in self._conn.execute(sql, args).fetchall()]
+
+    def get_interview_question(self, question_id: int) -> InterviewQuestion | None:
+        row = self._conn.execute(
+            "SELECT * FROM interview_questions WHERE id = ?", (question_id,)
+        ).fetchone()
+        return _row_to_question(row) if row else None
+
+    def answer_interview_question(self, question_id: int, answer_text: str) -> None:
+        """Mark a question as answered. Idempotent — re-answering overwrites."""
+        self._conn.execute(
+            """
+            UPDATE interview_questions
+               SET answer_text = ?,
+                   status      = 'answered',
+                   answered_at = ?
+             WHERE id = ?
+            """,
+            (answer_text, datetime.utcnow().isoformat(), question_id),
+        )
+
+    def dismiss_interview_question(self, question_id: int) -> None:
+        self._conn.execute(
+            "UPDATE interview_questions SET status = 'dismissed' WHERE id = ?",
+            (question_id,),
+        )
+
+    def count_interview_questions(self, status: InterviewStatus) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM interview_questions WHERE status = ?",
+            (status.value,),
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
 
 def _row_to_item(row: sqlite3.Row) -> AnalyzedUpdate:
     update = Update(
@@ -169,4 +276,20 @@ def _row_to_item(row: sqlite3.Row) -> AnalyzedUpdate:
         detected_at=datetime.fromisoformat(row["detected_at"]),
         analyzed_at=datetime.fromisoformat(row["analyzed_at"]) if row["analyzed_at"] else None,
         notion_page_id=page_id,
+    )
+
+
+def _row_to_question(row: sqlite3.Row) -> InterviewQuestion:
+    answered_at = (
+        datetime.fromisoformat(row["answered_at"]) if row["answered_at"] else None
+    )
+    return InterviewQuestion(
+        id=int(row["id"]),
+        container_name=row["container_name"],
+        image_digest_short=row["image_digest_short"],
+        question_text=row["question_text"],
+        answer_text=row["answer_text"],
+        status=InterviewStatus(row["status"]),
+        created_at=datetime.fromisoformat(row["created_at"]),
+        answered_at=answered_at,
     )

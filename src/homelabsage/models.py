@@ -32,6 +32,14 @@ class UpdateStatus(StrEnum):
     FAILED = "failed"
 
 
+class InterviewStatus(StrEnum):
+    """Tracking state of a curator interview question."""
+
+    PENDING = "pending"
+    ANSWERED = "answered"
+    DISMISSED = "dismissed"
+
+
 class Update(BaseModel):
     """A single available update detected by a plugin.
 
@@ -83,3 +91,25 @@ class AnalyzedUpdate(BaseModel):
     def id(self) -> str:
         """Stable identifier across runs: source + subject + new_version."""
         return f"{self.update.source}:{self.update.subject}:{self.update.new_version}"
+
+
+class InterviewQuestion(BaseModel):
+    """A clarification the curator needs from the user before it can write a
+    useful note for a container.
+
+    Created when the LLM emits the Rule 7 fallback (no purpose stated yet —
+    fill in). `image_digest_short` records which build of the image the
+    question was raised for; if the image is rebuilt later the question stays
+    valid (the purpose typically does not depend on the image hash) but the
+    answer is invalidated and a fresh question is added if the new run also
+    fails Rule 7.
+    """
+
+    id: int | None = None
+    container_name: str
+    image_digest_short: str
+    question_text: str
+    answer_text: str | None = None
+    status: InterviewStatus = InterviewStatus.PENDING
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    answered_at: datetime | None = None

@@ -12,6 +12,8 @@ from homelabsage.db import Database
 from homelabsage.models import (
     Analysis,
     AnalyzedUpdate,
+    InterviewQuestion,
+    InterviewStatus,
     Severity,
     Update,
     UpdateStatus,
@@ -141,3 +143,134 @@ def test_list_filters_by_status(tmp_path):
 
     assert {i.update.subject for i in db.list(status=UpdateStatus.ANALYZED)} == {"b"}
     assert len(db.list()) == 3
+
+
+# ─── interview_questions ────────────────────────────────────────
+
+
+def _make_question(**overrides) -> InterviewQuestion:
+    base = {
+        "container_name": "openclaw",
+        "image_digest_short": "abc123def456",
+        "question_text": "What is the purpose of openclaw in your homelab?",
+    }
+    base.update(overrides)
+    return InterviewQuestion(**base)
+
+
+def test_add_interview_question_round_trip(tmp_path):
+    db = Database(tmp_path / "state.sqlite")
+    qid = db.add_interview_question(_make_question())
+    assert qid > 0
+
+    back = db.get_interview_question(qid)
+    assert back is not None
+    assert back.container_name == "openclaw"
+    assert back.status is InterviewStatus.PENDING
+    assert back.answer_text is None
+    assert back.answered_at is None
+
+
+def test_add_interview_question_dedupes_pending_for_same_container_image(tmp_path):
+    """If the same `(container, image_digest)` already has a PENDING question,
+    re-adding returns the existing id — no duplicate row."""
+    db = Database(tmp_path / "state.sqlite")
+    q = _make_question()
+    first = db.add_interview_question(q)
+    second = db.add_interview_question(q)
+
+    assert first == second
+    assert len(db.list_interview_questions()) == 1
+
+
+def test_add_creates_new_row_when_image_digest_changes(tmp_path):
+    """A rebuilt image is a different question — the user might have new context."""
+    db = Database(tmp_path / "state.sqlite")
+    first = db.add_interview_question(_make_question(image_digest_short="aaa"))
+    second = db.add_interview_question(_make_question(image_digest_short="bbb"))
+    assert first != second
+    assert len(db.list_interview_questions()) == 2
+
+
+def test_add_creates_new_row_when_previous_was_answered(tmp_path):
+    """An answered question doesn't block a fresh one for the same container —
+    user might want to re-answer for a new image build."""
+    db = Database(tmp_path / "state.sqlite")
+    first = db.add_interview_question(_make_question())
+    db.answer_interview_question(first, "It's a Telegram bot.")
+    second = db.add_interview_question(_make_question())
+    assert first != second
+    assert db.count_interview_questions(InterviewStatus.PENDING) == 1
+    assert db.count_interview_questions(InterviewStatus.ANSWERED) == 1
+
+
+def test_answer_interview_question_marks_answered(tmp_path):
+    db = Database(tmp_path / "state.sqlite")
+    qid = db.add_interview_question(_make_question())
+    db.answer_interview_question(qid, "It's the Hermes Telegram bot.")
+
+    back = db.get_interview_question(qid)
+    assert back is not None
+    assert back.status is InterviewStatus.ANSWERED
+    assert back.answer_text == "It's the Hermes Telegram bot."
+    assert back.answered_at is not None
+
+
+def test_dismiss_interview_question(tmp_path):
+    db = Database(tmp_path / "state.sqlite")
+    qid = db.add_interview_question(_make_question())
+    db.dismiss_interview_question(qid)
+
+    back = db.get_interview_question(qid)
+    assert back.status is InterviewStatus.DISMISSED
+    assert db.count_interview_questions(InterviewStatus.PENDING) == 0
+
+
+def test_list_interview_filters_by_status_default_pending(tmp_path):
+    db = Database(tmp_path / "state.sqlite")
+    pending_id = db.add_interview_question(_make_question(container_name="a"))
+    answered_id = db.add_interview_question(_make_question(container_name="b"))
+    db.answer_interview_question(answered_id, "answer")
+    db.add_interview_question(_make_question(container_name="c"))
+
+    pending = db.list_interview_questions()  # default status=PENDING
+    assert {q.container_name for q in pending} == {"a", "c"}
+    assert all(q.status is InterviewStatus.PENDING for q in pending)
+    assert pending_id in {q.id for q in pending}
+
+
+def test_list_interview_status_none_returns_all(tmp_path):
+    db = Database(tmp_path / "state.sqlite")
+    db.add_interview_question(_make_question(container_name="a"))
+    second = db.add_interview_question(_make_question(container_name="b"))
+    db.dismiss_interview_question(second)
+
+    everything = db.list_interview_questions(status=None)
+    assert len(everything) == 2
+
+
+def test_count_interview_questions_per_status(tmp_path):
+    db = Database(tmp_path / "state.sqlite")
+    a = db.add_interview_question(_make_question(container_name="a"))
+    b = db.add_interview_question(_make_question(container_name="b"))
+    c = db.add_interview_question(_make_question(container_name="c"))
+    db.answer_interview_question(b, "answer")
+    db.dismiss_interview_question(c)
+    _ = a
+
+    assert db.count_interview_questions(InterviewStatus.PENDING) == 1
+    assert db.count_interview_questions(InterviewStatus.ANSWERED) == 1
+    assert db.count_interview_questions(InterviewStatus.DISMISSED) == 1
+
+
+def test_interview_table_idempotent_open(tmp_path):
+    """Opening Database twice on the same path must not error nor lose data."""
+    path = tmp_path / "state.sqlite"
+    db1 = Database(path)
+    qid = db1.add_interview_question(_make_question())
+    db1.close()
+
+    db2 = Database(path)
+    back = db2.get_interview_question(qid)
+    assert back is not None
+    assert back.container_name == "openclaw"
