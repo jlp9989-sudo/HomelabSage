@@ -344,6 +344,25 @@ class CuratorConfig(BaseModel):
     recent_releases: int = 5
     max_release_chars: int = 8000
 
+    # Enrichment knobs — extra context fetched per container before the LLM
+    # is called. Each fetch is best-effort; failures don't break the curate.
+    fetch_readme: bool = Field(
+        True,
+        description="Fetch the upstream repo's README.md (raw.githubusercontent.com) and inject an excerpt into the curator prompt.",
+    )
+    fetch_docker_hub: bool = Field(
+        True,
+        description="When the image lives on Docker Hub, fetch its `full_description` as a fallback context source.",
+    )
+    include_logs: bool = Field(
+        True,
+        description="Include the container's last ~30 log lines as live context. Disable if you don't want logs forwarded to the LLM.",
+    )
+    max_readme_chars: int = 8000
+    max_docker_hub_chars: int = 6000
+    max_logs_chars: int = 3000
+    log_tail_lines: int = 30
+
 
 class Config(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
