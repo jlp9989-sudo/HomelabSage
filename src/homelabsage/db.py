@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS interview_questions (
     container_name     TEXT NOT NULL,
     image_digest_short TEXT NOT NULL,
     question_text      TEXT NOT NULL,
+    suggested_text     TEXT,
     answer_text        TEXT,
     status             TEXT NOT NULL DEFAULT 'pending',
     created_at         TEXT NOT NULL,
@@ -65,6 +66,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(updates)").fetchall()}
     if "notion_page_id" not in cols:
         conn.execute("ALTER TABLE updates ADD COLUMN notion_page_id TEXT")
+
+    # interview_questions may not exist yet on very old DBs (CREATE IF NOT
+    # EXISTS in _SCHEMA above already covers that). Once it exists, ensure
+    # the suggested_text column was added by the v0.4.2 migration — silent
+    # add for installs upgrading from the first interview build.
+    iq_cols = {
+        r[1] for r in conn.execute("PRAGMA table_info(interview_questions)").fetchall()
+    }
+    if iq_cols and "suggested_text" not in iq_cols:
+        conn.execute("ALTER TABLE interview_questions ADD COLUMN suggested_text TEXT")
 
 
 class Database:
@@ -185,13 +196,14 @@ class Database:
             """
             INSERT INTO interview_questions
                 (container_name, image_digest_short, question_text,
-                 answer_text, status, created_at, answered_at)
-            VALUES (?,?,?,?,?,?,?)
+                 suggested_text, answer_text, status, created_at, answered_at)
+            VALUES (?,?,?,?,?,?,?,?)
             """,
             (
                 q.container_name,
                 q.image_digest_short,
                 q.question_text,
+                q.suggested_text,
                 q.answer_text,
                 q.status.value,
                 q.created_at.isoformat(),
@@ -283,11 +295,17 @@ def _row_to_question(row: sqlite3.Row) -> InterviewQuestion:
     answered_at = (
         datetime.fromisoformat(row["answered_at"]) if row["answered_at"] else None
     )
+    # `suggested_text` only exists after the v0.4.2 migration; older rows on
+    # an upgraded DB return None for it. Guard the key access the same way
+    # the updates table does for `notion_page_id`.
+    cols = row.keys()
+    suggested = row["suggested_text"] if "suggested_text" in cols else None
     return InterviewQuestion(
         id=int(row["id"]),
         container_name=row["container_name"],
         image_digest_short=row["image_digest_short"],
         question_text=row["question_text"],
+        suggested_text=suggested,
         answer_text=row["answer_text"],
         status=InterviewStatus(row["status"]),
         created_at=datetime.fromisoformat(row["created_at"]),

@@ -274,3 +274,77 @@ def test_interview_table_idempotent_open(tmp_path):
     back = db2.get_interview_question(qid)
     assert back is not None
     assert back.container_name == "openclaw"
+
+
+def test_suggested_text_round_trip(tmp_path):
+    db = Database(tmp_path / "state.sqlite")
+    qid = db.add_interview_question(
+        _make_question(suggested_text="Likely a Telegram bot framework.")
+    )
+    back = db.get_interview_question(qid)
+    assert back is not None
+    assert back.suggested_text == "Likely a Telegram bot framework."
+
+
+def test_suggested_text_defaults_to_none(tmp_path):
+    db = Database(tmp_path / "state.sqlite")
+    qid = db.add_interview_question(_make_question())
+    back = db.get_interview_question(qid)
+    assert back is not None
+    assert back.suggested_text is None
+
+
+def test_migration_adds_suggested_text_to_pre_v042_db(tmp_path):
+    """First-build interview rows lacked suggested_text. Opening via Database
+    must add the column without dropping any data."""
+    path = tmp_path / "state.sqlite"
+    raw = sqlite3.connect(path)
+    raw.executescript(
+        """
+        CREATE TABLE updates (
+            id              TEXT PRIMARY KEY,
+            source          TEXT NOT NULL,
+            subject         TEXT NOT NULL,
+            current_version TEXT NOT NULL,
+            new_version     TEXT NOT NULL,
+            release_url     TEXT,
+            release_notes   TEXT,
+            context_json    TEXT NOT NULL DEFAULT '{}',
+            severity        TEXT,
+            summary         TEXT,
+            analysis_json   TEXT,
+            status          TEXT NOT NULL,
+            detected_at     TEXT NOT NULL,
+            analyzed_at     TEXT,
+            notion_page_id  TEXT
+        );
+        CREATE TABLE interview_questions (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            container_name     TEXT NOT NULL,
+            image_digest_short TEXT NOT NULL,
+            question_text      TEXT NOT NULL,
+            answer_text        TEXT,
+            status             TEXT NOT NULL DEFAULT 'pending',
+            created_at         TEXT NOT NULL,
+            answered_at        TEXT
+        );
+        """
+    )
+    raw.execute(
+        "INSERT INTO interview_questions"
+        "(container_name,image_digest_short,question_text,status,created_at) "
+        "VALUES('legacy','aaa','what is legacy?','pending','2026-05-13T00:00:00')"
+    )
+    raw.commit()
+    raw.close()
+
+    db = Database(path)
+    cols = {
+        r[1]
+        for r in db._conn.execute("PRAGMA table_info(interview_questions)").fetchall()
+    }
+    assert "suggested_text" in cols
+    pending = db.list_interview_questions()
+    assert len(pending) == 1
+    assert pending[0].container_name == "legacy"
+    assert pending[0].suggested_text is None  # column added but unset, OK
