@@ -26,7 +26,7 @@ from . import __version__
 from .config import load_config
 from .db import Database
 from .engine import run_blocking
-from .models import UpdateStatus
+from .models import InterviewStatus, UpdateStatus
 
 app = typer.Typer(add_completion=False, help="HomelabSage — AI-powered homelab analyzer.")
 console = Console()
@@ -149,11 +149,13 @@ def curate(
     from .llm import LLMClient
 
     llm = LLMClient(cfg.llm)
+    db = Database(cfg.storage.database_path)
     curator = Curator(
         cfg.curator,
         llm,
         cfg.sources.docker,
         notes_dir=cfg.notes.notes_dir,
+        db=db,
     )
     try:
         snapshots = curator.discover_targets(
@@ -181,6 +183,7 @@ def curate(
                 "skipped_manual": "yellow",
                 "skipped_dry_run": "cyan",
                 "llm_failed": "red",
+                "interview_pending": "magenta",
             }.get(result.status, "white")
             path_str = str(result.path) if result.path else "(no path)"
             console.print(
@@ -192,8 +195,14 @@ def curate(
                 console.print(result.body)
             if result.note:
                 console.print(f"  [dim]{result.note}[/dim]")
+            if result.status == "interview_pending" and result.interview_question_id:
+                console.print(
+                    f"  [magenta]→ run `homelabsage interview answer "
+                    f"{result.interview_question_id} --text \"...\"`[/magenta]"
+                )
     finally:
         curator.close()
+        db.close()
 
 
 def _collect_export_payload(cfg) -> dict:
@@ -369,6 +378,141 @@ def serve(config: Path = CONFIG_OPT, verbose: bool = VERBOSE_OPT) -> None:
 @app.command()
 def version() -> None:
     console.print(__version__)
+
+
+# ─── interview sub-app ──────────────────────────────────────────────────
+
+interview_app = typer.Typer(
+    add_completion=False,
+    help="Manage curator interview questions (Rule 7 fallbacks).",
+    no_args_is_help=True,
+)
+app.add_typer(interview_app, name="interview")
+
+
+@interview_app.command("list")
+def interview_list(
+    config: Path = CONFIG_OPT,
+    status: str = typer.Option(
+        "pending",
+        "--status",
+        "-s",
+        help="Filter by status: pending | answered | dismissed | all.",
+    ),
+    limit: int = typer.Option(50, help="Max rows."),
+) -> None:
+    """List curator interview questions."""
+    cfg = load_config(config)
+    db = Database(cfg.storage.database_path)
+    try:
+        if status == "all":
+            questions = db.list_interview_questions(status=None, limit=limit)
+        else:
+            questions = db.list_interview_questions(
+                status=InterviewStatus(status), limit=limit
+            )
+        if not questions:
+            console.print(f"[dim]No interview questions with status={status}.[/dim]")
+            return
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("ID", justify="right")
+        table.add_column("Container")
+        table.add_column("Status")
+        table.add_column("Question", overflow="fold", max_width=50)
+        table.add_column("Answer", overflow="fold", max_width=40)
+        for q in questions:
+            table.add_row(
+                str(q.id),
+                q.container_name,
+                q.status.value,
+                q.question_text,
+                (q.answer_text or "")[:140],
+            )
+        console.print(table)
+    finally:
+        db.close()
+
+
+@interview_app.command("answer")
+def interview_answer(
+    question_id: int = typer.Argument(..., help="ID of the question to answer."),
+    text: str = typer.Option(..., "--text", "-t", help="Your answer text."),
+    config: Path = CONFIG_OPT,
+    no_recurate: bool = typer.Option(
+        False, "--no-recurate", help="Just record the answer, don't regenerate the note."
+    ),
+    verbose: bool = VERBOSE_OPT,
+) -> None:
+    """Answer an interview question and re-curate the container's note."""
+    _setup_logging(verbose)
+    cfg = load_config(config)
+    db = Database(cfg.storage.database_path)
+    try:
+        q = db.get_interview_question(question_id)
+        if q is None:
+            console.print(f"[red]No question with id={question_id}.[/red]")
+            raise typer.Exit(code=1)
+        db.answer_interview_question(question_id, text)
+        console.print(
+            f"[green]Recorded answer[/green] for question #{question_id} "
+            f"(container={q.container_name})."
+        )
+        if no_recurate:
+            return
+
+        # Re-curate that one container with user_purpose injected.
+        from .curator import Curator
+        from .llm import LLMClient
+
+        llm = LLMClient(cfg.llm)
+        curator = Curator(
+            cfg.curator,
+            llm,
+            cfg.sources.docker,
+            notes_dir=cfg.notes.notes_dir,
+            db=db,
+        )
+        try:
+            snapshots = curator.discover_targets(only=[q.container_name])
+            if not snapshots:
+                console.print(
+                    f"[yellow]Container {q.container_name} not running — "
+                    f"answer recorded but note not regenerated.[/yellow]"
+                )
+                return
+            result = asyncio.run(
+                curator.curate_one(snapshots[0], force=True, user_purpose=text)
+            )
+            console.print(
+                f"[green]Re-curated[/green] {q.container_name} → status={result.status}"
+            )
+            if result.path:
+                console.print(f"  {result.path}")
+        finally:
+            curator.close()
+    finally:
+        db.close()
+
+
+@interview_app.command("dismiss")
+def interview_dismiss(
+    question_id: int = typer.Argument(..., help="ID of the question to dismiss."),
+    config: Path = CONFIG_OPT,
+) -> None:
+    """Dismiss a question — the curator will not ask again until the image rebuilds."""
+    cfg = load_config(config)
+    db = Database(cfg.storage.database_path)
+    try:
+        q = db.get_interview_question(question_id)
+        if q is None:
+            console.print(f"[red]No question with id={question_id}.[/red]")
+            raise typer.Exit(code=1)
+        db.dismiss_interview_question(question_id)
+        console.print(
+            f"[green]Dismissed[/green] question #{question_id} (container={q.container_name})."
+        )
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
