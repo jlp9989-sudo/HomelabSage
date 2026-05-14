@@ -1,0 +1,81 @@
+{% extends "_base.html" %}
+{% set nav = "interview" %}
+{% block title %}Interview · HomelabSage{% endblock %}
+{% block header_actions %}
+  <span class="muted">{{ pending|length }} pending · {{ answered|length }} answered · {{ dismissed|length }} dismissed</span>
+{% endblock %}
+{% block content %}
+
+<p class="muted">
+  When the curator can't infer a container's purpose from its image, env vars and labels,
+  it asks you here. Your answer becomes the lead sentence of that container's note,
+  and the rest is regenerated automatically.
+</p>
+
+<h2 style="font-size:1.05rem; margin-top:1.5rem">Pending</h2>
+{% if not pending %}
+  <p class="muted">No pending questions. ✨</p>
+{% else %}
+  {% for q in pending %}
+    <div class="field" style="margin-bottom:1rem">
+      <div class="field-head">
+        <label>{{ q.container_name }}</label>
+        <span class="field-type">image @ {{ q.image_digest_short }}</span>
+      </div>
+      <div class="field-help">{{ q.question_text }}</div>
+      <form method="post" action="/interview/{{ q.id }}/answer" style="display:flex; flex-direction:column; gap:.5rem">
+        <textarea
+          name="text"
+          class="field-input"
+          rows="3"
+          placeholder="One short sentence — used as the PURPOSE line of the note."
+          required
+        ></textarea>
+        <div class="field-actions">
+          <button type="submit">Save answer & re-curate</button>
+          <button type="submit" formaction="/interview/{{ q.id }}/dismiss" class="ghost">Dismiss</button>
+          <span class="muted" style="font-size:.78rem">Re-curate calls the LLM — may take 10-30 seconds.</span>
+        </div>
+      </form>
+    </div>
+  {% endfor %}
+{% endif %}
+
+{% if answered %}
+<h2 style="font-size:1.05rem; margin-top:2rem">Recently answered</h2>
+<table>
+  <thead>
+    <tr><th>Container</th><th>Question</th><th>Your answer</th><th>When</th></tr>
+  </thead>
+  <tbody>
+    {% for q in answered %}
+    <tr>
+      <td><code>{{ q.container_name }}</code></td>
+      <td style="max-width:32ch">{{ q.question_text }}</td>
+      <td style="max-width:36ch">{{ q.answer_text }}</td>
+      <td class="muted">{{ q.answered_at.strftime("%Y-%m-%d %H:%M") if q.answered_at else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if dismissed %}
+<h2 style="font-size:1.05rem; margin-top:2rem">Dismissed</h2>
+<table>
+  <thead>
+    <tr><th>Container</th><th>Question</th><th>When</th></tr>
+  </thead>
+  <tbody>
+    {% for q in dismissed %}
+    <tr>
+      <td><code>{{ q.container_name }}</code></td>
+      <td style="max-width:48ch">{{ q.question_text }}</td>
+      <td class="muted">{{ q.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% endblock %}

@@ -9,6 +9,8 @@
 {% endblock %}
 {% block content %}
 
+<div hx-get="/interview/banner" hx-trigger="load" hx-swap="innerHTML"></div>
+
 {% if show_wizard_banner %}
 <div class="flash" style="background:#1c3850; color:#cfe5ff; border:1px solid #2d4f6f">
   <strong>Welcome 👋</strong>

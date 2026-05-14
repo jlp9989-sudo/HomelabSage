@@ -31,6 +31,7 @@ from .auth import attach_basic_auth
 from .csrf import attach_csrf_guard
 from .lifecycle import register_lifecycle
 from .routes_health import register_health_routes
+from .routes_interview import register_interview_routes
 from .routes_llm_profiles import register_llm_profiles_routes
 from .routes_notes import register_notes_routes
 from .routes_settings import register_settings_routes
@@ -73,6 +74,7 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
 
     register_lifecycle(app, cfg, engine)
     register_updates_routes(app, db, engine, env)
+    register_interview_routes(app, cfg, db, env)
     register_notes_routes(app, editor, env)
     register_settings_routes(app, cfg, cfg_path)
     # LLM profiles owns `/settings/llm/profiles*` and the dashboard switch
