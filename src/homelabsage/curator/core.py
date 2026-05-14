@@ -10,8 +10,10 @@ import docker
 from docker.models.containers import Container
 
 from ..config import CuratorConfig, DockerSourceConfig
+from ..db import Database
 from ..github import list_releases
 from ..llm import LLMClient
+from ..models import InterviewQuestion
 from ..plugins.docker import DockerPlugin
 from .helpers import (
     FOOTER_RE,
@@ -20,6 +22,7 @@ from .helpers import (
     filter_labels,
     format_mounts,
     format_ports,
+    is_purpose_fallback,
     redact_env,
     safe_filename,
     strip_fences,
@@ -50,10 +53,11 @@ class CurateResult:
     """Outcome of a single `Curator.curate_one` call."""
 
     snapshot: ContainerSnapshot
-    status: str  # "written" | "skipped_same_digest" | "skipped_manual" | "skipped_dry_run" | "llm_failed"
+    status: str  # "written" | "skipped_same_digest" | "skipped_manual" | "skipped_dry_run" | "llm_failed" | "interview_pending"
     path: Path | None = None
     body: str | None = None
     note: str | None = None  # human-readable reason, optional
+    interview_question_id: int | None = None  # set when status == "interview_pending"
 
 
 class Curator:
@@ -70,6 +74,7 @@ class Curator:
         llm: LLMClient,
         docker_cfg: DockerSourceConfig,
         notes_dir: str | Path,
+        db: Database | None = None,
     ):
         self.cfg = cfg
         self.llm = llm
@@ -79,6 +84,10 @@ class Curator:
         self.output_dir = Path(out).resolve() if out else None
         self._docker_plugin = DockerPlugin(docker_cfg)
         self._client: docker.DockerClient | None = None
+        # Optional — when present, fallback (Rule 7) detections persist as
+        # interview questions instead of writing a useless note. CLI usage
+        # without a DB still works, just without the interview feature.
+        self.db = db
 
     # ── Lifecycle ──
 
@@ -210,8 +219,14 @@ class Curator:
         release_notes: str,
         style_examples: str,
         template: str | None = None,
+        user_purpose: str | None = None,
     ) -> str:
-        """Render the prompt template with the snapshot data."""
+        """Render the prompt template with the snapshot data.
+
+        `user_purpose`, when supplied, is the user's verbatim answer to a
+        prior interview question. The template's Rule 7 exception ensures
+        the LLM uses it as the PURPOSE sentence and skips the fallback.
+        """
         tpl = template if template is not None else self.load_template()
         ports = "\n  - " + "\n  - ".join(snapshot.ports) if snapshot.ports else "(none)"
         mounts = "\n  - " + "\n  - ".join(snapshot.mounts) if snapshot.mounts else "(none)"
@@ -231,6 +246,7 @@ class Curator:
             labels=labels,
             release_notes=truncate(release_notes, self.cfg.max_release_chars),
             style_examples=style_examples,
+            user_purpose=(user_purpose or "").strip() or "(none provided)",
         )
         return tpl.format_map(values)
 
@@ -273,6 +289,7 @@ class Curator:
         *,
         dry_run: bool = False,
         force: bool = False,
+        user_purpose: str | None = None,
     ) -> CurateResult:
         if self.output_dir is None:
             return CurateResult(
@@ -290,12 +307,42 @@ class Curator:
 
         release_notes = await self.fetch_release_context(snapshot.repo)
         style_examples = self.load_style_examples()
-        prompt = self.build_prompt(snapshot, release_notes, style_examples)
+        prompt = self.build_prompt(
+            snapshot, release_notes, style_examples, user_purpose=user_purpose
+        )
 
         body_raw = await self.llm.generate_text(prompt)
         if not body_raw:
             return CurateResult(snapshot=snapshot, status="llm_failed", note="LLM returned empty")
         body = strip_fences(body_raw)
+
+        # Rule 7 fallback — the LLM gave up on inferring the purpose. Don't
+        # write the useless note; instead persist an interview question (if
+        # we have a DB) and let the user answer it. A re-curate with
+        # `user_purpose` will skip this path.
+        if is_purpose_fallback(body) and not user_purpose:
+            qid: int | None = None
+            if self.db is not None:
+                question = (
+                    f"What is the purpose of `{snapshot.name}` in your homelab? "
+                    "(One short sentence — used as the lead of its note.)"
+                )
+                qid = self.db.add_interview_question(
+                    InterviewQuestion(
+                        container_name=snapshot.name,
+                        image_digest_short=snapshot.image_digest_short,
+                        question_text=question,
+                    )
+                )
+            return CurateResult(
+                snapshot=snapshot,
+                status="interview_pending",
+                path=path,
+                body=body,
+                note="LLM emitted Rule 7 fallback — interview question pending",
+                interview_question_id=qid,
+            )
+
         footer = f"<!-- curator: {snapshot.name}@{snapshot.image_digest_short} -->"
         # If the LLM somehow emitted a stale footer, strip it before appending ours.
         body = FOOTER_RE.sub("", body).rstrip()

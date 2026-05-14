@@ -15,6 +15,7 @@ from .helpers import (
     filter_labels,
     format_mounts,
     format_ports,
+    is_purpose_fallback,
     redact_env,
     safe_filename,
     strip_fences,
@@ -48,4 +49,5 @@ __all__ = [
     "Curator",
     "DEFAULT_PROMPT_TEMPLATE",
     "PROMPT_PLACEHOLDERS",
+    "is_purpose_fallback",
 ]

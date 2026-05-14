@@ -18,6 +18,7 @@ PROMPT_PLACEHOLDERS: frozenset[str] = frozenset(
         "labels",
         "release_notes",
         "style_examples",
+        "user_purpose",
     }
 )
 
@@ -37,7 +38,7 @@ Rules for the note:
 4. You may group bullets under `## Section Name` headers if it helps reading. Headers are optional.
 5. Keep the total note under 30 lines.
 6. Output ONLY the Markdown body. No code fences, no preamble, no closing remarks.
-7. If you do not have enough information to write the PURPOSE sentence, write exactly this single line and stop: `(no purpose stated yet — fill in)`. Do not invent reasons.
+7. If you do not have enough information to write the PURPOSE sentence, write exactly this single line and stop: `(no purpose stated yet — fill in)`. Do not invent reasons. EXCEPTION: if the `# User-provided purpose` block below is non-empty, USE IT VERBATIM as the PURPOSE sentence (Rule 1) — Rule 7 does not apply, do NOT emit the fallback line.
 8. NEVER invent facts. Do not assign meaning to container name suffixes, image tag variants, env var values, or settings unless the inputs above explicitly state that meaning. If the inputs do not support a bullet, omit the bullet entirely — fewer bullets are better than speculation. In particular:
    - Do not guess what a name suffix like `-pnp`, `-lts`, `-edge`, etc. means.
    - Do not speculate about whether a setting is "overridden", "unused", "ignored", or "deprecated" without evidence in the inputs.
@@ -56,6 +57,9 @@ Rules for the note:
 
 # Recent upstream releases
 {release_notes}
+
+# User-provided purpose (authoritative — overrides Rule 7 fallback)
+{user_purpose}
 
 # Style examples from the user (study the tone and structure, do not copy the content)
 {style_examples}

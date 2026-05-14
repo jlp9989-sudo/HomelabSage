@@ -125,3 +125,40 @@ def truncate(text: str, max_chars: int) -> str:
 # Re-export the compiled regex for callers that need to strip stale footers
 # from LLM output before appending a fresh one.
 FOOTER_RE = _FOOTER_RE
+
+
+# Rule 7 of the curator prompt instructs the LLM to emit this literal line
+# (and nothing else) when it can't infer a purpose. The wording in the
+# template uses an em-dash; some models normalise it to a regular dash, drop
+# spaces, or add quotes — accept all of those. The body contract is "first
+# non-empty line is the fallback" — Gemini sometimes appends bullets despite
+# the "stop" instruction, but if the fallback is the lead, the rest is
+# unsupported speculation we should not write to disk anyway.
+_FALLBACK_RE = re.compile(
+    r"""
+    \(?            # opt opening paren
+    \s*
+    no\ purpose\ stated\ yet
+    [\s—–\-:,]+   # em-dash / en-dash / hyphen / punctuation between
+    fill\ in
+    \s*
+    \)?            # opt closing paren
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def is_purpose_fallback(body: str) -> bool:
+    """True if the LLM bailed out with the Rule 7 fallback as its lead.
+
+    Robust to small wording drift (em-dash → dash, missing parens, slight
+    whitespace) and to follow-up bullets the model may add by mistake.
+    """
+    if not body:
+        return False
+    for line in body.splitlines():
+        stripped = line.strip().lstrip("#> *-").strip().strip("`'\"")
+        if not stripped:
+            continue
+        return bool(_FALLBACK_RE.search(stripped))
+    return False

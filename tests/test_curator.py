@@ -20,6 +20,7 @@ from homelabsage.curator import (
     _redact_env,
     _safe_filename,
     _strip_fences,
+    is_purpose_fallback,
 )
 
 # ─── Pure helpers ────────────────────────────────────────────────────────
@@ -90,6 +91,177 @@ def test_existing_footer_returns_none_when_absent():
 def test_default_template_uses_all_documented_placeholders():
     for ph in PROMPT_PLACEHOLDERS:
         assert "{" + ph + "}" in DEFAULT_PROMPT_TEMPLATE, ph
+
+
+# ─── is_purpose_fallback ─────────────────────────────────────────────────
+
+
+def test_fallback_detected_for_exact_rule7_string():
+    assert is_purpose_fallback("(no purpose stated yet — fill in)")
+
+
+def test_fallback_detected_when_followed_by_speculative_bullets():
+    """Gemini sometimes ignores the 'stop' instruction and adds bullets after
+    the fallback. The lead is still the fallback, so the whole note is junk
+    and we should treat it as the trigger."""
+    body = (
+        "(no purpose stated yet — fill in)\n"
+        "\n"
+        "- runs on port 8000\n"
+        "- environment: TZ=Europe/Madrid\n"
+    )
+    assert is_purpose_fallback(body)
+
+
+def test_fallback_detected_with_normal_dash_normalisation():
+    assert is_purpose_fallback("(no purpose stated yet - fill in)")
+    assert is_purpose_fallback("(no purpose stated yet – fill in)")  # en-dash
+
+
+def test_fallback_detected_without_parens():
+    assert is_purpose_fallback("no purpose stated yet — fill in")
+
+
+def test_fallback_detected_when_wrapped_in_quotes_or_backticks():
+    assert is_purpose_fallback("`(no purpose stated yet — fill in)`")
+    assert is_purpose_fallback('"(no purpose stated yet — fill in)"')
+
+
+def test_fallback_skips_blank_leading_lines():
+    body = "\n\n   \n(no purpose stated yet — fill in)\n"
+    assert is_purpose_fallback(body)
+
+
+def test_fallback_not_detected_when_purpose_is_real():
+    body = (
+        "OpenClaw is the personal Telegram bot Hermes.\n\n"
+        "- entrypoint: bot.py\n"
+        "- volume: /opt/openclaw\n"
+    )
+    assert not is_purpose_fallback(body)
+
+
+def test_fallback_not_detected_when_phrase_appears_as_aside():
+    """If the fallback wording is buried in a real note, it does NOT count.
+    Only the lead matters — that's what Rule 7 mandates."""
+    body = (
+        "OpenClaw is the personal Telegram bot Hermes.\n\n"
+        "- previous run logged: '(no purpose stated yet — fill in)' in notes\n"
+    )
+    assert not is_purpose_fallback(body)
+
+
+def test_fallback_not_detected_for_empty_or_whitespace_only():
+    assert not is_purpose_fallback("")
+    assert not is_purpose_fallback("   \n\n\t\n")
+
+
+# ─── Interview integration ──────────────────────────────────────────────
+
+
+def _curator_with_db(tmp_path: Path, llm: _FakeLLM):
+    from homelabsage.db import Database
+
+    db = Database(tmp_path / "state.sqlite")
+    cfg = CuratorConfig()
+    return Database, db, Curator(
+        cfg=cfg,
+        llm=llm,
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+        db=db,
+    )
+
+
+def test_curate_one_persists_interview_question_on_fallback(tmp_path: Path):
+    from homelabsage.models import InterviewStatus
+
+    llm = _FakeLLM("(no purpose stated yet — fill in)")
+    _Database, db, c = _curator_with_db(tmp_path, llm)
+    snap = _snapshot()
+
+    result = asyncio.run(c.curate_one(snap))
+
+    assert result.status == "interview_pending"
+    assert result.interview_question_id is not None
+    # No note file written
+    assert result.path is not None
+    assert not result.path.exists()
+
+    pending = db.list_interview_questions()
+    assert len(pending) == 1
+    assert pending[0].container_name == snap.name
+    assert pending[0].image_digest_short == snap.image_digest_short
+    assert pending[0].status is InterviewStatus.PENDING
+
+
+def test_curate_one_repeated_fallback_does_not_duplicate_questions(tmp_path: Path):
+    """Cron runs daily — same fallback shouldn't pile up rows."""
+    llm = _FakeLLM("(no purpose stated yet — fill in)")
+    _Database, db, c = _curator_with_db(tmp_path, llm)
+    snap = _snapshot()
+
+    first = asyncio.run(c.curate_one(snap))
+    second = asyncio.run(c.curate_one(snap, force=True))
+
+    assert first.interview_question_id == second.interview_question_id
+    assert len(db.list_interview_questions()) == 1
+
+
+def test_curate_one_with_user_purpose_skips_fallback_path(tmp_path: Path):
+    """When a user has answered, re-curate must inject the purpose into the
+    prompt and write the note, even if the (mocked) LLM still returns the
+    fallback string. The presence of `user_purpose` short-circuits the
+    interview detection by design — the user already told us the purpose."""
+    llm = _FakeLLM("OpenClaw is the Hermes Telegram bot.\n\n- entrypoint: bot.py\n")
+    _Database, db, c = _curator_with_db(tmp_path, llm)
+    snap = _snapshot()
+
+    result = asyncio.run(c.curate_one(snap, user_purpose="My personal Telegram bot."))
+
+    assert result.status == "written"
+    assert result.path is not None
+    assert result.path.exists()
+    assert "OpenClaw is the Hermes Telegram bot." in result.body
+    # The fake LLM recorded the prompt — verify the purpose got injected
+    assert any("My personal Telegram bot." in p for p in llm.calls)
+
+
+def test_build_prompt_renders_user_purpose_block(tmp_path: Path):
+    cfg = CuratorConfig()
+    c = Curator(
+        cfg=cfg,
+        llm=_FakeLLM(),
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+    )
+    snap = _snapshot()
+    prompt_with = c.build_prompt(snap, "(none)", "(none)", user_purpose="Hello world.")
+    prompt_without = c.build_prompt(snap, "(none)", "(none)")
+
+    assert "Hello world." in prompt_with
+    assert "(none provided)" in prompt_without
+    # The block header must be present so Rule 7's exception clause makes sense
+    assert "User-provided purpose" in prompt_with
+    assert "User-provided purpose" in prompt_without
+
+
+def test_curate_one_without_db_still_works_on_fallback(tmp_path: Path):
+    """No DB configured (e.g. ad-hoc CLI run) → still returns interview_pending
+    but without persisting. Behaviour gracefully degrades."""
+    llm = _FakeLLM("(no purpose stated yet — fill in)")
+    cfg = CuratorConfig()
+    c = Curator(
+        cfg=cfg,
+        llm=llm,
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+        db=None,
+    )
+    result = asyncio.run(c.curate_one(_snapshot()))
+
+    assert result.status == "interview_pending"
+    assert result.interview_question_id is None
 
 
 # ─── Curator state machine ──────────────────────────────────────────────
