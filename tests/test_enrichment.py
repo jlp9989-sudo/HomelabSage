@@ -19,6 +19,7 @@ from homelabsage.enrichment import (
     fetch_container_logs,
     fetch_docker_hub_description,
     fetch_github_readme,
+    find_user_context,
 )
 
 
@@ -296,3 +297,145 @@ def test_logs_replaces_undecodable_bytes_instead_of_crashing():
     text = fetch_container_logs(c, tail=30)
     assert text is not None
     assert "garbage" in text
+
+
+# ─── find_user_context ───────────────────────────────────────────────────
+
+
+def _seed_notes(tmp_path, files: dict[str, str]) -> str:
+    for relpath, content in files.items():
+        path = tmp_path / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_find_user_context_returns_snippets_with_file_header(tmp_path):
+    d = _seed_notes(
+        tmp_path,
+        {
+            "infra.md": (
+                "# Infra notes\n\n"
+                "FileBrowser-PNP is the kids file share over Tailscale.\n"
+                "It mounts /mnt/user/share read-write.\n\n"
+                "Other random stuff.\n"
+            ),
+        },
+    )
+    ctx = find_user_context("FileBrowser-PNP", [d])
+    assert ctx is not None
+    assert "## infra.md" in ctx
+    assert "kids file share" in ctx
+
+
+def test_find_user_context_returns_none_when_no_matches(tmp_path):
+    d = _seed_notes(tmp_path, {"random.md": "nothing relevant here"})
+    assert find_user_context("openclaw", [d]) is None
+
+
+def test_find_user_context_matches_case_insensitively(tmp_path):
+    d = _seed_notes(tmp_path, {"a.md": "OPENCLAW is the bot"})
+    ctx = find_user_context("openclaw", [d])
+    assert ctx is not None
+    assert "bot" in ctx
+
+
+def test_find_user_context_respects_word_boundaries(tmp_path):
+    """`mealie` must NOT match inside `mealie-db` if we asked for mealie."""
+    # Wait — we DO want mealie to match mealie-db because dash is a
+    # boundary char (memos and notes refer to both interchangeably).
+    # The boundary rule excludes alphanumerics and underscore only, so
+    # `mealiedb` (no separator) would NOT match. Pin both behaviours.
+    d = _seed_notes(
+        tmp_path,
+        {
+            "ok.md": "We use mealie-db for the Mealie postgres.",
+            "wrong.md": "ratemealiestuff",
+        },
+    )
+    ctx = find_user_context("mealie", [d])
+    assert ctx is not None
+    assert "mealie-db" in ctx
+    assert "ratemealiestuff" not in ctx
+
+
+def test_find_user_context_includes_surrounding_lines(tmp_path):
+    d = _seed_notes(
+        tmp_path,
+        {
+            "n.md": (
+                "Line 1\nLine 2\nFileBrowser-PNP entry here\nLine 4\nLine 5\nLine 6\n"
+            ),
+        },
+    )
+    ctx = find_user_context("FileBrowser-PNP", [d], context_lines=1)
+    assert ctx is not None
+    # Match line + 1 above + 1 below
+    assert "Line 2" in ctx
+    assert "Line 4" in ctx
+    # Lines outside the window should be absent
+    assert "Line 6" not in ctx
+
+
+def test_find_user_context_merges_adjacent_windows(tmp_path):
+    d = _seed_notes(
+        tmp_path,
+        {
+            "n.md": "L0\nopenclaw mention\nL2\nopenclaw again\nL4\n",
+        },
+    )
+    ctx = find_user_context("openclaw", [d], context_lines=1)
+    assert ctx is not None
+    # Should contain a single merged block with both mentions, only one
+    # "L2" line, no duplicate.
+    assert ctx.count("L2") == 1
+    assert "openclaw mention" in ctx
+    assert "openclaw again" in ctx
+
+
+def test_find_user_context_walks_subdirectories(tmp_path):
+    d = _seed_notes(
+        tmp_path,
+        {"sub/deep.md": "openclaw is buried here"},
+    )
+    ctx = find_user_context("openclaw", [d])
+    assert ctx is not None
+    assert "buried" in ctx
+
+
+def test_find_user_context_picks_up_txt_files(tmp_path):
+    d = _seed_notes(tmp_path, {"plain.txt": "openclaw note in txt"})
+    ctx = find_user_context("openclaw", [d])
+    assert ctx is not None
+    assert "txt" in ctx
+
+
+def test_find_user_context_searches_multiple_dirs(tmp_path):
+    d1 = tmp_path / "memory"
+    d2 = tmp_path / "notes"
+    _seed_notes(d1, {"a.md": "openclaw in memory"})
+    _seed_notes(d2, {"b.md": "openclaw in notes"})
+    ctx = find_user_context("openclaw", [str(d1), str(d2)])
+    assert ctx is not None
+    assert "in memory" in ctx
+    assert "in notes" in ctx
+
+
+def test_find_user_context_truncates_to_budget(tmp_path):
+    long = "openclaw " + "x" * 10000
+    d = _seed_notes(tmp_path, {"big.md": long})
+    ctx = find_user_context("openclaw", [d], max_chars=300)
+    assert ctx is not None
+    assert len(ctx) <= 320  # tiny over because of file header + suffix
+
+
+def test_find_user_context_skips_missing_dirs(tmp_path):
+    real = _seed_notes(tmp_path, {"a.md": "openclaw here"})
+    ctx = find_user_context("openclaw", ["/does/not/exist", real])
+    assert ctx is not None
+    assert "openclaw here" in ctx
+
+
+def test_find_user_context_returns_none_for_empty_inputs():
+    assert find_user_context("", ["/anywhere"]) is None
+    assert find_user_context("openclaw", []) is None

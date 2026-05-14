@@ -500,6 +500,103 @@ def test_gather_enrichment_respects_flags(tmp_path: Path):
     assert enr.logs is None
 
 
+def test_build_prompt_renders_user_context_section(tmp_path: Path):
+    """The high-value user_context block must be present in both the
+    default note prompt and the suggestion prompt — the LLM is told to
+    prioritise it over the README."""
+    from homelabsage.curator import SUGGESTION_PROMPT_TEMPLATE
+    from homelabsage.enrichment import Enrichment
+
+    c = Curator(
+        cfg=CuratorConfig(),
+        llm=_FakeLLM(),
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+    )
+    enr = Enrichment(user_context="## CLAUDE.md\nFileBrowser-PNP is the kids share.")
+
+    main_prompt = c.build_prompt(_snapshot(), "(none)", "(none)", enrichment=enr)
+    assert "FileBrowser-PNP is the kids share." in main_prompt
+    assert "Existing user notes/memory" in main_prompt
+
+    # Suggestion prompt uses the same _base_values, so the user_context
+    # block should also be wired there.
+    values = c._base_values(_snapshot(), enr)
+    suggestion = SUGGESTION_PROMPT_TEMPLATE.format_map(values)
+    assert "FileBrowser-PNP is the kids share." in suggestion
+    assert "Existing user notes/memory" in suggestion
+
+
+def test_gather_enrichment_calls_find_user_context(tmp_path: Path, monkeypatch):
+    """When cross_reference_notes is enabled, gather_enrichment must
+    invoke find_user_context with the configured dirs and surface the
+    result on the Enrichment."""
+    from homelabsage import curator as curator_module
+
+    captured: dict = {}
+
+    def _fake_find(name, dirs, *, max_chars=4000, context_lines=2):
+        captured["name"] = name
+        captured["dirs"] = dirs
+        return f"USER_NOTES_FOR_{name}"
+
+    async def _no_readme(*a, **kw):
+        return None
+
+    async def _no_hub(*a, **kw):
+        return None
+
+    monkeypatch.setattr(curator_module.core, "find_user_context", _fake_find)
+    monkeypatch.setattr(curator_module.core, "fetch_github_readme", _no_readme)
+    monkeypatch.setattr(curator_module.core, "fetch_docker_hub_description", _no_hub)
+    monkeypatch.setattr(curator_module.core, "fetch_container_logs", lambda *a, **kw: None)
+
+    c = Curator(
+        cfg=CuratorConfig(
+            include_logs=False,
+            cross_reference_dirs=["/opt/claude-memory", "/opt/notes"],
+        ),
+        llm=_FakeLLM(),
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+    )
+    enr = asyncio.run(c.gather_enrichment(_snapshot()))
+    assert enr.user_context == "USER_NOTES_FOR_homelabsage"
+    assert captured["name"] == "homelabsage"
+    assert captured["dirs"] == ["/opt/claude-memory", "/opt/notes"]
+
+
+def test_gather_enrichment_skips_user_context_when_disabled(tmp_path: Path, monkeypatch):
+    from homelabsage import curator as curator_module
+
+    called = {"n": 0}
+
+    def _fake_find(*a, **kw):
+        called["n"] += 1
+        return "should-not-be-used"
+
+    async def _no_readme(*a, **kw):
+        return None
+
+    async def _no_hub(*a, **kw):
+        return None
+
+    monkeypatch.setattr(curator_module.core, "find_user_context", _fake_find)
+    monkeypatch.setattr(curator_module.core, "fetch_github_readme", _no_readme)
+    monkeypatch.setattr(curator_module.core, "fetch_docker_hub_description", _no_hub)
+    monkeypatch.setattr(curator_module.core, "fetch_container_logs", lambda *a, **kw: None)
+
+    c = Curator(
+        cfg=CuratorConfig(cross_reference_notes=False, include_logs=False),
+        llm=_FakeLLM(),
+        docker_cfg=DockerSourceConfig(enabled=True),
+        notes_dir=str(tmp_path),
+    )
+    enr = asyncio.run(c.gather_enrichment(_snapshot()))
+    assert enr.user_context is None
+    assert called["n"] == 0
+
+
 def test_curate_one_passes_enrichment_to_main_prompt(tmp_path: Path, monkeypatch):
     """End-to-end: curate_one gathers enrichment and the values end up in
     the prompt the LLM actually sees."""

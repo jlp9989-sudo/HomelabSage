@@ -358,9 +358,18 @@ class CuratorConfig(BaseModel):
         True,
         description="Include the container's last ~30 log lines as live context. Disable if you don't want logs forwarded to the LLM.",
     )
+    cross_reference_notes: bool = Field(
+        True,
+        description="Grep the user's notes/memory dirs for the container name and inject matching snippets into the prompt — turns generic suggestions into ones tailored to YOUR setup.",
+    )
+    cross_reference_dirs: list[str] = Field(
+        default_factory=lambda: ["/opt/claude-memory", "/opt/notes"],
+        description="Directories searched by `cross_reference_notes`. Mount them read-only in your compose file.",
+    )
     max_readme_chars: int = 8000
     max_docker_hub_chars: int = 6000
     max_logs_chars: int = 3000
+    max_user_context_chars: int = 4000
     log_tail_lines: int = 30
 
 

@@ -1,10 +1,11 @@
 """Best-effort context enrichers for the curator.
 
-Three small fetchers, each independent and failure-tolerant:
+Four small fetchers, each independent and failure-tolerant:
 
   - `fetch_github_readme(repo)`     — README.md from raw.githubusercontent.
   - `fetch_docker_hub_description(image)` — full_description from Docker Hub.
   - `fetch_container_logs(container)` — last N lines via the docker SDK.
+  - `find_user_context(name, dirs)`  — grep user notes/memory for the name.
 
 The curator calls them once per container before composing its prompts.
 Each returns None when there's nothing to add — the prompt template then
@@ -17,7 +18,9 @@ makes it trivially mockable in tests (one function per source).
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 
@@ -55,6 +58,7 @@ class Enrichment:
     readme: str | None = None
     docker_hub: str | None = None
     logs: str | None = None
+    user_context: str | None = None
 
 
 def _truncate(text: str, max_chars: int) -> str:
@@ -214,3 +218,111 @@ def fetch_container_logs(
     if not text:
         return None
     return _truncate(text, max_chars)
+
+
+# Files we'll bother grepping. Markdown notes (the dominant case for
+# both /opt/notes and /opt/claude-memory) plus plain-text fallbacks.
+_USER_CONTEXT_GLOBS = ("*.md", "*.txt")
+
+# How many extra lines around each match to include — gives the LLM a
+# bit of surrounding context without dragging in whole pages.
+_CONTEXT_LINES = 2
+
+
+def _name_pattern(container_name: str) -> re.Pattern[str]:
+    """Match the container_name as a whole token, case-insensitive.
+
+    Allows the dash and dot delimiters typical in container names — the
+    SQL identifier-style word boundary `\\b` doesn't cover them, so we
+    build an explicit boundary class. Examples:
+        FileBrowser-PNP, mealie-db, openclaw, ragflow-server.
+    """
+    boundary = r"(?:^|[^A-Za-z0-9_\-./])"
+    return re.compile(
+        boundary + re.escape(container_name) + boundary, re.IGNORECASE
+    )
+
+
+def find_user_context(
+    container_name: str,
+    search_dirs: list[str],
+    *,
+    max_chars: int = 4000,
+    context_lines: int = _CONTEXT_LINES,
+) -> str | None:
+    """Grep the user's notes/memories for the container name and return
+    surrounding snippets, or None if nothing matched.
+
+    Each match becomes a block of `2*context_lines + 1` lines (centred
+    on the matching line). Blocks are deduplicated within a file (a
+    line that lives in two adjacent blocks is shown once). The output
+    is `## file.md\\n<snippet>\\n…` per matching file.
+
+    All access is read-only; symlinks are followed once via `Path.glob`
+    (the bind-mount in production is `:ro` anyway). Errors per file are
+    swallowed so one bad file doesn't drop the whole context.
+    """
+    if not container_name or not search_dirs:
+        return None
+    pattern = _name_pattern(container_name)
+    out: list[str] = []
+    budget = max_chars
+
+    for dir_str in search_dirs:
+        if budget <= 0:
+            break
+        root = Path(dir_str)
+        if not root.is_dir():
+            continue
+        files: list[Path] = []
+        for glob in _USER_CONTEXT_GLOBS:
+            try:
+                files.extend(sorted(root.rglob(glob)))
+            except OSError:
+                continue
+
+        for fp in files:
+            if budget <= 0:
+                break
+            try:
+                text = fp.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            lines = text.splitlines()
+            hit_lines = {
+                i for i, line in enumerate(lines) if pattern.search(line)
+            }
+            if not hit_lines:
+                continue
+            # Expand each hit into a window, then merge overlapping windows
+            # so adjacent matches don't duplicate lines.
+            windows: list[tuple[int, int]] = []
+            for h in sorted(hit_lines):
+                lo = max(0, h - context_lines)
+                hi = min(len(lines) - 1, h + context_lines)
+                if windows and lo <= windows[-1][1] + 1:
+                    windows[-1] = (windows[-1][0], max(windows[-1][1], hi))
+                else:
+                    windows.append((lo, hi))
+
+            # Render this file's snippets relative to root for readability
+            try:
+                rel = fp.relative_to(root)
+            except ValueError:
+                rel = fp
+            block = [f"## {rel}"]
+            for lo, hi in windows:
+                block.append("\n".join(lines[lo : hi + 1]))
+                block.append("…")
+            block_text = "\n".join(block).rstrip("…\n").rstrip()
+            chunk = block_text + "\n"
+            if len(chunk) > budget:
+                # Truncate the file block instead of dropping it whole —
+                # partial context beats no context.
+                chunk = chunk[: budget - 16] + "\n…[truncated]…\n"
+            out.append(chunk)
+            budget -= len(chunk)
+
+    if not out:
+        return None
+    return "\n".join(out).rstrip()

@@ -22,6 +22,7 @@ PROMPT_PLACEHOLDERS: frozenset[str] = frozenset(
         "readme_excerpt",
         "docker_hub_description",
         "recent_logs",
+        "user_context",
     }
 )
 
@@ -70,6 +71,9 @@ Rules for the note:
 # Recent container logs (live signal — last lines stdout+stderr)
 {recent_logs}
 
+# Existing user notes/memory mentioning this container (HIGH-VALUE — your user wrote these about THEIR setup)
+{user_context}
+
 # User-provided purpose (authoritative — overrides Rule 7 fallback)
 {user_purpose}
 
@@ -84,9 +88,11 @@ Rules for the note:
 # start they can confirm or edit. The "Likely" / "Appears to be" framing
 # tells the LLM (and the reader) this is speculation, not asserted fact.
 SUGGESTION_PROMPT_TEMPLATE = """\
-You are helping a homelab user document a service. Based ONLY on the inputs below, write a SINGLE sentence describing what this software typically does. Begin with a hedge word: "Likely", "Appears to be", "Probably". Output the sentence and nothing else — no preamble, no bullets, no markdown, no quotes.
+You are helping a homelab user document a service. Write a SINGLE sentence prefilling their answer to "what is this for in your homelab?". Begin with a hedge word: "Likely", "Appears to be", "Probably". Output the sentence and nothing else — no preamble, no bullets, no markdown, no quotes.
 
-If you genuinely cannot guess from the inputs, output exactly: `(no guess)`
+PRIORITISE the user's own notes (`# Existing user notes/memory` block below) over the upstream README — the user knows their setup, the README only describes the software. If the user's notes describe how THEY use it, prefer that wording.
+
+If you genuinely cannot guess from any of the inputs, output exactly: `(no guess)`
 
 # Container facts
 - name: {container_name}
@@ -97,6 +103,9 @@ If you genuinely cannot guess from the inputs, output exactly: `(no guess)`
 - mounts: {mounts}
 - environment variables (secrets redacted): {env_vars}
 - labels of interest: {labels}
+
+# Existing user notes/memory mentioning this container (HIGH-VALUE — prefer this over the README)
+{user_context}
 
 # Upstream README excerpt
 {readme_excerpt}

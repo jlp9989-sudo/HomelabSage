@@ -16,6 +16,7 @@ from ..enrichment import (
     fetch_container_logs,
     fetch_docker_hub_description,
     fetch_github_readme,
+    find_user_context,
 )
 from ..github import list_releases
 from ..llm import LLMClient
@@ -208,7 +209,20 @@ class Curator:
                 tail=self.cfg.log_tail_lines,
                 max_chars=self.cfg.max_logs_chars,
             )
-        return Enrichment(readme=readme, docker_hub=docker_hub, logs=logs)
+
+        user_context: str | None = None
+        if self.cfg.cross_reference_notes and self.cfg.cross_reference_dirs:
+            user_context = find_user_context(
+                snapshot.name,
+                self.cfg.cross_reference_dirs,
+                max_chars=self.cfg.max_user_context_chars,
+            )
+        return Enrichment(
+            readme=readme,
+            docker_hub=docker_hub,
+            logs=logs,
+            user_context=user_context,
+        )
 
     async def fetch_release_context(self, repo: str | None) -> str:
         """Concatenate the bodies of the N most recent releases, capped."""
@@ -288,6 +302,7 @@ class Curator:
             readme_excerpt=enr.readme or "(none)",
             docker_hub_description=enr.docker_hub or "(none)",
             recent_logs=enr.logs or "(none)",
+            user_context=enr.user_context or "(none)",
         )
 
     def build_prompt(
