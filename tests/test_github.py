@@ -11,10 +11,34 @@ import pytest
 
 from homelabsage.github import (
     ABANDONED_DAYS,
+    CODEBERG_API,
+    GITHUB_API,
     STALE_DAYS,
     _parse_github_ts,
+    _resolve_api,
     classify_repo_health,
 )
+
+# ─── host resolution ──────────────────────────────────────────────────────
+
+
+def test_resolve_api_defaults_to_github():
+    assert _resolve_api("owner/repo") == (GITHUB_API, "owner/repo")
+
+
+def test_resolve_api_routes_codeberg_prefix():
+    base, slug = _resolve_api("codeberg.org/forgejo/forgejo")
+    assert base == CODEBERG_API
+    assert slug == "forgejo/forgejo"
+
+
+def test_resolve_api_leaves_owner_with_dots_alone():
+    # An owner with a literal `codeberg.org` substring inside their slug is
+    # not realistic — github owners are restricted to alphanumerics + dash —
+    # but the prefix check uses `startswith` to avoid false positives anyway.
+    base, slug = _resolve_api("owner.codeberg.org/repo")
+    assert base == GITHUB_API
+    assert slug == "owner.codeberg.org/repo"
 
 # ─── timestamp parsing ────────────────────────────────────────────────────
 

@@ -111,6 +111,12 @@ class DockerSourceConfig(BaseModel):
     # GitHub rate-limit budget covers this without raising costs. Set to
     # false if you want to skip the extra request.
     repo_health: bool = True
+    # Track containers whose tag is not a version (`latest`, `main`, `edge`,
+    # `stable`, …) by comparing the local image digest with what the
+    # registry currently serves under that tag. Only Docker Hub is queried
+    # (anonymous v2 API); other hosts fall through silently. Saves the
+    # ~10 containers per typical homelab that would otherwise be invisible.
+    track_floating_tags: bool = True
 
 
 class HAConfig(BaseModel):
@@ -157,12 +163,83 @@ class ScriptsSourceConfig(BaseModel):
     enable_unraid: bool = False
 
 
+class FedoraSourceConfig(BaseModel):
+    """Pull dnf updates from a Fedora host over SSH.
+
+    The host needs nothing special — just `dnf check-update --refresh` on
+    a SSH-reachable account. The plugin parses the standard 3-column
+    output and emits one `Update` per matched package.
+
+    Filtering rationale: a typical Fedora server has 30-150 packages
+    pending at any given time. Sending each one through the analyzer
+    would be expensive and the result would be 90 % noise (random
+    userspace libs). Instead, packages matched by `critical_packages`
+    become individual updates; the rest are rolled up into ONE summary
+    update so the user still sees the total count without LLM cost.
+    """
+
+    enabled: bool = Field(
+        False,
+        description="Enable the Fedora plugin. Off by default — it needs SSH credentials.",
+    )
+    host: str = Field("", description="SSH host or IP (e.g. `192.168.31.19`).")
+    user: str = Field(
+        "",
+        description="SSH user on the target host. The user must be able to run "
+        "`dnf check-update` (no sudo required — dnf reads metadata as any user).",
+    )
+    ssh_key_path: str = Field(
+        "",
+        description="Path INSIDE the homelabsage container to the private key. "
+        "Mount your key read-only via the compose file, e.g. "
+        "`/mnt/user/appdata/.../halo_ed25519:/opt/ssh-keys/halo:ro`.",
+        json_schema_extra={"ui_widget": "path", "ui_path_kind": "file"},
+    )
+    port: int = 22
+    known_hosts_path: str = Field(
+        "",
+        description="Optional known_hosts file. Leave empty to accept the host "
+        "key on first connection (logged at WARNING).",
+        json_schema_extra={"ui_widget": "path", "ui_path_kind": "file"},
+    )
+    critical_packages: list[str] = Field(
+        default_factory=lambda: [
+            r"^kernel(-core|-modules|-modules-core|-modules-extra|-devel)?$",
+            r"^linux-firmware$",
+            r"^mesa-",
+            r"^vulkan-",
+            r"^rocm-",
+            r"^llvm",
+            r"^gcc$",
+            r"^glibc(-common|-langpack-.+)?$",
+            r"^systemd(-libs|-pam|-udev|-resolved|-networkd)?$",
+            r"^podman$",
+            r"^docker(-ce)?$",
+            r"^dnf$",
+            r"^selinux-policy(-targeted)?$",
+            r"^openssh(-server|-clients)?$",
+        ],
+        description="Regex list. Packages whose name matches ANY pattern become "
+        "individual `Update` items (and get LLM-analyzed). Everything else is "
+        "aggregated into a single summary entry.",
+    )
+    aggregate_others: bool = Field(
+        True,
+        description="If true, non-critical pending packages are reported as ONE "
+        "summary update (`fedora-userspace`). If false, they're dropped silently.",
+    )
+    timeout_seconds: int = Field(
+        45,
+        description="SSH + dnf metadata refresh can take a while on cold caches.",
+    )
+
+
 class SourcesConfig(BaseModel):
     docker: DockerSourceConfig = Field(default_factory=DockerSourceConfig)
     homeassistant: HAConfig = Field(default_factory=HAConfig)
     scripts: ScriptsSourceConfig = Field(default_factory=ScriptsSourceConfig)
+    fedora: FedoraSourceConfig = Field(default_factory=FedoraSourceConfig)
     # Placeholders for future plugins — kept loose to not break configs.
-    fedora: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
     llamacpp: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
     huggingface_models: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
     unraid: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
@@ -371,6 +448,26 @@ class CuratorConfig(BaseModel):
     max_logs_chars: int = 3000
     max_user_context_chars: int = 4000
     log_tail_lines: int = 30
+
+    # Incremental hook — after the analyzer concludes an update is risky,
+    # append a one-line summary to the curator's note so the file
+    # accumulates trap history without a manual recurate.
+    append_analysis_log: bool = Field(
+        True,
+        description=(
+            "When the analyzer flags an update as 'hold' or with breaking "
+            "changes, append a dated bullet to the curator note for the "
+            "service. Only ever touches files written by the curator (with "
+            "the `<!-- curator: ... -->` footer); manual notes are left alone."
+        ),
+    )
+    analysis_log_max_lines: int = Field(
+        20,
+        description=(
+            "Maximum entries kept in the appended `## Update log` section. "
+            "Older entries drop off the tail."
+        ),
+    )
 
 
 class Config(BaseModel):

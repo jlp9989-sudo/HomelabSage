@@ -33,6 +33,10 @@ dependencies = [
     # Bundled tzdata so the timezone validator works on minimal OS images
     # (Alpine, distroless, Windows) where the system tz database is absent.
     "tzdata>=2024.1",
+    # SSH client used by the Fedora plugin to read remote `dnf check-update`.
+    # Pure-Python (no system libssh dep), lazy-imported so it only loads when
+    # the plugin is enabled.
+    "paramiko>=3.4",
 ]
 
 [project.optional-dependencies]

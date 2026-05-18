@@ -82,16 +82,47 @@ async def fetch_github_readme(
     """
     if not repo or "/" not in repo:
         return None
-    owner, _, name = repo.partition("/")
+
+    # Route by host prefix — same contract `github.py:_resolve_api` uses.
+    # Bare `owner/repo` → GitHub raw; `codeberg.org/owner/repo` → Codeberg
+    # raw (different URL shape: /{owner}/{repo}/raw/branch/{branch}/{file}).
+    if repo.startswith("codeberg.org/"):
+        slug = repo.removeprefix("codeberg.org/")
+
+        def _url(owner: str, name: str, branch: str, filename: str) -> str:
+            return f"https://codeberg.org/{owner}/{name}/raw/branch/{branch}/{filename}"
+    else:
+        slug = repo
+
+        def _url(owner: str, name: str, branch: str, filename: str) -> str:
+            return f"https://raw.githubusercontent.com/{owner}/{name}/{branch}/{filename}"
+
+    owner, _, name = slug.partition("/")
     if not owner or not name:
         return None
 
+    # Branches to probe. Start with the repo's actual default (forgejo's is
+    # literally `forgejo`, not `main`) so we get a 200 on the first try when
+    # the metadata lookup succeeds. Fall back to the historic main/master if
+    # metadata is unavailable. _README_BRANCHES is appended last so a custom
+    # default still benefits from the typical fallback chain.
+    from .github import repo_metadata as _repo_metadata
+
+    branches: list[str] = []
+    try:
+        meta = await _repo_metadata(repo)
+        if meta and (default := meta.get("default_branch")):
+            branches.append(default)
+    except Exception:
+        meta = None
+    for b in _README_BRANCHES:
+        if b not in branches:
+            branches.append(b)
+
     async def _try(c: httpx.AsyncClient) -> str | None:
-        for branch in _README_BRANCHES:
+        for branch in branches:
             for filename in _README_FILES:
-                url = (
-                    f"https://raw.githubusercontent.com/{owner}/{name}/{branch}/{filename}"
-                )
+                url = _url(owner, name, branch, filename)
                 try:
                     r = await c.get(url, timeout=8.0, follow_redirects=True)
                 except Exception as e:

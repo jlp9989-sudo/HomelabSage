@@ -6,15 +6,36 @@ newer than another, and whether a stopped container counts as orphan.
 """
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
+from homelabsage.config import DockerSourceConfig
 from homelabsage.plugins.docker import (
     _SEMVER_RE,
     DockerPlugin,
     _orphan_days,
     _parse_docker_timestamp,
 )
+
+
+def _fake_container(
+    *,
+    name: str = "svc",
+    labels: dict[str, str] | None = None,
+    tags: list[str] | None = None,
+    image_in_attrs: str = "",
+) -> SimpleNamespace:
+    """Minimal Container stand-in for resolve_repo tests.
+
+    Only exposes the surface `_find_github_repo` reads — name, image.labels,
+    image.tags, and Config.Image from attrs.
+    """
+    return SimpleNamespace(
+        name=name,
+        image=SimpleNamespace(labels=labels or {}, tags=tags or []),
+        attrs={"Config": {"Image": image_in_attrs}},
+    )
 
 
 def test_semver_re_accepts_clean_semver():
@@ -123,3 +144,46 @@ def test_orphan_days_returns_none_for_exited_without_finished_at():
     # Edge case: status=exited but the FinishedAt slot is empty / sentinel.
     assert _orphan_days("exited", "") is None
     assert _orphan_days("exited", "0001-01-01T00:00:00Z") is None
+
+
+# ─── resolve_repo from OCI labels ─────────────────────────────────────────
+
+
+def _plugin(overrides: dict[str, str] | None = None) -> DockerPlugin:
+    return DockerPlugin(DockerSourceConfig(overrides=overrides or {}))
+
+
+def test_resolve_repo_reads_github_source_label():
+    c = _fake_container(
+        labels={"org.opencontainers.image.source": "https://github.com/linuxserver/docker-plex"}
+    )
+    assert _plugin().resolve_repo(c) == "linuxserver/docker-plex"
+
+
+def test_resolve_repo_reads_codeberg_source_label():
+    # Forgejo ships with this exact label. Before this support the detector
+    # fell through and users had to add a fake `Forgejo: go-gitea/gitea`
+    # override that pointed at the wrong project.
+    c = _fake_container(
+        name="Forgejo",
+        labels={"org.opencontainers.image.source": "https://codeberg.org/forgejo/forgejo"},
+    )
+    assert _plugin().resolve_repo(c) == "codeberg.org/forgejo/forgejo"
+
+
+def test_resolve_repo_override_wins_over_label():
+    c = _fake_container(
+        name="myservice",
+        labels={"org.opencontainers.image.source": "https://github.com/upstream/repo"},
+    )
+    assert _plugin({"myservice": "fork/repo"}).resolve_repo(c) == "fork/repo"
+
+
+def test_resolve_repo_falls_back_to_ghcr_heuristic():
+    c = _fake_container(tags=["ghcr.io/jlp9989-sudo/homelabsage:0.2.0"])
+    assert _plugin().resolve_repo(c) == "jlp9989-sudo/homelabsage"
+
+
+def test_resolve_repo_returns_none_when_unknown():
+    c = _fake_container(tags=["someorg/random-image:latest"])
+    assert _plugin().resolve_repo(c) is None

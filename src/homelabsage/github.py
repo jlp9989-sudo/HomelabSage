@@ -15,6 +15,22 @@ from typing import Any, Literal
 import httpx
 
 GITHUB_API = "https://api.github.com"
+CODEBERG_API = "https://codeberg.org/api/v1"
+
+
+def _resolve_api(repo: str) -> tuple[str, str]:
+    """Split a repo identifier into `(api_base, owner/repo)`.
+
+    Bare `owner/repo` → GitHub. A `codeberg.org/owner/repo` prefix routes to
+    Codeberg's Gitea/Forgejo-compatible API (same JSON shape for releases
+    and repo metadata — `tag_name`, `body`, `archived`, `updated_at`).
+
+    Adding a new host is a single elif branch: the response handlers down
+    the line never need to know which host they're talking to.
+    """
+    if repo.startswith("codeberg.org/"):
+        return CODEBERG_API, repo.removeprefix("codeberg.org/")
+    return GITHUB_API, repo
 
 # Repo health buckets. See `classify_repo_health` for the thresholds and why
 # they were chosen.
@@ -26,19 +42,29 @@ STALE_DAYS = 180        # >6 months no push → "stale": dev has slowed
 ABANDONED_DAYS = 365    # >1 year no push  → "abandoned": likely dead for security purposes
 
 
-def _headers() -> dict[str, str]:
-    h = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
-    if token := os.environ.get("GITHUB_TOKEN"):
-        h["Authorization"] = f"Bearer {token}"
+def _headers(api_base: str = GITHUB_API) -> dict[str, str]:
+    """Build the request headers for whichever forge host we're talking to.
+
+    The `GITHUB_TOKEN` env var is *only* sent to api.github.com. Sending a
+    GitHub PAT to Codeberg returns 401 ("invalid token") because the bearer
+    schema is the same but the token namespace is not — and we'd rather make
+    an anonymous request than blow it on the wrong host.
+    """
+    h = {"Accept": "application/vnd.github+json"}
+    if api_base == GITHUB_API:
+        h["X-GitHub-Api-Version"] = "2022-11-28"
+        if token := os.environ.get("GITHUB_TOKEN"):
+            h["Authorization"] = f"Bearer {token}"
     return h
 
 
 async def list_releases(repo: str, per_page: int = 30) -> list[dict[str, Any]]:
     """List releases (most recent first). Empty list on 404 or transport error."""
-    url = f"{GITHUB_API}/repos/{repo}/releases"
+    api_base, slug = _resolve_api(repo)
+    url = f"{api_base}/repos/{slug}/releases"
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.get(url, headers=_headers(), params={"per_page": per_page})
+            r = await client.get(url, headers=_headers(api_base), params={"per_page": per_page})
             if r.status_code == 404:
                 return []
             r.raise_for_status()
@@ -68,13 +94,14 @@ async def repo_metadata(
     `pushed_at`, `archived`, `open_issues_count`, `default_branch`, etc.),
     or None on any HTTP/transport error.
     """
-    url = f"{GITHUB_API}/repos/{repo}"
+    api_base, slug = _resolve_api(repo)
+    url = f"{api_base}/repos/{slug}"
     owns = client is None
     if owns:
         client = httpx.AsyncClient(timeout=20)
     assert client is not None
     try:
-        r = await client.get(url, headers=_headers())
+        r = await client.get(url, headers=_headers(api_base))
         if r.status_code != 200:
             return None
         return r.json()

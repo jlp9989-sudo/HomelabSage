@@ -10,6 +10,7 @@ from pathlib import Path
 import httpx
 
 from .config import Config
+from .curator.incremental import append_update_to_note
 from .db import Database
 from .llm import LLMClient
 from .models import AnalyzedUpdate, UpdateStatus
@@ -19,6 +20,7 @@ from .outputs.notion import NotionOutput
 from .outputs.telegram import TelegramOutput
 from .plugins import Plugin
 from .plugins.docker import DockerPlugin
+from .plugins.fedora import FedoraPlugin
 from .plugins.homeassistant import HomeAssistantPlugin
 
 log = logging.getLogger(__name__)
@@ -30,6 +32,8 @@ def build_plugins(cfg: Config) -> list[Plugin]:
         plugins.append(DockerPlugin(cfg.sources.docker))
     if cfg.sources.homeassistant.enabled:
         plugins.append(HomeAssistantPlugin(cfg.sources.homeassistant))
+    if cfg.sources.fedora.enabled:
+        plugins.append(FedoraPlugin(cfg.sources.fedora))
     return plugins
 
 
@@ -116,6 +120,7 @@ class Engine:
                     except Exception as e:
                         log.exception("LLM failed on %s: %s", update.subject, e)
                 self.db.upsert(analyzed)
+                self._incremental_hook(analyzed)
                 for output in self.outputs:
                     try:
                         await output.send(analyzed)
@@ -125,6 +130,31 @@ class Engine:
         await self._heartbeat_ok()
         log.info("Run end — %s", stats)
         return stats
+
+    def _incremental_hook(self, analyzed: AnalyzedUpdate) -> None:
+        """Pin a one-line summary of a risky update to the curator's note.
+
+        Disabled when no notes_dir is configured, when the user has
+        disabled the feature, or when the analyzed update isn't risky.
+        Failures are swallowed: the note hook is a nice-to-have, never
+        a reason to break the scan loop.
+        """
+        if not self.cfg.curator.append_analysis_log:
+            return
+        notes_dir = self.cfg.curator.output_dir or self.cfg.notes.notes_dir
+        if not notes_dir:
+            return
+        try:
+            path = append_update_to_note(
+                notes_dir,
+                analyzed,
+                max_lines=self.cfg.curator.analysis_log_max_lines,
+            )
+        except Exception:
+            log.exception("incremental hook failed on %s", analyzed.update.subject)
+            return
+        if path is not None:
+            log.info("incremental: appended %s → %s", analyzed.id, path)
 
     async def _heartbeat_ok(self) -> None:
         url = self.cfg.scheduler.heartbeat_url

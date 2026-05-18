@@ -14,6 +14,11 @@ from ..config import DockerSourceConfig
 from ..github import classify_repo_health, latest_release, repo_metadata
 from ..images import find_alternatives
 from ..models import Update
+from ..registries import (
+    dockerhub_tag_info,
+    local_digest_for,
+    parse_image_ref,
+)
 from . import Plugin
 
 log = logging.getLogger(__name__)
@@ -73,6 +78,18 @@ _GHCR_RE = re.compile(r"^(?:ghcr\.io|gcr\.io)/([\w.-]+)/([\w.-]+)")
 _SEMVER_RE = re.compile(r"^v?\d+(?:\.\d+){1,3}")
 
 
+def _looks_like_semver(s: str | None) -> bool:
+    """True iff `s` is a non-empty version string we can meaningfully compare.
+
+    Used by the floating-tag branch to detect cases where `_current_version`
+    fell back to an OCI label whose value is itself opaque (e.g. some
+    images set `org.opencontainers.image.version=latest`). In those cases
+    we don't have a real version to compare, so the digest branch should
+    take over.
+    """
+    return bool(s) and _SEMVER_RE.match(s or "") is not None
+
+
 class DockerPlugin(Plugin):
     id = "docker"
 
@@ -95,7 +112,14 @@ class DockerPlugin(Plugin):
         return self._current_version(c)
 
     def _find_github_repo(self, c: Container) -> str | None:
-        """Resolve a container to `owner/repo` on GitHub.
+        """Resolve a container to a `repo` identifier the GitHub helper accepts.
+
+        Returned shapes:
+          - `owner/repo`               → GitHub (default).
+          - `codeberg.org/owner/repo`  → Codeberg (runs Forgejo, exposes
+                                         a GitHub-compatible REST API at
+                                         `/api/v1`). github.py routes by
+                                         prefix.
 
         Priority:
           1) `overrides` in config (container_name → repo).
@@ -117,6 +141,12 @@ class DockerPlugin(Plugin):
                 parts = tail.split("/")
                 if len(parts) >= 2:
                     return f"{parts[0]}/{parts[1]}"
+            if "codeberg.org/" in src:
+                # https://codeberg.org/owner/repo → codeberg.org/owner/repo
+                tail = src.split("codeberg.org/", 1)[1].strip("/")
+                parts = tail.split("/")
+                if len(parts) >= 2:
+                    return f"codeberg.org/{parts[0]}/{parts[1]}"
         except Exception:
             pass
 
@@ -179,10 +209,23 @@ class DockerPlugin(Plugin):
             if self._should_skip(c.name):
                 continue
             repo = self._find_github_repo(c)
+            current = self._current_version(c)
+
+            # Floating-tag branch: when there's no usable semver to compare
+            # against (no tag, or the OCI image.version label is something
+            # opaque like "latest"), fall back to comparing the local image
+            # digest against what Docker Hub serves for the same tag. The
+            # result lacks release notes but still surfaces "this container
+            # is out of date" — the analyzer says `apply` or `hold` based
+            # on the user's notes.
+            if self.cfg.track_floating_tags and not _looks_like_semver(current):
+                floating = await self._floating_tag_update(c)
+                if floating is not None:
+                    updates.append(floating)
+                    continue
             if not repo:
                 log.debug("no GitHub repo resolved for %s, skip", c.name)
                 continue
-            current = self._current_version(c)
             if not current:
                 log.debug("no parseable version for %s (image tag %s), skip",
                           c.name, c.image.tags)
@@ -254,3 +297,91 @@ class DockerPlugin(Plugin):
                 )
             )
         return updates
+
+    async def _floating_tag_update(self, c: Container) -> Update | None:
+        """Compare the local image digest with Docker Hub's `:tag` digest.
+
+        Triggers when the container's tag isn't a version (so the semver
+        path bailed). Quietly returns None for any failure mode — registry
+        offline, non-Hub host, anonymous pull rate-limited, missing
+        RepoDigests on a locally-built image — so the scan loop keeps going.
+
+        Why this is worth its own branch instead of forcing semver: with
+        Docker, plenty of stable images (and most "edge" images) only ever
+        publish `:latest` or `:main`. Without this check they'd stay
+        invisible to the analyzer.
+        """
+        image_ref_str = (c.image.tags[0] if c.image.tags else "") or (
+            c.attrs.get("Config", {}).get("Image", "") or ""
+        )
+        ref = parse_image_ref(image_ref_str)
+        if ref is None or not ref.is_docker_hub:
+            return None
+        # `c.image.attrs` is where RepoDigests live; `c.attrs["Image"]` is
+        # the image SHA string, not the image config block.
+        try:
+            image_attrs = c.image.attrs or {}
+        except Exception:
+            image_attrs = {}
+        local_digest = local_digest_for(image_ref_str, image_attrs)
+        if not local_digest:
+            return None
+
+        try:
+            remote = await dockerhub_tag_info(ref.slug, ref.tag)
+        except Exception as e:
+            log.debug("dockerhub query failed for %s: %s", image_ref_str, e)
+            return None
+        if remote is None or not remote.digest:
+            return None
+        if remote.digest == local_digest:
+            return None
+
+        # Pull image creation time off the inspected image config so the
+        # analyzer can reason about age — "container was pulled 6 months
+        # ago, registry digest changed last week" carries different weight
+        # than "pulled yesterday, registry moved today".
+        local_pulled_at = _parse_docker_timestamp(str(image_attrs.get("Created") or ""))
+
+        labels = c.attrs.get("Config", {}).get("Labels") or {}
+        compose_project = labels.get("com.docker.compose.project", "")
+        image_short = image_ref_str.split("/")[-1].split(":")[0]
+        keywords = [
+            k for k in {ref.slug, ref.slug.split("/")[-1], image_short, compose_project} if k
+        ]
+
+        ctx: dict[str, object] = {
+            "image": image_ref_str,
+            "registry": "docker.io",
+            "registry_slug": ref.slug,
+            "tag": ref.tag,
+            "compose_project": compose_project,
+            "_note_keywords": keywords,
+            "remote_pushed_at": remote.pushed_at.isoformat() if remote.pushed_at else None,
+            "local_pulled_at": local_pulled_at.isoformat() if local_pulled_at else None,
+        }
+        # Short digests (12-char) for human-readable subject/version fields.
+        local_short = local_digest.removeprefix("sha256:")[:12]
+        remote_short = remote.digest.removeprefix("sha256:")[:12]
+        # Build a release_notes-equivalent block so the LLM still gets
+        # context even without an upstream changelog.
+        release_notes = (
+            f"Tag `{ref.tag}` on docker.io/{ref.slug} now points at "
+            f"a different image than the one this container is running.\n\n"
+            f"- local digest:  {local_short}\n"
+            f"- remote digest: {remote_short}\n"
+        )
+        if remote.pushed_at:
+            release_notes += f"- registry push: {remote.pushed_at.isoformat()}\n"
+        if local_pulled_at:
+            release_notes += f"- local pull:    {local_pulled_at.isoformat()}\n"
+
+        return Update(
+            source=self.id,
+            subject=c.name,
+            current_version=f"local @ {local_short}",
+            new_version=f"registry @ {remote_short}",
+            release_url=f"https://hub.docker.com/r/{ref.slug}/tags",
+            release_notes=release_notes,
+            context=ctx,
+        )
