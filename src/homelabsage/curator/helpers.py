@@ -16,6 +16,46 @@ _SECRET_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Env vars that are pure container-runtime noise — interpreter sha sums,
+# init system internals, build metadata, locale. Every LLM tested at the
+# 12-may benchmark cited at least one of these as if it were homelab-relevant
+# (Llama-Groq quoted `PYTHON_SHA256` verbatim). Drop them before assembling
+# the prompt; if a real config var collides, the user can override per-image
+# via env_allowlist (TODO when someone hits the case).
+_NOISE_ENV_PREFIXES = (
+    "PYTHON",       # PYTHON_VERSION, PYTHON_SHA256, PYTHON_PIP_VERSION, PYTHONUNBUFFERED, PYTHONDONTWRITEBYTECODE
+    "S6_",          # s6-overlay internals on LSIO images
+    "_S6_",
+    "GPG_KEY",      # interpreter build-time signing keys
+    "NODE_VERSION",
+    "NPM_CONFIG_",
+    "YARN_VERSION",
+    "GOLANG_VERSION",
+    "RUBY_",
+    "PERL_",
+)
+_NOISE_ENV_EXACT = frozenset(
+    {
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "TERM",
+        "HOSTNAME",
+        "HOME",
+        "PWD",
+        "SHLVL",
+        "DEBIAN_FRONTEND",
+        "LANGUAGE",
+    }
+)
+
+
+def _is_noise_env(name: str) -> bool:
+    """True if this env var is container-runtime boilerplate the LLM should not see."""
+    if name in _NOISE_ENV_EXACT:
+        return True
+    return any(name.startswith(p) for p in _NOISE_ENV_PREFIXES)
+
 _FOOTER_RE = re.compile(
     r"<!--\s*curator:\s*(?P<name>[^@\s]+)@(?P<digest>[A-Za-z0-9]+)\s*-->"
 )
@@ -36,13 +76,29 @@ _LABEL_ALLOW_PREFIX = (
 
 
 def redact_env(env: list[str]) -> list[str]:
-    """Return env vars with secret-looking values replaced by `[REDACTED]`."""
+    """Clean an `Env` list before sending it to the LLM.
+
+    Two passes in one:
+
+    1. Drop entries that are pure container-runtime noise (interpreter sha
+       sums, init system internals, locale, PATH). The LLM has no way to tell
+       these are irrelevant and routinely cites them as if they meant
+       something.
+    2. Redact values whose key name looks secret-shaped (token/key/password/…).
+       Done by name, not by value, so unusual secrets in plain-looking keys
+       still get caught if the key contains one of the secret words.
+
+    Entries without `=` are passed through unchanged (older daemons can emit
+    plain strings, and dropping them silently would hide a real bug).
+    """
     out: list[str] = []
     for entry in env or []:
         if "=" not in entry:
             out.append(entry)
             continue
         name, _, value = entry.partition("=")
+        if _is_noise_env(name):
+            continue
         if _SECRET_NAME_RE.search(name):
             out.append(f"{name}=[REDACTED]")
         else:

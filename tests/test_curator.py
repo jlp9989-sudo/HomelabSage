@@ -52,6 +52,77 @@ def test_redact_env_handles_entries_without_equals():
     assert out == ["MALFORMED"]
 
 
+def test_redact_env_drops_python_runtime_noise():
+    out = _redact_env(
+        [
+            "PYTHON_VERSION=3.12.5",
+            "PYTHON_SHA256=abc123def456",
+            "PYTHON_PIP_VERSION=25.0",
+            "PYTHONUNBUFFERED=1",
+            "PYTHONDONTWRITEBYTECODE=1",
+            "GPG_KEY=A035C8C19219BA821ECEA86B64E628F8D684696D",
+            "TZ=Europe/Madrid",
+        ]
+    )
+    # Only TZ survives. Everything else is interpreter/build noise.
+    assert out == ["TZ=Europe/Madrid"]
+
+
+def test_redact_env_drops_s6_overlay_noise():
+    out = _redact_env(
+        [
+            "S6_BEHAVIOUR_IF_STAGE2_FAILS=2",
+            "S6_VERBOSITY=1",
+            "_S6_VERBOSITY=1",
+            "PUID=99",
+            "PGID=100",
+        ]
+    )
+    # LSIO PUID/PGID survive — those are actual user config, not s6 internals.
+    assert out == ["PUID=99", "PGID=100"]
+
+
+def test_redact_env_drops_shell_locale_noise():
+    out = _redact_env(
+        [
+            "PATH=/usr/local/sbin:/usr/local/bin",
+            "LANG=C.UTF-8",
+            "LC_ALL=C",
+            "TERM=xterm",
+            "HOSTNAME=a1b2c3",
+            "HOME=/root",
+            "PWD=/app",
+            "SHLVL=1",
+            "DEBIAN_FRONTEND=noninteractive",
+            "APP_PORT=8080",
+        ]
+    )
+    assert out == ["APP_PORT=8080"]
+
+
+def test_redact_env_drops_other_runtime_versions():
+    out = _redact_env(
+        [
+            "NODE_VERSION=20.18.0",
+            "NPM_CONFIG_LOGLEVEL=info",
+            "YARN_VERSION=1.22.22",
+            "GOLANG_VERSION=1.23.4",
+            "RUBY_VERSION=3.4.1",
+            "PERL_VERSION=5.40.0",
+            "REAL_CONFIG=keep_me",
+        ]
+    )
+    assert out == ["REAL_CONFIG=keep_me"]
+
+
+def test_redact_env_filter_runs_before_secret_redaction():
+    # PYTHON_SECRET would match the secret regex AND the noise prefix —
+    # noise drop wins because it removes the entry entirely, which is safer
+    # than leaking a redacted line that hints the var exists.
+    out = _redact_env(["PYTHON_SECRET=anything"])
+    assert out == []
+
+
 def test_safe_filename_strips_dangerous_chars():
     assert _safe_filename("homelabsage") == "homelabsage.md"
     assert _safe_filename("foo/bar") == "foo_bar.md"
@@ -91,6 +162,17 @@ def test_existing_footer_returns_none_when_absent():
 def test_default_template_uses_all_documented_placeholders():
     for ph in PROMPT_PLACEHOLDERS:
         assert "{" + ph + "}" in DEFAULT_PROMPT_TEMPLATE, ph
+
+
+def test_default_template_rule7_has_stop_anti_example():
+    # Regression guard for the Gemini "fallback + bullets" failure mode.
+    # If Rule 7 is rewritten without an explicit STOP instruction, the
+    # anti-example, or both, the prompt regresses to the 14-may behaviour.
+    tpl = DEFAULT_PROMPT_TEMPLATE
+    assert "Negative example" in tpl
+    assert "Positive example" in tpl
+    # The fallback string must appear at least 3x (rule body + neg + pos).
+    assert tpl.count("(no purpose stated yet — fill in)") >= 3
 
 
 # ─── is_purpose_fallback ─────────────────────────────────────────────────
