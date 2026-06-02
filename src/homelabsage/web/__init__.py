@@ -26,11 +26,13 @@ from .. import __version__
 from ..config import Config
 from ..db import Database
 from ..engine import Engine
+from ..mcp import register_mcp_routes
 from ..notes import NotesEditor
 from .auth import attach_basic_auth
 from .csrf import attach_csrf_guard
 from .lifecycle import register_lifecycle
 from .routes_diagnostics import register_diagnostics_routes
+from .routes_explain import register_explain_routes
 from .routes_health import register_health_routes
 from .routes_interview import register_interview_routes
 from .routes_llm_profiles import register_llm_profiles_routes
@@ -39,6 +41,8 @@ from .routes_settings import register_settings_routes
 from .routes_settings_html import register_settings_html_routes
 from .routes_settings_test import register_settings_test_routes
 from .routes_updates import register_updates_routes
+from .routes_usage import register_usage_routes
+from .routes_widgets import register_widget_routes
 from .routes_wizard import register_wizard_routes
 
 log = logging.getLogger(__name__)
@@ -90,6 +94,10 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
     register_settings_html_routes(app, cfg, cfg_path, env)
     register_wizard_routes(app, cfg, cfg_path, env)
     register_diagnostics_routes(app, cfg, env)
+    register_explain_routes(app, db, env)
+    register_mcp_routes(app, cfg, db)
+    register_widget_routes(app, cfg, db)
+    register_usage_routes(app, db, env)
     register_health_routes(app)
 
     # Static assets (HTMX, favicon, future CSS sprites). Mounted last so

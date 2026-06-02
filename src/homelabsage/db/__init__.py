@@ -24,6 +24,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from .explainers import ExplainersMixin
 from .interview import InterviewMixin
 from .interview import row_to_question as _row_to_question
 from .pending import PendingMixin
@@ -33,10 +34,14 @@ from .updates import UpdatesMixin
 # Re-exported for back-compat with `from homelabsage.db import _row_to_item`
 # which a handful of tests + the curator referenced in earlier versions.
 from .updates import row_to_item as _row_to_item
+from .usage import UsageMixin
 from .watched import WatchedMixin
 
 
-class Database(UpdatesMixin, InterviewMixin, WatchedMixin, PendingMixin):
+class Database(
+    UpdatesMixin, InterviewMixin, WatchedMixin, PendingMixin,
+    ExplainersMixin, UsageMixin,
+):
     """Single connection wrapper. Thread-safe for reads, writes serialised
     at the engine level (one scan at a time)."""
 

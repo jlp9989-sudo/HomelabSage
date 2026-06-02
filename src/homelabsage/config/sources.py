@@ -30,6 +30,14 @@ class DockerSourceConfig(BaseModel):
     # GitHub rate-limit budget covers this without raising costs. Set to
     # false if you want to skip the extra request.
     repo_health: bool = True
+    # Walk every GitHub/Codeberg release strictly between the local tag
+    # and the candidate tag, concatenate the bodies and attach to
+    # `Update.context.release_notes_diff`. The analyzer prompt mines the
+    # diff for breaking changes the user actually crosses by upgrading.
+    # On by default — one extra paginated GET per update, cheap, but the
+    # signal it produces is the project's main wedge over Watchtower/
+    # Diun/WUD which only say "new tag exists".
+    releases_diff: bool = True
     # Track containers whose tag is not a version (`latest`, `main`, `edge`,
     # `stable`, …) by comparing the local image digest with what the
     # registry currently serves under that tag. Only Docker Hub is queried

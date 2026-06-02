@@ -55,6 +55,17 @@ Rules:
   entirely if none of the alternatives is more popular than the current image
   by a margin you'd describe as "much more" (the gate filter already ensures
   that, but trust your reading of the data).
+- If the context block contains "release_notes_diff" with a non-empty
+  `body`, it concatenates EVERY release between the user's current
+  version and the candidate version (`from_version` → `to_version`,
+  versions listed in `versions_included`). This is the FULL changelog
+  span the user actually crosses by upgrading, not just the latest
+  release. Treat it as the authoritative source for `breaking_changes`
+  and `config_obsolete`: scan the body for any "BREAKING", "removed",
+  "deprecated", "renamed", "migration", "schema", "drop support", "no
+  longer". Cite the version each finding lands in (e.g. "in 2.4.0:
+  removed --legacy-auth flag"). When `truncated=true`, mention that
+  later releases were not included.
 - If the context block contains "image_size_growth" with `triggered=true`,
   mention in `summary` that the image roughly tripled / doubled / etc in
   size (cite the ratio VERBATIM, e.g. "image grew 2.4× — 80 → 195 MiB").

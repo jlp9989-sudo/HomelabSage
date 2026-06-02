@@ -268,11 +268,11 @@ async def test_client_dispatches_groq_to_openai_compat(monkeypatch):
 
     async def fake_ollama(self, prompt, strict_json, temperature):
         called.append("ollama")
-        return "{}"
+        return "{}", 0, 0, True
 
     async def fake_openai_compat(self, prompt, strict_json, temperature):
         called.append("openai_compat")
-        return "{}"
+        return "{}", 0, 0, True
 
     monkeypatch.setattr(LLMClient, "_call_ollama", fake_ollama)
     monkeypatch.setattr(LLMClient, "_call_openai_compat", fake_openai_compat)

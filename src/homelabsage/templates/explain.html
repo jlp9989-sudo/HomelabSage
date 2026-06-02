@@ -1,0 +1,67 @@
+{% extends "_base.html" %}
+{% set nav = "updates" %}
+{% block title %}Why this verdict — {{ item.update.subject }}{% endblock %}
+
+{% block content %}
+<style>
+  pre.audit { background:#0a0d11; padding:1rem; border-radius:6px; max-height:60vh; overflow:auto; white-space:pre-wrap; font: 12px/1.45 ui-monospace, monospace; }
+  .meta { color:#8fa3b8; font-size:.85rem; }
+  .meta code { color:#d9e1e8; }
+  .pair { display:grid; grid-template-columns:1fr; gap:1rem; margin-bottom:1.5rem; }
+  @media (min-width: 900px) {
+    .pair { grid-template-columns:1fr 1fr; }
+  }
+  details summary { cursor:pointer; padding:.4rem 0; font-weight:600; }
+</style>
+
+<h2>Why this verdict?</h2>
+
+<p class="meta">
+  <code>{{ item.id }}</code> &middot;
+  {{ item.update.subject }}
+  <code>{{ item.update.current_version }}</code> → <code>{{ item.update.new_version }}</code>
+</p>
+
+{% if item.analysis %}
+  <p>
+    {% set sev = item.analysis.severity.value %}
+    <span class="sev sev-{{ sev }}">{{ sev|upper }}</span>
+    &mdash; {{ item.analysis.summary }}
+  </p>
+{% endif %}
+
+{% if explainer %}
+  <p class="meta">
+    Captured {{ explainer.created_at }}.
+    Provider <code>{{ explainer.provider }}</code> &middot; model <code>{{ explainer.model }}</code>.
+  </p>
+
+  <div class="pair">
+    <details open>
+      <summary>Prompt sent to the LLM ({{ explainer.prompt|length }} chars)</summary>
+      <pre class="audit">{{ explainer.prompt }}</pre>
+    </details>
+    <details open>
+      <summary>Raw response from the LLM ({{ explainer.raw_response|length }} chars)</summary>
+      <pre class="audit">{{ explainer.raw_response }}</pre>
+    </details>
+  </div>
+
+  {% if explainer.notes_used %}
+    <details>
+      <summary>Notes injected into this prompt</summary>
+      <pre class="audit">{{ explainer.notes_used }}</pre>
+    </details>
+  {% endif %}
+{% else %}
+  <p class="flash error">
+    No explainer recorded for this update. Either it was analysed before the
+    explain table existed, or the LLM call failed before storing the prompt.
+    Re-run a scan to populate it.
+  </p>
+{% endif %}
+
+<p style="margin-top:2rem;">
+  <a href="/" class="btn ghost">← back to updates</a>
+</p>
+{% endblock %}

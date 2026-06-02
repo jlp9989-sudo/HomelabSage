@@ -1,0 +1,65 @@
+{% extends "_base.html" %}
+{% set nav = "usage" %}
+{% block title %}HomelabSage — LLM usage{% endblock %}
+
+{% block content %}
+<h2>LLM usage</h2>
+<p class="muted">
+  Per-call rows for the last {{ summary.days }} days. Token counts come
+  from the provider response when available, or a chars/4 estimate
+  otherwise (rows marked <code>est</code>).
+</p>
+
+<div style="margin:.6rem 0 1.4rem 0; display:flex; gap:.6rem; flex-wrap:wrap;">
+  <span class="pill">{{ summary.totals.calls }} calls</span>
+  <span class="pill">{{ summary.totals.tokens_in }} in</span>
+  <span class="pill">{{ summary.totals.tokens_out }} out</span>
+  <span class="pill">{{ summary.totals.succeeded }} succeeded</span>
+</div>
+
+{% if summary.by_provider_model %}
+<h3>By provider / model</h3>
+<table>
+  <thead><tr>
+    <th>Provider</th><th>Model</th><th>Calls</th><th>Tokens in</th><th>Tokens out</th><th>Estimated</th>
+  </tr></thead>
+  <tbody>
+    {% for row in summary.by_provider_model %}
+    <tr>
+      <td><code>{{ row.provider }}</code></td>
+      <td><code>{{ row.model }}</code></td>
+      <td>{{ row.calls }}</td>
+      <td>{{ row.tokens_in or 0 }}</td>
+      <td>{{ row.tokens_out or 0 }}</td>
+      <td>{{ row.estimated_count or 0 }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if recent %}
+<h3>Recent calls</h3>
+<table>
+  <thead><tr>
+    <th>When</th><th>Provider/model</th><th>Update</th>
+    <th>In</th><th>Out</th><th>ms</th><th>OK</th>
+  </tr></thead>
+  <tbody>
+    {% for r in recent %}
+    <tr>
+      <td class="muted">{{ r.created_at }}</td>
+      <td><code>{{ r.provider }}</code> / <code>{{ r.model }}</code></td>
+      <td><code>{{ r.update_id or '—' }}</code></td>
+      <td>{{ r.tokens_in }}{% if r.estimated %} <span class="muted">(est)</span>{% endif %}</td>
+      <td>{{ r.tokens_out }}</td>
+      <td>{{ r.duration_ms }}</td>
+      <td>{% if r.succeeded %}✓{% else %}✗{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No LLM calls recorded yet — run a scan to populate this page.</p>
+{% endif %}
+{% endblock %}

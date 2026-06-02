@@ -2,6 +2,82 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.4.0 — 2026-06-02
+
+The "Watchtower-was-archived" release — eight research-driven features that
+sharpen the wedge HomelabSage has over the now-archived Watchtower
+(github.com/containrrr/watchtower discussion #2135, 17 Dec 2025) and over
+the notify-only WUD/Diun cohort. None of them reason about *what changed*
+between versions; v0.4 leans into that gap.
+
+### Added — analyzer
+
+- **Release-notes diff summariser** (`releases_diff.py`,
+  `sources.docker.releases_diff` on by default). Fetches every
+  GitHub/Codeberg release strictly between the local tag and the
+  candidate tag, concatenates the bodies, hands the diff to the LLM.
+  New prompt rule mines the diff for breaking changes the user actually
+  crosses by upgrading — not just the latest release body.
+- **Tag-pattern intelligence** (`tag_patterns.py`). Infers each
+  image's tag scheme (semver / calver / build_suffix / digest /
+  floating) from the published tag listing so the analyzer can skip
+  out-of-band candidate tags (e.g. an experimental `:cuda12` on a
+  semver-dominant image).
+
+### Added — UX / surfaces
+
+- **`/mcp` Model Context Protocol endpoint** (`mcp.py`). JSON-RPC 2.0
+  over HTTP exposing seven tools — `health`, `list_updates`,
+  `get_update`, `set_update_status`, `list_diagnostics`,
+  `list_watched_repos`, `list_pending_dispatches`. Lets the user's
+  Claude Code / Cursor / ChatGPT desktop read homelab state directly.
+- **Explain mode** (`/updates/<id>/explain`,
+  `analysis_explainers` table). Stores the exact prompt sent + raw
+  response received per analyzed update. Click any verdict for a
+  side-by-side audit trail of prompt / response / notes consulted.
+- **Homepage + Homarr widget endpoints** (`/widget/homepage`,
+  `/widget/homarr`). Auth-bypassed read-only JSON for dashboard
+  cards — pending count, severity buckets, parity_active,
+  queued_dispatches, last_scan_at.
+- **`/usage` page** (`db/usage.py`). Per-LLM-call rows + 30-day
+  rolling per-provider/model totals. Helps users see "where did my
+  Groq free-tier quota go?". Tokens come from provider responses
+  when available; chars/4 estimate otherwise.
+
+### Added — notifications
+
+- **Severity-aware batching** (`outputs/batch.py`,
+  `outputs.batching` config block). When ≥`min_count` updates below
+  `below_severity` fire in one scan, push channels receive a single
+  rollup at end-of-scan instead of one ping per item. Critical/High
+  keep firing immediately.
+
+### Added — migration aid
+
+- **Watchtower migration helper**
+  (`homelabsage watchtower-migrate`, `watchtower_migrate.py`).
+  Detects a running `containrrr/watchtower` or `nicholas-fedor/watchtower`
+  container, parses its env + CLI args + per-container labels, and
+  prints a Markdown report recommending what to include / skip /
+  monitor-only when migrating each container to HomelabSage.
+
+### Changed
+
+- **`LLMClient` instrumented** for token-usage. New `LastCall`
+  dataclass replaces the previous `(prompt, raw_response)` tuple;
+  it now also carries `tokens_in`, `tokens_out`, `tokens_estimated`,
+  `duration_ms`, `succeeded`. The Engine writes a usage row + an
+  explainer row per call. `_call()` is kept as a thin wrapper for
+  back-compat — `_call_with_usage()` is the new canonical method.
+- Web `/widget/*` paths bypass HTTP Basic Auth so dashboards can
+  scrape without juggling credentials.
+
+### Internal
+
+- 700 → 799 tests (+99). Ruff clean, 0 mypy errors.
+- Three new DB tables: `analysis_explainers`, `llm_usage`. Forward-
+  only `CREATE IF NOT EXISTS` — no migration script needed.
+
 ## v0.3.0 — 2026-06-02
 
 A polish-pack release that fills out the detector / output layer and tightens

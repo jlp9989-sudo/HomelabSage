@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from ._env import _ENV_RE, _expand, _load_dotenv
 from .llm import LLMConfig
 from .outputs import (
+    BatchingConfig,
     DiscordOutputConfig,
     GotifyOutputConfig,
     NotionOutputConfig,
@@ -132,6 +133,7 @@ __all__ = [
     "NtfyOutputConfig",
     "GotifyOutputConfig",
     "OutputsConfig",
+    "BatchingConfig",
     "SchedulerConfig",
     "DigestConfig",
     "ParityGateConfig",

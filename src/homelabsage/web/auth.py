@@ -25,8 +25,12 @@ def attach_basic_auth(app: FastAPI, cfg: WebAuthConfig) -> None:
 
     @app.middleware("http")
     async def basic_auth(request: Request, call_next):
-        # Health endpoint must stay open for Docker / Kuma probes.
-        if request.url.path == "/healthz":
+        # `/healthz` stays open for Docker / Kuma probes; `/widget/*`
+        # stays open so gethomepage / Homarr can scrape without juggling
+        # Basic Auth headers (the dashboards themselves expect a public
+        # endpoint behind a reverse proxy ACL).
+        path = request.url.path
+        if path == "/healthz" or path.startswith("/widget/"):
             return await call_next(request)
         header = request.headers.get("authorization", "")
         if header.startswith("Basic "):

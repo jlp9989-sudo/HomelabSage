@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import httpx
 from pydantic import ValidationError
@@ -17,6 +19,27 @@ from pydantic import ValidationError
 from .config import LLMConfig
 from .models import Analysis, Severity, Update
 from .prompts import load_template as _load_prompt_template
+
+
+@dataclass
+class LastCall:
+    """Auditable record of the most recent `LLMClient` call.
+
+    Read by the Engine after every analyze() to:
+      - persist the explainer row (prompt + raw_response + notes used)
+      - record usage stats (tokens_in/out, duration, succeeded)
+
+    Reset to None at the start of each call so a failed HTTP request
+    doesn't leak the previous call's content into the next explainer.
+    """
+
+    prompt: str
+    raw_response: str
+    tokens_in: int
+    tokens_out: int
+    tokens_estimated: bool
+    duration_ms: int
+    succeeded: bool
 
 log = logging.getLogger(__name__)
 
@@ -162,6 +185,12 @@ class LLMClient:
         else:
             fixed = cfg_provider
             self._provider = lambda: fixed
+        # Most-recent call record. The Engine reads this after analyze()
+        # to persist an explainer row (prompt+response) AND a usage row
+        # (tokens, duration, succeeded). Reset to None at the start of
+        # each call so a failed HTTP request doesn't leak the previous
+        # call's content into the next audit row.
+        self.last_call: LastCall | None = None
 
     @property
     def cfg(self) -> LLMConfig:
@@ -171,14 +200,36 @@ class LLMClient:
         return self.cfg.provider != "disabled"
 
     async def analyze(self, update: Update, notes: str = "") -> Analysis | None:
+        self.last_call = None
         if not self.is_enabled():
             return None
         prompt = build_prompt(update, notes=notes)
+        started = time.monotonic()
         try:
-            raw = await self._call(prompt, strict_json=self.cfg.strict_json)
+            raw, tin, tout, est = await self._call_with_usage(
+                prompt, strict_json=self.cfg.strict_json,
+            )
         except Exception as e:
             log.warning("LLM call failed for %s: %s", update.subject, e)
+            # Record the failure for usage stats — the engine sees
+            # last_call.succeeded=False and persists a row anyway so
+            # quota dashboards reflect failed-call attempts too.
+            self.last_call = LastCall(
+                prompt=prompt, raw_response="",
+                tokens_in=_estimate_tokens(prompt), tokens_out=0,
+                tokens_estimated=True,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                succeeded=False,
+            )
             return None
+        # Capture for the explainer table BEFORE parsing — even if parse
+        # fails we want the audit record to show what the model said.
+        self.last_call = LastCall(
+            prompt=prompt, raw_response=raw,
+            tokens_in=tin, tokens_out=tout, tokens_estimated=est,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            succeeded=True,
+        )
         return _parse_analysis(raw)
 
     async def generate_text(self, prompt: str, *, temperature: float = 0.0) -> str | None:
@@ -200,26 +251,46 @@ class LLMClient:
     async def _call(
         self, prompt: str, strict_json: bool, temperature: float = 0.2
     ) -> str:
+        """Backwards-compat wrapper around `_call_with_usage` for callers
+        that only want the text. Use `_call_with_usage` directly when you
+        need token counts (e.g. the analyzer's LastCall build)."""
+        text, _tin, _tout, _estimated = await self._call_with_usage(
+            prompt, strict_json=strict_json, temperature=temperature,
+        )
+        return text
+
+    async def _call_with_usage(
+        self, prompt: str, strict_json: bool, temperature: float = 0.2,
+    ) -> tuple[str, int, int, bool]:
+        """Returns `(text, tokens_in, tokens_out, estimated)`.
+
+        `estimated=True` means the provider didn't report usage and we
+        applied a 4-chars-per-token heuristic so totals stay populated.
+        """
         # Dispatch by the provider's protocol so adding a new openai-compat
         # provider (next Groq clone, next Gemini revision, …) doesn't need a
         # branch here — only a PROVIDER_PRESETS entry.
         protocol = PROVIDER_PRESETS.get(self.cfg.provider, {}).get("protocol")
         if protocol == "ollama":
-            raw = await self._call_ollama(
-                prompt, strict_json=strict_json, temperature=temperature
+            text, tin, tout, est = await self._call_ollama(
+                prompt, strict_json=strict_json, temperature=temperature,
             )
         elif protocol == "openai_compat":
-            raw = await self._call_openai_compat(
-                prompt, strict_json=strict_json, temperature=temperature
+            text, tin, tout, est = await self._call_openai_compat(
+                prompt, strict_json=strict_json, temperature=temperature,
             )
         else:
             raise ValueError(f"unknown LLM provider: {self.cfg.provider}")
-        return _strip_think_blocks(raw)
+        return _strip_think_blocks(text), tin, tout, est
 
     async def _call_ollama(
-        self, prompt: str, strict_json: bool, temperature: float
-    ) -> str:
-        """Ollama-compat: POST /api/generate, format=json forces JSON output."""
+        self, prompt: str, strict_json: bool, temperature: float,
+    ) -> tuple[str, int, int, bool]:
+        """Ollama-compat: POST /api/generate, format=json forces JSON output.
+
+        Ollama reports usage as `prompt_eval_count` + `eval_count`. When
+        absent (very old servers, custom forks) we fall back to estimates.
+        """
         url = self.cfg.endpoint.rstrip("/") + "/api/generate"
         payload = {
             "model": self.cfg.model,
@@ -233,12 +304,27 @@ class LLMClient:
         async with httpx.AsyncClient(timeout=self.cfg.timeout) as client:
             r = await client.post(url, json=payload)
             r.raise_for_status()
-            return r.json().get("response", "")
+            data = r.json()
+            text = data.get("response", "")
+            tin = int(data.get("prompt_eval_count") or 0)
+            tout = int(data.get("eval_count") or 0)
+            estimated = False
+            if tin == 0:
+                tin = _estimate_tokens(prompt)
+                estimated = True
+            if tout == 0:
+                tout = _estimate_tokens(text)
+                estimated = True
+            return text, tin, tout, estimated
 
     async def _call_openai_compat(
-        self, prompt: str, strict_json: bool, temperature: float
-    ) -> str:
-        """OpenAI-compatible chat completions."""
+        self, prompt: str, strict_json: bool, temperature: float,
+    ) -> tuple[str, int, int, bool]:
+        """OpenAI-compatible chat completions.
+
+        `usage.prompt_tokens` + `usage.completion_tokens` per the OpenAI
+        spec; Groq/Gemini/OpenRouter all return them.
+        """
         url = _resolve_chat_completions_url(self.cfg.endpoint)
         headers = {"Authorization": f"Bearer {self.cfg.api_key}"} if self.cfg.api_key else {}
         payload = {
@@ -252,7 +338,23 @@ class LLMClient:
             r = await client.post(url, json=payload, headers=headers)
             r.raise_for_status()
             data = r.json()
-            return data["choices"][0]["message"]["content"]
+            text = data["choices"][0]["message"]["content"]
+            usage = data.get("usage") or {}
+            tin = int(usage.get("prompt_tokens") or 0)
+            tout = int(usage.get("completion_tokens") or 0)
+            estimated = False
+            if tin == 0:
+                tin = _estimate_tokens(prompt)
+                estimated = True
+            if tout == 0:
+                tout = _estimate_tokens(text)
+                estimated = True
+            return text, tin, tout, estimated
+
+
+def _estimate_tokens(text: str) -> int:
+    """Crude chars / 4 estimate when the provider didn't report usage."""
+    return max(1, len(text) // 4)
 
 
 def _parse_analysis(raw: str) -> Analysis | None:

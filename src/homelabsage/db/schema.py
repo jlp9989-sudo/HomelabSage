@@ -69,6 +69,42 @@ CREATE TABLE IF NOT EXISTS pending_dispatches (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pending_output ON pending_dispatches(output_id);
+
+-- Auditable AI: one row per successful LLM analyze() call. Stores the
+-- exact prompt sent and the raw response received so the user can
+-- inspect WHY a verdict landed where it did. Off when the LLM is
+-- disabled; never written for failed calls (we don't store empty/error
+-- responses — they'd just be noise).
+CREATE TABLE IF NOT EXISTS analysis_explainers (
+    update_id      TEXT PRIMARY KEY,
+    prompt         TEXT NOT NULL,
+    raw_response   TEXT NOT NULL,
+    notes_used     TEXT,
+    provider       TEXT,
+    model          TEXT,
+    created_at     TEXT NOT NULL
+);
+
+-- Per-LLM-call usage stats. One row per successful or failed call so
+-- the user can answer "where did my Groq free-tier quota go?" / "is
+-- the Gemini paid tier worth it?". Token counts come straight from the
+-- provider response when available; otherwise we estimate via a
+-- 4-chars-per-token rule of thumb.
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider      TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    update_id     TEXT,
+    tokens_in     INTEGER NOT NULL DEFAULT 0,
+    tokens_out    INTEGER NOT NULL DEFAULT 0,
+    estimated     INTEGER NOT NULL DEFAULT 0,
+    duration_ms   INTEGER NOT NULL DEFAULT 0,
+    succeeded     INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_provider ON llm_usage(provider);
+CREATE INDEX IF NOT EXISTS idx_usage_created  ON llm_usage(created_at);
 """
 
 

@@ -130,9 +130,35 @@ class GotifyOutputConfig(BaseModel):
     )
 
 
+class BatchingConfig(BaseModel):
+    """Severity-aware notification batching.
+
+    When enabled, push outputs accumulate items below `below_severity` and
+    send a single rollup per scan rather than one ping each. Critical /
+    High continue to fire immediately. Useful when `min_severity` is set
+    to `info` or `medium` — without batching the user gets spammed with
+    one push per touch.
+    """
+
+    enabled: bool = False
+    below_severity: Literal["critical", "high", "medium", "info"] = Field(
+        "high",
+        description=(
+            "Items STRICTLY BELOW this severity get batched. Default 'high' "
+            "means medium + info are batched; high + critical fire immediately."
+        ),
+    )
+    min_count: int = Field(
+        2,
+        description="Minimum number of batched items to send a rollup. Fewer "
+        "are dispatched individually as today.",
+    )
+
+
 class OutputsConfig(BaseModel):
     notion: NotionOutputConfig = Field(default_factory=NotionOutputConfig)
     telegram: TelegramOutputConfig = Field(default_factory=TelegramOutputConfig)
     discord: DiscordOutputConfig = Field(default_factory=DiscordOutputConfig)
     ntfy: NtfyOutputConfig = Field(default_factory=NtfyOutputConfig)
     gotify: GotifyOutputConfig = Field(default_factory=GotifyOutputConfig)
+    batching: BatchingConfig = Field(default_factory=BatchingConfig)

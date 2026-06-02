@@ -13,9 +13,10 @@ from .config import Config
 from .curator.incremental import append_update_to_note
 from .db import Database
 from .llm import LLMClient
-from .models import AnalyzedUpdate, UpdateStatus
+from .models import AnalyzedUpdate, Severity, UpdateStatus
 from .notes import NotesProvider
 from .outputs import Output
+from .outputs.batch import below_threshold, dispatch_batch
 from .outputs.discord import DiscordOutput
 from .outputs.gotify import GotifyOutput
 from .outputs.notion import NotionOutput
@@ -120,6 +121,13 @@ class Engine:
         if not push_gated:
             await self._flush_pending_dispatches()
 
+        # Items collected for low-severity batching. Dispatched once at the
+        # end of the scan as a single rollup per push channel rather than
+        # one ping per item. Only populated when `outputs.batching.enabled`.
+        batched: list[AnalyzedUpdate] = []
+        batch_cfg = self.cfg.outputs.batching
+        batch_threshold = Severity(batch_cfg.below_severity) if batch_cfg.enabled else None
+
         for plugin in self.plugins:
             try:
                 items = await plugin.scan()
@@ -149,10 +157,46 @@ class Engine:
                             analyzed.status = UpdateStatus.ANALYZED
                             analyzed.analyzed_at = utcnow()
                             stats["analyzed"] += 1
+                        # Persist explainer (prompt + raw response + notes
+                        # used) AND a usage row regardless of parse
+                        # success. last_call is None only when analyze()
+                        # early-returned because the LLM is disabled.
+                        if self.llm.last_call is not None:
+                            call = self.llm.last_call
+                            cfg_now = self.llm.cfg
+                            if call.succeeded:
+                                self.db.upsert_explainer(
+                                    analyzed.id,
+                                    prompt=call.prompt,
+                                    raw_response=call.raw_response,
+                                    notes_used=notes_ctx or None,
+                                    provider=cfg_now.provider,
+                                    model=cfg_now.model,
+                                )
+                            self.db.record_llm_call(
+                                provider=cfg_now.provider,
+                                model=cfg_now.model,
+                                update_id=analyzed.id,
+                                tokens_in=call.tokens_in,
+                                tokens_out=call.tokens_out,
+                                estimated=call.tokens_estimated,
+                                duration_ms=call.duration_ms,
+                                succeeded=call.succeeded,
+                            )
                     except Exception as e:
                         log.exception("LLM failed on %s: %s", update.subject, e)
                 self.db.upsert(analyzed)
                 self._incremental_hook(analyzed)
+                # Batching short-circuit: when the item is below the rollup
+                # threshold AND we have a meaningful analysis, defer push
+                # outputs to a single rollup at end-of-scan. Notion (and
+                # other persistent outputs) still run per-item.
+                deferred_to_batch = (
+                    batch_threshold is not None
+                    and below_threshold(analyzed, batch_threshold)
+                )
+                if deferred_to_batch:
+                    batched.append(analyzed)
                 for output in self.outputs:
                     if push_gated and output.is_push:
                         # Queue for later flush rather than relying on the
@@ -163,10 +207,25 @@ class Engine:
                         # the gate clears.
                         self.db.queue_pending_dispatch(analyzed.id, output.id)
                         continue
+                    if deferred_to_batch and output.is_push:
+                        # Sent later via dispatch_batch.
+                        continue
                     try:
                         await output.send(analyzed)
                     except Exception as e:
                         log.exception("output %s failed: %s", output.id, e)
+
+        # End-of-scan: flush the low-severity batch if we crossed the
+        # minimum count. Below min_count we DROP the batched items — the
+        # whole point of batching is "don't ping the user for trivia";
+        # forwarding the first message of a 1-item batch defeats that.
+        if (
+            batch_threshold is not None
+            and not push_gated
+            and len(batched) >= batch_cfg.min_count
+        ):
+            results = await dispatch_batch(self.cfg, batched)
+            log.info("Batched %d updates → %s", len(batched), results)
 
         await self._heartbeat_ok()
         log.info("Run end — %s", stats)

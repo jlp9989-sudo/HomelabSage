@@ -24,6 +24,7 @@ from ..registries import (
     local_digest_for,
     parse_image_ref,
 )
+from ..releases_diff import build_diff as build_releases_diff
 from . import Plugin
 
 log = logging.getLogger(__name__)
@@ -313,6 +314,14 @@ class DockerPlugin(Plugin):
             }
             if any(v is not None for v in puid_pgid.values()):
                 ctx["puid_pgid"] = {k: v for k, v in puid_pgid.items() if v is not None}
+
+            if self.cfg.releases_diff:
+                try:
+                    diff = await build_releases_diff(repo, current, new_version)
+                    if diff is not None:
+                        ctx["release_notes_diff"] = diff.to_context()
+                except Exception as e:
+                    log.debug("releases_diff failed for %s: %s", repo, e)
 
             if self.cfg.repo_health:
                 try:
