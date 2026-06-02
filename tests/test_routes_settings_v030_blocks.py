@@ -18,38 +18,17 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from homelabsage import web
-from homelabsage.config import load_config
+from .conftest import make_baseline_config_yaml, make_test_client
 
 
 @pytest.fixture
 def cfg_dir(tmp_path: Path) -> Path:
-    cfg = tmp_path / "config.yaml"
-    cfg.write_text(
-        "llm:\n"
-        "  provider: openai\n"
-        "  model: stub\n"
-        "  endpoint: http://stub\n"
-        "scheduler:\n"
-        "  enabled: false\n"
-        "storage:\n"
-        f"  database_path: {tmp_path}/state.sqlite\n"
-        "web:\n"
-        "  enabled: true\n"
-        "  host: 127.0.0.1\n"
-        "  port: 0\n"
-        "  auth:\n"
-        "    enabled: false\n"
-    )
-    return tmp_path
+    return make_baseline_config_yaml(tmp_path)
 
 
 @pytest.fixture
 def client(cfg_dir: Path) -> TestClient:
-    cfg_path = cfg_dir / "config.yaml"
-    cfg = load_config(cfg_path)
-    app = web.create_app(cfg, cfg_path=cfg_path)
-    return TestClient(app)
+    return make_test_client(cfg_dir)
 
 
 # ─── block index ────────────────────────────────────────────────────────

@@ -24,6 +24,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from ._time import utcnow
 from .config import Config, get_active_llm_config
 from .db import Database
 from .llm import LLMClient
@@ -205,7 +206,7 @@ def gather_evidence(
         db.close()
 
     since = (
-        last.detected_at if last else datetime.utcnow() - timedelta(hours=fallback_window_hours)
+        last.detected_at if last else utcnow() - timedelta(hours=fallback_window_hours)
     )
     raw_lines = fetch_docker_logs(
         container_name, since=since, socket=cfg.sources.docker.socket

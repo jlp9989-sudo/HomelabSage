@@ -94,7 +94,7 @@ class NotesProvider:
     def __init__(
         self,
         notes_dir: str | Path | None = None,
-        extra_docs: list[str | Path] | None = None,
+        extra_docs: list[str] | None = None,
         max_chars: int = 4000,
     ):
         self.max_chars = max_chars
@@ -179,7 +179,7 @@ class NotesEditor:
             raise ValueError(f"invalid filename: {filename!r}")
         if Path(clean).suffix.lower() not in ALLOWED_SUFFIXES:
             raise ValueError(f"only {sorted(ALLOWED_SUFFIXES)} files are allowed")
-        full = (self.dir / clean).resolve()  # type: ignore[union-attr]
+        full = (self.dir / clean).resolve()  # type: ignore[union-attr,operator]
         if not str(full).startswith(str(self.dir)):  # type: ignore[union-attr]
             raise PermissionError(f"path escapes notes_dir: {filename!r}")
         return full

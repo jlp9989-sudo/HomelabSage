@@ -45,6 +45,11 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
     "mypy>=1.10",
+    # Stub packages — mypy `import-untyped` errors disappear once these land.
+    # `docker` and `apscheduler` don't publish typed stubs; mypy.overrides
+    # below silences them.
+    "types-PyYAML>=6.0",
+    "types-paramiko>=3.4",
 ]
 
 [project.scripts]
@@ -72,3 +77,30 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+# ─── mypy ───────────────────────────────────────────────────────────────
+# Goal: zero errors against `mypy src/homelabsage`. The CI workflow keeps
+# `continue-on-error` for safety, but we run clean.
+#
+# Two friction sources accumulate noise:
+#   1. Third-party libs without type stubs (docker SDK, apscheduler). We
+#      can't supply those upstream; suppress at import time.
+#   2. Pydantic v2 reports `default_factory=ClassName` as type-incompatible
+#      because it expects `Callable[[], Never]`. The runtime is correct;
+#      we rewrite the call sites to use `default_factory=lambda: Cls()` so
+#      the type checker accepts them without per-line ignores.
+[tool.mypy]
+python_version = "3.11"
+strict_optional = true
+# Pydantic v2 ships its own mypy plugin that teaches mypy about
+# `Field(default, ...)` providing defaults; without it, `Cls()` calls
+# look like "all fields required" and emit ~30 false call-arg errors.
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "docker",
+    "docker.*",
+    "apscheduler.*",
+]
+ignore_missing_imports = true

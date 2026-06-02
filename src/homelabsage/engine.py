@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
 from pathlib import Path
 
 import httpx
 
+from ._time import utcnow
 from .config import Config
 from .curator.incremental import append_update_to_note
 from .db import Database
@@ -147,7 +147,7 @@ class Engine:
                         analyzed.analysis = await self.llm.analyze(update, notes=notes_ctx)
                         if analyzed.analysis:
                             analyzed.status = UpdateStatus.ANALYZED
-                            analyzed.analyzed_at = datetime.utcnow()
+                            analyzed.analyzed_at = utcnow()
                             stats["analyzed"] += 1
                     except Exception as e:
                         log.exception("LLM failed on %s: %s", update.subject, e)

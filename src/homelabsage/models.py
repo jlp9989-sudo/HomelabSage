@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ._time import utcnow
+
 
 class Severity(StrEnum):
     """Severity assigned by the LLM to an update."""
@@ -80,7 +82,7 @@ class AnalyzedUpdate(BaseModel):
     update: Update
     analysis: Analysis | None = None
     status: UpdateStatus = UpdateStatus.NEW
-    detected_at: datetime = Field(default_factory=datetime.utcnow)
+    detected_at: datetime = Field(default_factory=utcnow)
     analyzed_at: datetime | None = None
     # Cache of the Notion page id once we have created/found it. Lets the
     # Notion output PATCH instead of POST and prevents duplicate rows when
@@ -115,5 +117,5 @@ class InterviewQuestion(BaseModel):
     suggested_text: str | None = None
     answer_text: str | None = None
     status: InterviewStatus = InterviewStatus.PENDING
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
     answered_at: datetime | None = None

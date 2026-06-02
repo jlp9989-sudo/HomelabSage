@@ -342,7 +342,13 @@ def register_settings_html_routes(
     @app.post("/settings/{block:path}/update", response_class=HTMLResponse)
     async def settings_update(request: Request, block: str) -> HTMLResponse:
         dotted, submodel = _resolve_block(block)
-        form = dict(await request.form())
+        # FastAPI form() returns UploadFile | str; settings forms never
+        # upload files, so coerce any non-string value to "" before passing
+        # to the form-to-patch helper (which is typed `dict[str, str]`).
+        form: dict[str, str] = {
+            k: (v if isinstance(v, str) else "")
+            for k, v in dict(await request.form()).items()
+        }
 
         # Walk the dotted path on the fresh config to get the current values
         # for the bool/diff-trim logic in `_form_to_block_patch`.
@@ -388,6 +394,10 @@ def register_settings_html_routes(
             if block is None:
                 raise HTTPException(404, f"unknown settings block: {rest}")
 
+        # `block` is set to a known SETTING_BLOCKS key before this point
+        # (either equal to `rest` or peeled out of it); the type checker
+        # can't follow the dual-branch narrowing, so assert.
+        assert block is not None
         try:
             _apply_revert(block, key=key)
             flash = (

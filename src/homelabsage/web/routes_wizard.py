@@ -191,8 +191,17 @@ def register_wizard_routes(
         step = WIZARD_STEPS[_step_index(slug)]
         return _render("wizard.html", view="step", **_step_ctx(step))
 
-    @app.post("/wizard/{slug}", response_class=HTMLResponse)
-    async def wizard_step_submit(request: Request, slug: str) -> HTMLResponse:
+    @app.post(
+        "/wizard/{slug}",
+        response_class=HTMLResponse,
+        # FastAPI tries to derive a response_model from the union annotation
+        # and crashes on `HTMLResponse | RedirectResponse`. Both branches are
+        # already concrete Response subclasses, so there's nothing to model.
+        response_model=None,
+    )
+    async def wizard_step_submit(
+        request: Request, slug: str,
+    ) -> HTMLResponse | RedirectResponse:
         if slug == "done":
             # POST /wizard/done = "mark complete and bail out to the dashboard"
             if cfg_path is not None:
@@ -200,7 +209,13 @@ def register_wizard_routes(
             return RedirectResponse("/", status_code=303)
 
         step = WIZARD_STEPS[_step_index(slug)]
-        form = dict(await request.form())
+        # FastAPI's form() returns UploadFile | str values. The wizard
+        # forms only ship text inputs, so coerce upfront — mypy can't
+        # narrow the union through the helpers below.
+        form: dict[str, str] = {
+            k: (v if isinstance(v, str) else "")
+            for k, v in dict(await request.form()).items()
+        }
 
         # "Skip this step" sends a marker field; we accept and move on
         # without touching the overlay for this block.

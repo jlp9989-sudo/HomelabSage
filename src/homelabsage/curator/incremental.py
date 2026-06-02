@@ -118,9 +118,19 @@ def _replace_or_insert_block(body: str, new_line: str, *, max_lines: int) -> str
         before = body[:start]
         after = body[end + len(LOG_END):]
         inner = body[start + len(LOG_START):end]
-        existing_lines = [ln for ln in inner.splitlines() if ln.strip()]
-        existing_lines = [ln for ln in existing_lines if not _LINE_TOKEN_RE.search(ln)
-                          or _LINE_TOKEN_RE.search(ln).group(1) != _line_version(new_line)]
+        # Drop lines whose `<!-- update:VER -->` token matches the new line's
+        # version (same upgrade re-detected). Single regex search per line —
+        # the obvious "if search() or search().group()" form runs it twice
+        # AND confuses mypy on the short-circuit.
+        new_version = _line_version(new_line)
+        kept: list[str] = []
+        for ln in inner.splitlines():
+            if not ln.strip():
+                continue
+            m = _LINE_TOKEN_RE.search(ln)
+            if m is None or m.group(1) != new_version:
+                kept.append(ln)
+        existing_lines = kept
         lines = [new_line] + existing_lines
         lines = lines[:max_lines]
         rebuilt = LOG_START + "\n" + "\n".join(lines) + "\n" + LOG_END

@@ -1,78 +1,176 @@
 # HomelabSage — config.yaml
-# Copia este archivo a `config.yaml` (gitignored) y rellena.
-# Cualquier `${VAR}` se lee del entorno o de `.env`.
+#
+# Copia este fichero a `config.yaml` (gitignored) y rellena los huecos. Cualquier
+# `${VAR}` o `${VAR:-default}` se expande contra el entorno o `.env`. Toda la
+# configuración es opcional: arrancar con defaults te da un scan local
+# anonimizado contra Docker y la API pública de GitHub.
+#
+# Los settings también se editan desde el web UI (`/settings`), que escribe
+# `config.user.yaml` (overlay) sin tocar este fichero. Lo de aquí es el deploy
+# default; lo de allí gana en runtime.
 
-# ──────────────────────────────────────────────────────────────────────
-# LLM — análisis de release notes con tu LLM local (o nube)
-# ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+#   LLM — quién analiza las release notes
+# ══════════════════════════════════════════════════════════════════════
 llm:
-  # Modos: ollama | openai | anthropic | disabled
-  # `disabled` = solo detecta updates, sin análisis IA (más rápido, menos útil).
+  # provider: ollama | openai | groq | gemini | openrouter | anthropic | disabled
+  #   - `disabled` te da solo detección (sin análisis IA). Útil si quieres ver qué
+  #     containers tienen update pero no consumir tokens.
+  #   - `ollama` habla el shape Ollama nativo (`/api/generate`).
+  #   - `openai/groq/gemini/openrouter/anthropic` hablan el shape OpenAI
+  #     chat-completions; el `endpoint` cambia, el código no.
   provider: ollama
 
-  # Endpoint del backend LLM.
-  # Ollama por defecto: http://localhost:11434
-  # llama.cpp server: http://localhost:8080
-  # OpenAI: https://api.openai.com
-  # Anthropic: https://api.anthropic.com
+  # Base URL del backend. Ejemplos:
+  #   http://192.168.1.10:11434                                (Ollama LAN)
+  #   http://localhost:8080                                    (llama.cpp server)
+  #   https://api.groq.com/openai                              (Groq, free tier)
+  #   https://generativelanguage.googleapis.com/v1beta/openai  (Gemini)
+  #   https://openrouter.ai/api/v1                             (OpenRouter)
+  #   https://api.openai.com/v1                                (OpenAI)
   endpoint: http://localhost:11434
 
-  # Modelo a usar. Para análisis recomendamos uno con ≥30B parámetros.
-  # Si tu modelo no respeta JSON estricto, marca strict_json: false.
+  # Nombre del modelo tal como lo espera el backend. Para análisis fiable
+  # recomendamos ≥30B parámetros (Qwen3.6-35B, Llama-3.3-70B). Modelos más
+  # pequeños alucinan versiones y CVE IDs.
   model: qwen3:30b
 
-  # Context window del modelo (tokens). Release notes largas pueden ser grandes.
+  # Context window del modelo (tokens). Release notes largas se trunca al
+  # 15K bytes a la entrada igualmente, pero el prompt + notas + context
+  # rondan los 4-8K, así que 32K-65K es lo razonable.
   context_size: 32768
 
-  # API key (solo openai/anthropic). Para ollama dejar vacío.
+  # Bearer token. Vacío para servidores locales sin auth.
   api_key: "${LLM_API_KEY:-}"
 
-  # Timeout por llamada (s). Modelos grandes en CPU/Vulkan pueden tardar.
+  # Timeout por llamada. Modelos grandes en CPU/Vulkan tardan; 180s es
+  # generoso pero deja un margen de cordura.
   timeout: 180
 
+  # Forzar JSON estricto (`response_format` para OpenAI-compat, `format=json`
+  # para Ollama). Solo desactiva si tu backend lo rechaza.
   strict_json: true
 
-# ──────────────────────────────────────────────────────────────────────
-# Sources — qué dominios escanea
-# ──────────────────────────────────────────────────────────────────────
+# Multi-profile opcional. Si pones llm_active = "halo" y defines
+# llm_profiles.halo, el engine cambia de modelo on-the-fly desde el dashboard
+# sin reiniciar. Si no lo necesitas, deja ambos por defecto.
+# llm_active: ""
+# llm_profiles:
+#   halo:
+#     provider: openai
+#     endpoint: http://192.168.31.19:11434
+#     model: Qwen3.6-35B-Abl
+#   groq:
+#     provider: groq
+#     endpoint: https://api.groq.com/openai
+#     api_key: ${GROQ_API_KEY}
+#     model: llama-3.3-70b-versatile
+
+# ══════════════════════════════════════════════════════════════════════
+#   Sources — qué dominios escanea
+# ══════════════════════════════════════════════════════════════════════
 sources:
 
+  # ── Docker ──────────────────────────────────────────────────────────
   docker:
     enabled: true
-    # Socket del daemon Docker. En contenedor montar /var/run/docker.sock.
+    # Socket del daemon. Si corres en container, monta /var/run/docker.sock RO.
     socket: /var/run/docker.sock
-    # Mapeo manual de container_name → repo GitHub (cuando no se puede inferir).
+
+    # Override manual container_name → repo upstream. Solo necesario para
+    # imágenes sin OCI label `org.opencontainers.image.source` y sin patrón
+    # GHCR/Codeberg en el tag. El detector lo intenta todo antes de fallar;
+    # mira `/diagnostics` para ver qué containers necesitan override.
     overrides: {}
       # OpenClaw: openclaw/openclaw
       # a-eye: spaceinvaderone/a-eye
-    # Containers a ignorar (regex sobre el nombre).
+      # MiServicioCustom: codeberg.org/owner/repo
+
+    # Containers a ignorar (regex contra container_name). El default tapa los
+    # DBs adjuntos típicos de stacks (postgres/mysql/redis/valkey).
     skip:
       - "^.*_(redis|valkey|postgres|mysql|mariadb|db)$"
-    # CVE scan (necesita trivy o grype en PATH). Off por defecto: el primer
-    # run de trivy descarga la DB de vulnerabilidades (~300 MB).
+
+    # Containers `Status=exited` durante ≥ N días se marcan en
+    # `context.orphan_since_days`. La prompt rule sugiere "evalúa eliminar
+    # en lugar de actualizar". Pon 0 para desactivar.
+    orphan_min_days: 30
+
+    # Buscar imágenes alternativas en LSIO + Docker Hub. Atrae 2-3 HTTP calls
+    # extra por container; los candidatos pasan un filtro estricto (same
+    # purpose, ≥10× pulls, push < 90 días, semver match). Off por defecto.
+    find_alternatives: false
+
+    # Clasificar cada repo upstream como alive / stale / abandoned. Una sola
+    # GET extra por update — el budget de rate-limit de GitHub lo cubre sin
+    # problemas. Cuando es abandoned, la prompt rule sube severity un nivel.
+    repo_health: true
+
+    # Para containers con tag flotante (latest / main / edge / stable / no
+    # semver) compara el digest local con el que sirve Docker Hub. Solo Hub
+    # (anonymous v2 API); GHCR / quay / privados se ignoran. Sin esto, ~10
+    # containers típicos de un homelab quedarían invisibles al analyzer.
+    track_floating_tags: true
+
+    # ── Trivy / Grype CVE scan ────────────────────────────────────────
+    # Necesita `trivy` o `grype` en PATH (el primer run de trivy descarga
+    # ~300 MB de DB). Cuando hay findings críticos la prompt rule sube
+    # severity a critical y cita los CVE IDs literalmente. Inocuo si
+    # ninguna herramienta está instalada — el plugin no-op.
     cve_scan: false
-    # Dependencias de compose: cuando indiques paths con docker-compose.yml,
-    # cada Update lista en context.cascade los servicios que dependen de él.
+
+    # ── Compose dependency graph ──────────────────────────────────────
+    # Directorios que contienen docker-compose.yml para tus stacks. El
+    # plugin construye un grafo `depends_on` + redes compartidas y añade
+    # `context.cascade` a cada Update. Cuando A se actualiza, B/C/D que
+    # depende de A aparece en `recommended_action`. Walk recursivo,
+    # cap depth=4, cache por mtime. Lista vacía desactiva el detector.
     compose_scan_paths: []
       # - /mnt/user/appdata/dockge/stacks
+      # - /home/user/stacks
 
+    # ── Image-size growth (bloatware) ─────────────────────────────────
+    # Cuando el manifest size en Docker Hub del nuevo tag es ≥ ratio veces
+    # más grande que la imagen local, añade `context.image_size_growth`.
+    # La prompt rule lo cita en summary ("imagen creció 2.4× — 80 → 195
+    # MiB"). Off por defecto: 1 HTTP roundtrip extra por update y la mayoría
+    # no son bloatware.
+    image_size_growth_detect: false
+    image_size_growth_ratio: 2.0
+
+  # ── Home Assistant ──────────────────────────────────────────────────
   homeassistant:
     enabled: false
     url: http://homeassistant.local:8123
+    # Long-lived access token: perfil HA → Security → Long-lived access tokens.
     token: "${HA_TOKEN:-}"
-    # Incluye también integraciones HACS instaladas.
+    # Incluir integraciones HACS instaladas (necesita sensor.hacs publicado).
     include_hacs: true
-    # Incluye add-ons del Supervisor (si aplica).
+    # Incluir add-ons del Supervisor (HA OS); no-op fuera de OS install.
     include_addons: true
 
-  # Repos GitHub/Codeberg que quieres seguir aunque no corran como container.
-  # Lista gestionada vía `homelabsage watched add owner/repo`.
+  # ── Repos GitHub/Codeberg opt-in (sin container) ────────────────────
+  # Para toolboxes, scripts, dotfiles, firmware bundles. La lista vive en
+  # SQLite, no aquí; gestiónala con `homelabsage watched add owner/repo`.
   github_watched:
     enabled: false
 
-  # Próximamente — placeholders, mantén disabled.
+  # ── Fedora dnf via SSH ──────────────────────────────────────────────
   fedora:
     enabled: false
+    host: ""                       # 192.168.x.y
+    user: ""                       # usuario SSH (dnf check-update no necesita root)
+    ssh_key_path: ""               # path DENTRO del container al ed25519
+    port: 22
+    known_hosts_path: ""           # opcional (auto-accept si vacío)
+    # Paquetes que se analizan individualmente (regex); el resto se agrupa
+    # en un solo Update `fedora-userspace` con el count total. Tunea según
+    # tus dependencias críticas.
+    # critical_packages: [...]      # ver default en config/sources.py
+    aggregate_others: true
+    timeout_seconds: 45
+
+  # ── Placeholders para futuros plugins ────────────────────────────────
   llamacpp:
     enabled: false
   huggingface_models:
@@ -84,28 +182,35 @@ sources:
     enabled: false
     feeds: []
 
-# ──────────────────────────────────────────────────────────────────────
-# Outputs — adónde envía los análisis
-# ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+#   Outputs — adónde van los análisis
+# ══════════════════════════════════════════════════════════════════════
+# Notion es persistente (escribe siempre que esté enabled). Los 4 push
+# (Telegram/Discord/Ntfy/Gotify) respetan `min_severity` y el parity_gate.
 outputs:
 
-  # Notion DB. La DB debe existir con columnas específicas (ver docs).
+  # Notion — una fila de DB por update analizado. La DB debe existir con
+  # las columnas que el output espera (mira docs/notion-schema o readme).
   notion:
     enabled: false
-    api_key: "${NOTION_API_KEY:-}"
+    api_key: "${NOTION_API_KEY:-}"            # Internal Integration Secret
     database_id: "${NOTION_DB_INFRA_UPDATES:-}"
-    # always = escribe siempre. only_action_required = solo si la IA marca acción.
+    # always → escribe todos los updates analizados
+    # only_action_required → solo cuando la IA marca `action_required=true`
     write_policy: always
 
-  # Telegram bot push. Bot creado vía @BotFather.
+  # Telegram — bot via @BotFather → token; chat_id de @userinfobot o
+  # getUpdates si es grupo. Push severity-gated.
   telegram:
     enabled: false
     bot_token: "${TELEGRAM_BOT_TOKEN:-}"
     chat_id: "${TELEGRAM_CHAT_ID:-}"
-    # Umbral mínimo de severity para notificar: critical | high | medium | info
+    # critical | high | medium | info  (orden ascendente de ruido)
     min_severity: high
 
-  # Discord webhook. Crear en Server Settings → Integrations → Webhooks.
+  # Discord webhook. En Discord: Server Settings → Integrations → Webhooks
+  # → New Webhook → Copy URL. Trata la URL como secret (cualquiera con ella
+  # puede postear). Embed con stripe de color por severity.
   discord:
     enabled: false
     webhook_url: "${DISCORD_WEBHOOK_URL:-}"
@@ -113,90 +218,156 @@ outputs:
     avatar_url: ""
     min_severity: high
 
-  # ntfy.sh (público) o instancia self-hosted. Topic = string libre.
+  # ntfy — la opción favorita en r/selfhosted. Topic = string libre; quien
+  # lo conozca puede publicar Y leer, así que elige algo aleatorio para
+  # nada sensible. ntfy.sh es la instancia pública gratuita; mismo shape
+  # contra una instancia self-hosted (server_url + topic).
   ntfy:
     enabled: false
     server_url: https://ntfy.sh
-    topic: "${NTFY_TOPIC:-}"
-    auth_token: "${NTFY_TOKEN:-}"
+    topic: "${NTFY_TOPIC:-}"                # ej. "homelabsage-jlp-r4nd0m"
+    auth_token: "${NTFY_TOKEN:-}"           # opcional para instancias self-hosted con auth
     min_severity: high
 
-  # Gotify self-hosted. Token = app token desde Gotify UI.
+  # Gotify — token por app desde la UI de Gotify. Priority 1-10; el default
+  # mapea severity → 8/6/4/2. Override por severity si quieres full-screen.
   gotify:
     enabled: false
-    server_url: "${GOTIFY_URL:-}"
+    server_url: "${GOTIFY_URL:-}"           # ej. https://gotify.example.com
     token: "${GOTIFY_TOKEN:-}"
     min_severity: high
-    # priority_overrides: {critical: 10}
+    # priority_overrides: {critical: 10, info: 1}
 
-# ──────────────────────────────────────────────────────────────────────
-# Parity gate — silencia push notifications mientras corre parity check
-# ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+#   Parity gate — silenciar push durante parity check / resync
+# ══════════════════════════════════════════════════════════════════════
+# Para Unraid + mdraid plain. Cuando hay parity check / recovery / reshape
+# en curso, los outputs push se saltan y se persisten en
+# `pending_dispatches`; el siguiente scan ungated drena la cola
+# automáticamente. Notion + heartbeat siguen funcionando (persistentes).
+# El probe es best-effort: si /proc/mdstat o `mdcmd` faltan, el gate es
+# permisivo (no bloquea nada).
 parity_gate:
   enabled: false
   mdstat_path: /proc/mdstat
+  # Por defecto el digest semanal IGNORA el gate (es el backstop para
+  # pings perdidos). Pon true si quieres silencio total durante parity:
+  skip_digest_too: false
 
-# ──────────────────────────────────────────────────────────────────────
-# Digest semanal — rollup en canales seleccionados (default: dom 09:00)
-# ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+#   Digest semanal — rollup de severity counts + orphans + abandoned
+# ══════════════════════════════════════════════════════════════════════
+# Posts una sola vez por semana en los canales habilitados. Cron
+# separado del scan para no acoplar cadencias. Cuerpo determinista
+# (Markdown sin LLM), citando filas concretas de la DB. Se escribe
+# también a `<notes_dir>/digest.md` así que la próxima iteración del
+# curator lo ve como context.
 digest:
   enabled: false
+  # Cuándo posta (cron, 5 campos). Default = domingos 09:00. Usa el
+  # timezone definido en `scheduler.timezone`.
   cron: "0 9 * * 0"
+  # Cuántos días de historia incluye cada digest.
   lookback_days: 7
-  # Lista vacía = todos los canales habilitados arriba.
+  # Canales que reciben el digest. Lista vacía = auto-detect (todos los
+  # canales habilitados arriba reciben). Notion queda excluido por
+  # diseño (es per-row, no digest).
   channels: []
-  # Ejemplo: channels: [telegram, ntfy]
+  # Ejemplo: channels: [telegram, ntfy]   # solo a 2 de los 4 habilitados
 
-# ──────────────────────────────────────────────────────────────────────
-# Scheduler — cuándo escanea (cron syntax)
-# ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+#   Scheduler — cuándo escanea
+# ══════════════════════════════════════════════════════════════════════
 scheduler:
   enabled: true
+  # Cron del scan automático. Default = diario 09:00.
   cron: "0 9 * * *"
+  # Zona horaria IANA para todos los crons (scheduler + digest).
   timezone: Europe/Madrid
-  # Push opcional a Uptime Kuma / Healthchecks tras cada run exitoso.
+  # Opcional: pingea un URL después de cada scan exitoso (Uptime Kuma push,
+  # Healthchecks.io, etc.). Vacío = desactivado.
   heartbeat_url: "${HEARTBEAT_URL:-}"
 
-# ──────────────────────────────────────────────────────────────────────
-# Web UI
-# ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+#   Web UI
+# ══════════════════════════════════════════════════════════════════════
 web:
   enabled: true
   host: 0.0.0.0
   port: 8000
-
-  # HTTP Basic Auth. STRONGLY RECOMMENDED if `host` is not loopback.
-  # `/healthz` stays open for container/Kuma healthchecks.
+  # HTTP Basic Auth — RECOMENDADO si el host no es loopback. `/healthz`
+  # queda siempre abierto para que Docker / Kuma puedan health-check.
   auth:
     enabled: false
     username: admin
     password: "${HOMELABSAGE_PASSWORD:-}"
 
-# ──────────────────────────────────────────────────────────────────────
-# Almacenamiento
-# ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+#   Almacenamiento
+# ══════════════════════════════════════════════════════════════════════
 storage:
-  # Path al SQLite. En docker: /data/state.sqlite (mount volume).
+  # SQLite con WAL. En container, monta un volumen para que sobreviva
+  # restarts.
   database_path: ./data/state.sqlite
 
-# ──────────────────────────────────────────────────────────────────────
-# Notas del homelab — context extra que la IA usa para evaluar updates
-# ──────────────────────────────────────────────────────────────────────
-# La IA por defecto solo ve release notes + docker inspect. Para que
+# ══════════════════════════════════════════════════════════════════════
+#   Notas del homelab — el "secret sauce" del analyzer
+# ══════════════════════════════════════════════════════════════════════
+# El LLM por defecto solo ve release notes + docker inspect. Para que
 # sepa que "tu Elasticsearch está versionlocked en 8.x por RAGFlow" o
-# que "tu Plex usa --gpus device=UUID y no --runtime=nvidia", apúntala
-# a tus notas operativas.
+# "tu Plex usa --gpus device=UUID y no --runtime=nvidia", apúntalo a tus
+# notas operativas. Solo las secciones que mencionan el subject del
+# update se inyectan en el prompt — sin token bloat.
 notes:
-  # Directorio con tus notas (.md / .txt). Cada archivo se trocea por
-  # secciones y solo se inyectan las secciones que mencionen el subject
-  # del update (matching case-insensitive substring). Coste tokens: bajo.
+  # Directorio con .md/.txt. Para cada update se hace match
+  # case-insensitive contra el subject (container name); solo las
+  # secciones que matchean se inyectan en el prompt.
   notes_dir: ""
 
-  # Archivos siempre inyectados completos. Útil para tu CLAUDE.md /
-  # arquitectura. Mantenlos cortos porque se envían en cada análisis.
+  # Archivos siempre inyectados completos en cada análisis. Útil para
+  # CLAUDE.md / ARCHITECTURE.md (decisiones globales). Mantenlos cortos.
   extra_docs: []
     # - /opt/homelab-notes/ARCHITECTURE.md
     # - /opt/homelab-notes/POLICY.md
 
-  # Tope de caracteres totales que pasan al prompt por update.
+  # Cap de caracteres totales que pasan al prompt por update.
   max_chars: 4000
+
+# ══════════════════════════════════════════════════════════════════════
+#   Curator — escribe tus notas por ti
+# ══════════════════════════════════════════════════════════════════════
+# `homelabsage curate --discover` recorre cada container running y
+# escribe `notes/<service>.md` con context (image, repo, OCI labels,
+# README upstream, Docker Hub description, logs recientes,
+# cross-reference a tus memory dirs). `--system` añade `notes/system.md`
+# con probes del host (kernel, docker info, GPU, ZFS, Unraid).
+curator:
+  enabled: true
+  # Dónde escribe el curator. Vacío = usa notes.notes_dir (mismo dir que
+  # lee el analyzer, recursive context).
+  output_dir: ""
+  # Path a un prompt .txt personalizado. Vacío = built-in default.
+  prompt_template_path: ""
+  # Few-shot examples para guiar el estilo del lead sentence.
+  style_examples: []
+    # - /opt/notes/example.md
+
+  # Cuántas releases recientes se incluyen como context upstream.
+  recent_releases: 5
+  # Cap por prompt del combined release-notes text.
+  max_release_chars: 8000
+
+  # Enrichment switches — cada source es best-effort, off-by-fetch-fail.
+  fetch_readme: true                 # raw.githubusercontent.com README
+  fetch_docker_hub: true             # full_description del DH (no aplica a GHCR)
+  include_logs: true                 # docker logs --tail 30
+  cross_reference_notes: true        # grep tus memory dirs por container name
+  cross_reference_dirs:
+    - /opt/claude-memory
+    - /opt/notes
+
+  # Hook engine incremental — cuando un Update tiene `recommended_action=hold`
+  # o `breaking_changes` no vacío, añade una línea fechada a la nota del
+  # servicio. Solo toca notas con footer curator (no manuales).
+  append_analysis_log: true
+  analysis_log_max_lines: 20

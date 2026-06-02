@@ -161,7 +161,12 @@ def register_llm_profiles_routes(
 
     @app.post("/settings/llm/profiles/save", response_class=HTMLResponse, response_model=None)
     async def profiles_save(request: Request) -> HTMLResponse | RedirectResponse:
-        form = dict(await request.form())
+        # FastAPI form() returns UploadFile | str; coerce upfront — every
+        # field in the profile form is a text input.
+        form: dict[str, str] = {
+            k: (v if isinstance(v, str) else "")
+            for k, v in dict(await request.form()).items()
+        }
         name = (form.pop("__profile_name", "") or "").strip()
         if not name:
             return await profiles_index(request, error="Profile name is required.")

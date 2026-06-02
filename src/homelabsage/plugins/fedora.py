@@ -209,6 +209,10 @@ class FedoraPlugin(Plugin):
                     "fedora: no known_hosts configured; accepting host key for %s",
                     self.cfg.host,
                 )
+            # Try Ed25519 first (modern default in OpenSSH), then RSA. Both
+            # subclass `paramiko.PKey`; the union annotation lets mypy thread
+            # them through the .connect() call below.
+            pkey: paramiko.PKey
             try:
                 pkey = paramiko.Ed25519Key.from_private_key_file(str(key_path))
             except paramiko.SSHException:

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import httpx
 from fastapi import FastAPI
@@ -206,7 +207,7 @@ async def _test_discord(d_cfg: DiscordOutputConfig) -> tuple[bool, str]:
             "No webhook_url set. In Discord: Server Settings → Integrations → "
             "Webhooks → New Webhook → Copy URL."
         )
-    payload = {
+    payload: dict[str, Any] = {
         "embeds": [{
             "title": "HomelabSage test message",
             "description": "If you can read this, the webhook is wired up.",

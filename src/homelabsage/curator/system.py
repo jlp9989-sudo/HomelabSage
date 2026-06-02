@@ -26,6 +26,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from .._time import utcnow
+
 log = logging.getLogger(__name__)
 
 # Cap probe runtime — none of these should take more than a second on a
@@ -284,7 +286,7 @@ class SystemReport:
     zpools: list[dict[str, str]] | None = None
     unraid: dict[str, Any] | None = None
     network: dict[str, str] | None = None
-    generated_at: datetime = field(default_factory=datetime.utcnow)
+    generated_at: datetime = field(default_factory=utcnow)
 
     def fingerprint(self) -> str:
         """Stable hex digest of structural facts.

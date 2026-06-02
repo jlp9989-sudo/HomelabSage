@@ -44,6 +44,7 @@ from pathlib import Path
 
 import httpx
 
+from ._time import utcnow
 from .config import Config
 from .db import Database
 from .models import AnalyzedUpdate, UpdateStatus
@@ -83,9 +84,16 @@ def collect_stats(
     """Roll up the last `days` of stored updates into one DigestStats.
 
     The DB stores `detected_at` in UTC; we compare in UTC so DST shifts
-    don't bleed an item in or out by an hour.
+    don't bleed an item in or out by an hour. Callers passing a naive
+    `now` (older tests, programmatic uses) get it upgraded to tz-aware
+    UTC silently — the alternative (raising) breaks the long tail of
+    code that doesn't yet know about the tz-aware migration.
     """
-    now = now or datetime.utcnow()
+    if now is None:
+        now = utcnow()
+    elif now.tzinfo is None:
+        from datetime import UTC
+        now = now.replace(tzinfo=UTC)
     cutoff = now - timedelta(days=days)
     # Pull a generous page and filter in Python — the DB list() API is
     # ordered by detected_at DESC, so a 500-row cap is plenty for a week

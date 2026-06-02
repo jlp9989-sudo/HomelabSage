@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import typer
 
+from .._time import utcnow
 from ..config import load_config
 from ..db import Database
 from ._common import CONFIG_OPT, VERBOSE_OPT, app, console, setup_logging
@@ -46,7 +47,7 @@ def notify_pending(
     cfg = load_config(config)
     db = Database(cfg.storage.database_path)
     try:
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff = utcnow() - timedelta(hours=hours)
         # build_outputs already filters by enabled flag
         from ..engine import build_outputs
         outputs = [o for o in build_outputs(cfg, db) if o.is_push]
