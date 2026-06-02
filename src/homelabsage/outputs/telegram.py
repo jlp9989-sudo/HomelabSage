@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 
 class TelegramOutput(Output):
     id = "telegram"
+    is_push = True
 
     def __init__(self, cfg: TelegramOutputConfig):
         self.cfg = cfg

@@ -30,6 +30,7 @@ from ..notes import NotesEditor
 from .auth import attach_basic_auth
 from .csrf import attach_csrf_guard
 from .lifecycle import register_lifecycle
+from .routes_diagnostics import register_diagnostics_routes
 from .routes_health import register_health_routes
 from .routes_interview import register_interview_routes
 from .routes_llm_profiles import register_llm_profiles_routes
@@ -88,6 +89,7 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
     register_settings_test_routes(app, cfg, cfg_path, env)
     register_settings_html_routes(app, cfg, cfg_path, env)
     register_wizard_routes(app, cfg, cfg_path, env)
+    register_diagnostics_routes(app, cfg, env)
     register_health_routes(app)
 
     # Static assets (HTMX, favicon, future CSS sprites). Mounted last so

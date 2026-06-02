@@ -10,7 +10,10 @@ import docker
 from docker.models.containers import Container
 from packaging.version import InvalidVersion, Version
 
+from ..compose import DependencyGraph
+from ..compose import build_graph as build_compose_graph
 from ..config import DockerSourceConfig
+from ..cve import scan_image as scan_image_cve
 from ..github import classify_repo_health, latest_release, repo_metadata
 from ..images import find_alternatives
 from ..models import Update
@@ -205,6 +208,20 @@ class DockerPlugin(Plugin):
             log.error("Docker daemon unreachable at %s: %s", self.cfg.socket, e)
             return []
 
+        # Build the compose graph ONCE per scan — it's read-only and the
+        # walk cost (a handful of YAML files) is fixed regardless of how
+        # many containers we iterate below.
+        compose_graph: DependencyGraph | None = None
+        if self.cfg.compose_scan_paths:
+            try:
+                compose_graph = build_compose_graph(self.cfg.compose_scan_paths)
+                log.debug(
+                    "compose graph: %d services from %s",
+                    len(compose_graph.services), self.cfg.compose_scan_paths,
+                )
+            except Exception as e:
+                log.warning("compose graph build failed: %s", e)
+
         for c in containers:
             if self._should_skip(c.name):
                 continue
@@ -275,6 +292,23 @@ class DockerPlugin(Plugin):
                 except Exception as e:
                     log.debug("find_alternatives failed for %s: %s", c.name, e)
 
+            # PUID/PGID hint: if the container declares either env var,
+            # surface it so the analyzer prompt rule can warn on rename or
+            # behavioural changes upstream (LSIO images, rootless rebases).
+            env_list = (c.attrs.get("Config", {}) or {}).get("Env") or []
+            puid_pgid = {
+                "PUID": next(
+                    (e.split("=", 1)[1] for e in env_list if e.startswith("PUID=")),
+                    None,
+                ),
+                "PGID": next(
+                    (e.split("=", 1)[1] for e in env_list if e.startswith("PGID=")),
+                    None,
+                ),
+            }
+            if any(v is not None for v in puid_pgid.values()):
+                ctx["puid_pgid"] = {k: v for k, v in puid_pgid.items() if v is not None}
+
             if self.cfg.repo_health:
                 try:
                     meta = await repo_metadata(repo)
@@ -284,6 +318,29 @@ class DockerPlugin(Plugin):
                         ctx["repo_health"] = health
                 except Exception as e:
                     log.debug("repo_health failed for %s: %s", repo, e)
+
+            if compose_graph is not None:
+                deps = compose_graph.dependents_of(c.name)
+                neighbours = compose_graph.network_neighbours_of(c.name)
+                if deps or neighbours:
+                    ctx["cascade"] = {
+                        "depends_on_me": [
+                            {"service": d.name, "project": d.project}
+                            for d in deps[:20]
+                        ],
+                        "network_neighbours": [
+                            {"service": n.name, "project": n.project}
+                            for n in neighbours[:20]
+                        ],
+                    }
+
+            if self.cfg.cve_scan and image_tag:
+                try:
+                    summary = scan_image_cve(image_tag)
+                    if summary is not None:
+                        ctx["cve"] = summary.to_context()
+                except Exception as e:
+                    log.debug("cve scan failed for %s: %s", c.name, e)
 
             updates.append(
                 Update(

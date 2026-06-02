@@ -114,6 +114,27 @@ Rules:
   entirely if none of the alternatives is more popular than the current image
   by a margin you'd describe as "much more" (the gate filter already ensures
   that, but trust your reading of the data).
+- If the context block contains "cascade.depends_on_me" with any entries,
+  mention in `recommended_action` that the listed services will also need
+  to restart / be checked. Quote up to 3 service names verbatim. This is
+  informational — do NOT raise severity unless the release notes
+  themselves mention breaking changes that affect downstream services.
+- If the context block contains "puid_pgid" AND the release notes mention
+  any of: "PUID", "PGID", "user", "uid", "gid", "permissions", "non-root",
+  "rootless", "drop privileges": add a `breaking_changes` entry that
+  quotes the relevant change from the release notes verbatim, and set
+  `recommended_action` to "verify PUID/PGID mapping still matches your
+  data ownership before restarting; check `id` inside the container after
+  upgrade". If the release notes do NOT mention any of these, ignore
+  `puid_pgid` entirely — its presence alone is not a finding.
+- If the context block contains "cve" with `counts.critical > 0`, raise
+  severity to `"critical"` regardless of release-note content, mention the
+  number of critical CVEs in the summary VERBATIM (e.g. "3 critical CVEs
+  unpatched"), and include up to 3 CVE IDs from `top_critical` in the
+  `recommended_action`. If only HIGH CVEs are present (no critical), set
+  severity to at least `"high"` and mention the count similarly. Do NOT
+  invent CVE IDs that aren't in the context — quote `top_critical` /
+  `top_high` verbatim.
 - If the context block contains "repo_health" with status `"abandoned"`, the
   upstream repo is archived or hasn't been pushed in over a year. Set
   `recommended_action` to mention this fact ("upstream repo appears

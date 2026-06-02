@@ -21,15 +21,17 @@ from .outputs.gotify import GotifyOutput
 from .outputs.notion import NotionOutput
 from .outputs.ntfy import NtfyOutput
 from .outputs.telegram import TelegramOutput
+from .parity import is_parity_running
 from .plugins import Plugin
 from .plugins.docker import DockerPlugin
 from .plugins.fedora import FedoraPlugin
+from .plugins.github_watched import WatchedReposPlugin
 from .plugins.homeassistant import HomeAssistantPlugin
 
 log = logging.getLogger(__name__)
 
 
-def build_plugins(cfg: Config) -> list[Plugin]:
+def build_plugins(cfg: Config, db: Database | None = None) -> list[Plugin]:
     plugins: list[Plugin] = []
     if cfg.sources.docker.enabled:
         plugins.append(DockerPlugin(cfg.sources.docker))
@@ -37,6 +39,8 @@ def build_plugins(cfg: Config) -> list[Plugin]:
         plugins.append(HomeAssistantPlugin(cfg.sources.homeassistant))
     if cfg.sources.fedora.enabled:
         plugins.append(FedoraPlugin(cfg.sources.fedora))
+    if cfg.sources.github_watched.enabled and db is not None:
+        plugins.append(WatchedReposPlugin(db))
     return plugins
 
 
@@ -88,7 +92,7 @@ class Engine:
             extra_docs=cfg.notes.extra_docs,
             max_chars=cfg.notes.max_chars,
         )
-        self.plugins = build_plugins(cfg)
+        self.plugins = build_plugins(cfg, db)
         self.outputs = build_outputs(cfg, db)
 
     async def run_once(self) -> dict[str, int]:
@@ -96,6 +100,18 @@ class Engine:
         log.info("Run start — plugins=%s outputs=%s",
                  [p.id for p in self.plugins], [o.id for o in self.outputs])
         stats = {"scanned": 0, "new": 0, "analyzed": 0, "failed": 0}
+
+        # Probe parity once per run; outputs marked `is_push = True` are
+        # skipped while it's active. Persistent outputs (Notion) keep
+        # running so we don't lose state — the user just won't get a phone
+        # buzz mid-resync. The weekly digest is the backstop for missed
+        # real-time pings.
+        push_gated = False
+        if self.cfg.parity_gate.enabled:
+            state = is_parity_running(mdstat_path=self.cfg.parity_gate.mdstat_path)
+            if state.running:
+                push_gated = True
+                log.info("Push notifications gated by parity: %s", state.reason)
 
         for plugin in self.plugins:
             try:
@@ -131,6 +147,12 @@ class Engine:
                 self.db.upsert(analyzed)
                 self._incremental_hook(analyzed)
                 for output in self.outputs:
+                    if push_gated and output.is_push:
+                        # Persistent outputs still run; push is queued
+                        # implicitly: the same (subject, new_version) row
+                        # will reappear on the next gate-clear scan and
+                        # dispatch then.
+                        continue
                     try:
                         await output.send(analyzed)
                     except Exception as e:

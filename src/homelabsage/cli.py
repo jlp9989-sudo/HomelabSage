@@ -28,6 +28,8 @@ from .db import Database
 from .engine import run_blocking
 from .models import InterviewStatus, UpdateStatus
 
+log = logging.getLogger(__name__)
+
 app = typer.Typer(add_completion=False, help="HomelabSage — AI-powered homelab analyzer.")
 console = Console()
 
@@ -402,6 +404,118 @@ def export(
         console.print(f"[green]Wrote[/green] {len(text)} bytes to {output}")
 
 
+@app.command("notify-pending")
+def notify_pending(
+    config: Path = CONFIG_OPT,
+    hours: int = typer.Option(
+        48,
+        "--hours",
+        help=(
+            "Look back this many hours for analyzed items whose push "
+            "notification may have been skipped (parity gate, transient "
+            "outage). Default 48h."
+        ),
+    ),
+    verbose: bool = VERBOSE_OPT,
+) -> None:
+    """Replay push notifications for recently analyzed items.
+
+    Useful after a parity check finishes and you want the notifications
+    that were skipped to fire now. The push outputs themselves are
+    idempotent in spirit but NOT in practice (Telegram has no message
+    de-duplication) — re-running this with a small window is safe; running
+    with `--hours 720` will spam a month of notifications, so don't.
+    """
+    _setup_logging(verbose)
+    from datetime import datetime, timedelta
+
+    cfg = load_config(config)
+    db = Database(cfg.storage.database_path)
+    try:
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        # build_outputs already filters by enabled flag
+        from .engine import build_outputs
+        outputs = [o for o in build_outputs(cfg, db) if o.is_push]
+        if not outputs:
+            console.print("[yellow]No push outputs enabled — nothing to flush.[/yellow]")
+            return
+
+        items = [
+            it for it in db.list(limit=500)
+            if it.analyzed_at and it.analyzed_at >= cutoff and it.analysis
+        ]
+        if not items:
+            console.print(f"[dim]No analyzed items in the last {hours}h.[/dim]")
+            return
+
+        async def _flush():
+            for it in items:
+                for out in outputs:
+                    try:
+                        await out.send(it)
+                    except Exception as e:
+                        log.exception("notify-pending: %s on %s: %s", out.id, it.id, e)
+
+        asyncio.run(_flush())
+        console.print(
+            f"[green]Replayed[/green] {len(items)} item(s) across "
+            f"{len(outputs)} push output(s)."
+        )
+    finally:
+        db.close()
+
+
+@app.command()
+def analyse(
+    url: str = typer.Argument(..., help="GitHub or Codeberg repo URL."),
+    config: Path = CONFIG_OPT,
+    version: str = typer.Option(
+        "",
+        "--version",
+        help="Optional current version you run locally. Improves the analysis.",
+    ),
+    verbose: bool = VERBOSE_OPT,
+) -> None:
+    """One-shot analysis of a pasted repo URL. Uses your configured LLM + notes."""
+    _setup_logging(verbose)
+    cfg = load_config(config)
+    from .analyse_url import analyse_repo_url, parse_repo_url
+
+    repo = parse_repo_url(url)
+    if repo is None:
+        console.print(
+            f"[red]Could not parse a GitHub/Codeberg repo URL from {url!r}.[/red]"
+        )
+        raise typer.Exit(code=2)
+    analyzed = asyncio.run(analyse_repo_url(cfg, url, current_version=version))
+    if analyzed is None:
+        console.print(f"[red]Analysis failed for {repo}.[/red]")
+        raise typer.Exit(code=1)
+    u = analyzed.update
+    a = analyzed.analysis
+    console.print(f"[bold]{u.subject}[/bold]  {u.current_version} → {u.new_version}")
+    if u.release_url:
+        console.print(f"[dim]{u.release_url}[/dim]")
+    if a is None:
+        console.print("[yellow]LLM analysis unavailable — printed Update only.[/yellow]")
+        return
+    sev_colour = {"critical": "red", "high": "yellow",
+                  "medium": "cyan", "info": "blue"}.get(a.severity.value, "white")
+    console.print(
+        f"\n[{sev_colour}]{a.severity.value.upper()}[/{sev_colour}] — {a.summary}\n"
+    )
+    if a.breaking_changes:
+        console.print("[bold]Breaking changes:[/bold]")
+        for bc in a.breaking_changes:
+            console.print(f"  • {bc}")
+    if a.new_features_relevant:
+        console.print("\n[bold]New features:[/bold]")
+        for nf in a.new_features_relevant:
+            console.print(f"  • {nf}")
+    if a.recommended_action:
+        console.print(f"\n[bold]Recommended action:[/bold] {a.recommended_action}")
+
+
 @app.command()
 def csi(
     container: str = typer.Argument(..., help="Container name (as in `docker ps`)."),
@@ -608,6 +722,120 @@ def interview_answer(
                 console.print(f"  {result.path}")
         finally:
             curator.close()
+    finally:
+        db.close()
+
+
+# ─── watched sub-app ────────────────────────────────────────────────────
+
+watched_app = typer.Typer(
+    add_completion=False,
+    help="Manage the list of GitHub/Codeberg repos the watched-repos plugin scans.",
+    no_args_is_help=True,
+)
+app.add_typer(watched_app, name="watched")
+
+
+@watched_app.command("add")
+def watched_add(
+    repo: str = typer.Argument(..., help="owner/name or codeberg.org/owner/name."),
+    nickname: str = typer.Option(
+        "", "--nickname", "-n", help="Friendly name used in notifications."
+    ),
+    version: str = typer.Option(
+        "",
+        "--version",
+        help=(
+            "Seed `current_version`. Leave empty for first-scan to seed from "
+            "the latest release (avoids a phantom 0→N update on add)."
+        ),
+    ),
+    config: Path = CONFIG_OPT,
+) -> None:
+    """Add a repo to the watched list (idempotent — re-adding revives it active)."""
+    cfg = load_config(config)
+    db = Database(cfg.storage.database_path)
+    try:
+        wid = db.add_watched_repo(
+            repo,
+            nickname=nickname or None,
+            current_version=version or None,
+        )
+        console.print(f"[green]Watching[/green] {repo} (id={wid})")
+    finally:
+        db.close()
+
+
+@watched_app.command("list")
+def watched_list(
+    config: Path = CONFIG_OPT,
+    all_: bool = typer.Option(
+        False, "--all", help="Include inactive entries."
+    ),
+) -> None:
+    """List watched repos."""
+    cfg = load_config(config)
+    db = Database(cfg.storage.database_path)
+    try:
+        rows = db.list_watched_repos(active_only=not all_)
+        if not rows:
+            console.print("[dim]No watched repos.[/dim]")
+            return
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("ID", justify="right")
+        table.add_column("Repo")
+        table.add_column("Nickname")
+        table.add_column("Current version")
+        table.add_column("Active")
+        for r in rows:
+            table.add_row(
+                str(r["id"]),
+                r["repo"],
+                r["nickname"] or "",
+                r["current_version"] or "[dim](not seeded)[/dim]",
+                "✓" if r["active"] else "·",
+            )
+        console.print(table)
+    finally:
+        db.close()
+
+
+@watched_app.command("toggle")
+def watched_toggle(
+    watched_id: int = typer.Argument(..., help="ID from `homelabsage watched list`."),
+    config: Path = CONFIG_OPT,
+) -> None:
+    """Flip a watched repo between active and inactive."""
+    cfg = load_config(config)
+    db = Database(cfg.storage.database_path)
+    try:
+        row = db.get_watched_repo(watched_id)
+        if row is None:
+            console.print(f"[red]No watched repo with id={watched_id}.[/red]")
+            raise typer.Exit(code=1)
+        new_state = not bool(row["active"])
+        db.toggle_watched_repo(watched_id, new_state)
+        word = "activated" if new_state else "deactivated"
+        console.print(f"[green]{row['repo']}[/green] {word}")
+    finally:
+        db.close()
+
+
+@watched_app.command("remove")
+def watched_remove(
+    watched_id: int = typer.Argument(..., help="ID from `homelabsage watched list`."),
+    config: Path = CONFIG_OPT,
+) -> None:
+    """Drop a watched repo entirely."""
+    cfg = load_config(config)
+    db = Database(cfg.storage.database_path)
+    try:
+        row = db.get_watched_repo(watched_id)
+        if row is None:
+            console.print(f"[red]No watched repo with id={watched_id}.[/red]")
+            raise typer.Exit(code=1)
+        db.remove_watched_repo(watched_id)
+        console.print(f"[green]Removed[/green] {row['repo']}")
     finally:
         db.close()
 

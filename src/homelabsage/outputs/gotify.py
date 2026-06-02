@@ -45,6 +45,7 @@ _DEFAULT_PRIORITY: dict[str, int] = {
 
 class GotifyOutput(Output):
     id = "gotify"
+    is_push = True
 
     def __init__(self, cfg: GotifyOutputConfig):
         self.cfg = cfg

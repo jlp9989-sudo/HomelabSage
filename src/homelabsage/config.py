@@ -117,6 +117,16 @@ class DockerSourceConfig(BaseModel):
     # (anonymous v2 API); other hosts fall through silently. Saves the
     # ~10 containers per typical homelab that would otherwise be invisible.
     track_floating_tags: bool = True
+    # Run an external CVE scanner (`trivy` then `grype`) on each container's
+    # image and attach a CRITICAL/HIGH summary to `Update.context.cve`. No-op
+    # when neither binary is on PATH. Off by default because trivy needs to
+    # download/refresh its vulnerability DB on first run.
+    cve_scan: bool = False
+    # Directories to walk for `docker-compose.yml` files. When set, the
+    # plugin enriches each Update with a `cascade` block listing services
+    # that depend on it (via `depends_on` or shared networks). Empty list
+    # disables the detector entirely — no scan, no extra context.
+    compose_scan_paths: list[str] = Field(default_factory=list)
 
 
 class HAConfig(BaseModel):
@@ -234,11 +244,23 @@ class FedoraSourceConfig(BaseModel):
     )
 
 
+class GitHubWatchedConfig(BaseModel):
+    """Plugin that scans arbitrary user-curated GitHub/Codeberg repos.
+
+    No knobs beyond `enabled` — the actual list is per-row in SQLite, managed
+    via `homelabsage watched ...`. Keeping the configuration in the DB rather
+    than YAML lets non-technical users add/remove repos without editing
+    files."""
+
+    enabled: bool = False
+
+
 class SourcesConfig(BaseModel):
     docker: DockerSourceConfig = Field(default_factory=DockerSourceConfig)
     homeassistant: HAConfig = Field(default_factory=HAConfig)
     scripts: ScriptsSourceConfig = Field(default_factory=ScriptsSourceConfig)
     fedora: FedoraSourceConfig = Field(default_factory=FedoraSourceConfig)
+    github_watched: GitHubWatchedConfig = Field(default_factory=GitHubWatchedConfig)
     # Placeholders for future plugins — kept loose to not break configs.
     llamacpp: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
     huggingface_models: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
@@ -465,6 +487,27 @@ class SchedulerConfig(BaseModel):
         return v
 
 
+class ParityGateConfig(BaseModel):
+    """Skip push notifications while a parity check / resync is running.
+
+    Targets Unraid + plain mdraid hosts. The probe is best-effort: missing
+    `/proc/mdstat` and `mdcmd` simply means the gate is permissive (every
+    notification goes through). Disabled by default — the gate is most
+    useful when explicit, so the user has to opt in.
+
+    Trade-off: a notification missed during the parity window is missed
+    permanently — the engine doesn't re-dispatch already-analyzed items
+    once the gate clears. The recommended backstop is the weekly digest
+    (`digest.enabled = true`), which surfaces everything from the lookback
+    window regardless of whether real-time pings fired. The CLI also
+    exposes `homelabsage notify-pending` to replay recent analyses
+    manually.
+    """
+
+    enabled: bool = False
+    mdstat_path: str = "/proc/mdstat"
+
+
 class WebAuthConfig(BaseModel):
     """HTTP Basic Auth for the web UI.
 
@@ -626,6 +669,7 @@ class Config(BaseModel):
     notes: NotesConfig = Field(default_factory=NotesConfig)
     curator: CuratorConfig = Field(default_factory=CuratorConfig)
     digest: DigestConfig = Field(default_factory=DigestConfig)
+    parity_gate: ParityGateConfig = Field(default_factory=ParityGateConfig)
 
 
 def get_active_llm_config(cfg: Config) -> LLMConfig:

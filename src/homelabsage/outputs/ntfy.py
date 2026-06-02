@@ -57,6 +57,7 @@ _SEVERITY_TAGS: dict[str, str] = {
 
 class NtfyOutput(Output):
     id = "ntfy"
+    is_push = True
 
     def __init__(self, cfg: NtfyOutputConfig):
         self.cfg = cfg

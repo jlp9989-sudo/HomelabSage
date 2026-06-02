@@ -44,6 +44,7 @@ _SEVERITY_COLOR: dict[str, int] = {
 
 class DiscordOutput(Output):
     id = "discord"
+    is_push = True
 
     def __init__(self, cfg: DiscordOutputConfig):
         self.cfg = cfg

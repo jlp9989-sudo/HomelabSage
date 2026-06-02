@@ -48,6 +48,13 @@ sources:
     # Containers a ignorar (regex sobre el nombre).
     skip:
       - "^.*_(redis|valkey|postgres|mysql|mariadb|db)$"
+    # CVE scan (necesita trivy o grype en PATH). Off por defecto: el primer
+    # run de trivy descarga la DB de vulnerabilidades (~300 MB).
+    cve_scan: false
+    # Dependencias de compose: cuando indiques paths con docker-compose.yml,
+    # cada Update lista en context.cascade los servicios que dependen de él.
+    compose_scan_paths: []
+      # - /mnt/user/appdata/dockge/stacks
 
   homeassistant:
     enabled: false
@@ -57,6 +64,11 @@ sources:
     include_hacs: true
     # Incluye add-ons del Supervisor (si aplica).
     include_addons: true
+
+  # Repos GitHub/Codeberg que quieres seguir aunque no corran como container.
+  # Lista gestionada vía `homelabsage watched add owner/repo`.
+  github_watched:
+    enabled: false
 
   # Próximamente — placeholders, mantén disabled.
   fedora:
@@ -116,6 +128,13 @@ outputs:
     token: "${GOTIFY_TOKEN:-}"
     min_severity: high
     # priority_overrides: {critical: 10}
+
+# ──────────────────────────────────────────────────────────────────────
+# Parity gate — silencia push notifications mientras corre parity check
+# ──────────────────────────────────────────────────────────────────────
+parity_gate:
+  enabled: false
+  mdstat_path: /proc/mdstat
 
 # ──────────────────────────────────────────────────────────────────────
 # Digest semanal — rollup en canales seleccionados (default: dom 09:00)

@@ -1,0 +1,76 @@
+{% extends "_base.html" %}
+{% set nav = "diagnostics" %}
+{% block title %}HomelabSage — Diagnostics{% endblock %}
+
+{% block content %}
+<style>
+  .verdict { display:inline-block; padding:.15rem .55rem; border-radius:3px; font-size:.72rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  .v-tracked        { background:#1c4a26; color:#b6f5c1; }
+  .v-floating_tag   { background:#205b8a; color:#dbeefd; }
+  .v-no_repo        { background:#5a4218; color:#ffc77a; }
+  .v-no_version     { background:#5a4218; color:#ffc77a; }
+  .v-skipped_by_rule{ background:#2a3340; color:#8fa3b8; }
+</style>
+
+<h2>What HomelabSage sees</h2>
+<p class="muted">
+  One row per container the docker plugin enumerates. The verdict reflects
+  the same code path the scheduled scan takes — no outbound HTTP calls,
+  so this page is cheap and refreshable.
+</p>
+
+<div style="margin:1rem 0; display:flex; gap:.5rem; flex-wrap:wrap;">
+  {% for verdict, count in counts.items() %}
+    <span class="pill verdict v-{{ verdict }}">{{ count }} {{ verdict }}</span>
+  {% endfor %}
+  {% if not diagnostics %}
+    <span class="pill">docker daemon unreachable</span>
+  {% endif %}
+</div>
+
+{% if diagnostics %}
+<table>
+  <thead>
+    <tr>
+      <th>Container</th>
+      <th>Status</th>
+      <th>Image</th>
+      <th>Repo</th>
+      <th>Version</th>
+      <th>Verdict</th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for d in diagnostics %}
+    <tr>
+      <td><code>{{ d.name }}</code></td>
+      <td>{{ d.status }}</td>
+      <td><code>{{ d.image_short }}</code></td>
+      <td>
+        {% if d.repo %}<code>{{ d.repo }}</code>{% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td>
+        {% if d.current_version %}<code>{{ d.current_version }}</code>{% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td><span class="verdict v-{{ d.verdict }}">{{ d.verdict }}</span></td>
+      <td class="muted">
+        {% if d.skip_pattern %}
+          matched <code>{{ d.skip_pattern }}</code>
+        {% endif %}
+        {% for n in d.notes %}
+          <div>{{ n }}</div>
+        {% endfor %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="flash error">
+  No containers visible. Either the docker daemon is unreachable, or the
+  socket isn't mounted into this container. Check
+  <code>sources.docker.socket</code> in <a href="/settings">settings</a>.
+</p>
+{% endif %}
+{% endblock %}
