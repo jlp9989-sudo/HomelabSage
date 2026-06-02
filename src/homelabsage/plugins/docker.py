@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import UTC, datetime
@@ -210,11 +211,14 @@ class DockerPlugin(Plugin):
 
         # Build the compose graph ONCE per scan — it's read-only and the
         # walk cost (a handful of YAML files) is fixed regardless of how
-        # many containers we iterate below.
+        # many containers we iterate below. Filesystem walk runs off the
+        # event loop so concurrent HTTP plugins keep ticking.
         compose_graph: DependencyGraph | None = None
         if self.cfg.compose_scan_paths:
             try:
-                compose_graph = build_compose_graph(self.cfg.compose_scan_paths)
+                compose_graph = await asyncio.to_thread(
+                    build_compose_graph, self.cfg.compose_scan_paths
+                )
                 log.debug(
                     "compose graph: %d services from %s",
                     len(compose_graph.services), self.cfg.compose_scan_paths,
@@ -336,7 +340,10 @@ class DockerPlugin(Plugin):
 
             if self.cfg.cve_scan and image_tag:
                 try:
-                    summary = scan_image_cve(image_tag)
+                    # Trivy/grype are subprocess calls and can take 30-90s on
+                    # cold DB cache; run off the event loop so we don't
+                    # starve other plugins' HTTP work running concurrently.
+                    summary = await asyncio.to_thread(scan_image_cve, image_tag)
                     if summary is not None:
                         ctx["cve"] = summary.to_context()
                 except Exception as e:
