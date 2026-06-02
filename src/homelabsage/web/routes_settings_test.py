@@ -28,9 +28,12 @@ from jinja2 import Environment
 
 from ..config import (
     Config,
+    DiscordOutputConfig,
+    GotifyOutputConfig,
     HAConfig,
     LLMConfig,
     NotionOutputConfig,
+    NtfyOutputConfig,
     SchedulerConfig,
     TelegramOutputConfig,
     get_active_llm_config,
@@ -191,6 +194,107 @@ async def _test_telegram(tg_cfg: TelegramOutputConfig) -> tuple[bool, str]:
     )
 
 
+async def _test_discord(d_cfg: DiscordOutputConfig) -> tuple[bool, str]:
+    """Post a tiny embed to the webhook. 204 = delivered.
+
+    Discord rejects empty payloads, so we send a real embed labelled
+    "HomelabSage test message"; the user sees the post hit the channel,
+    which catches "wrong channel" mistakes the API alone cannot.
+    """
+    if not d_cfg.webhook_url:
+        return False, (
+            "No webhook_url set. In Discord: Server Settings → Integrations → "
+            "Webhooks → New Webhook → Copy URL."
+        )
+    payload = {
+        "embeds": [{
+            "title": "HomelabSage test message",
+            "description": "If you can read this, the webhook is wired up.",
+            "color": 0x3498DB,
+        }]
+    }
+    if d_cfg.username:
+        payload["username"] = d_cfg.username
+    try:
+        async with httpx.AsyncClient(timeout=TEST_TIMEOUT_S) as client:
+            r = await client.post(d_cfg.webhook_url, json=payload)
+    except httpx.HTTPError as e:
+        return False, f"Could not reach the webhook URL: {e}"
+
+    if r.status_code in (200, 204):
+        return True, f"Discord webhook accepted the test message (HTTP {r.status_code})."
+    if r.status_code == 401:
+        return False, (
+            "HTTP 401 — Discord rejected the webhook token. Has the webhook "
+            "been deleted in the channel settings?"
+        )
+    if r.status_code == 404:
+        return False, "HTTP 404 — the webhook URL is no longer valid (deleted?)."
+    return False, f"HTTP {r.status_code}: {r.text[:200]}"
+
+
+async def _test_ntfy(n_cfg: NtfyOutputConfig) -> tuple[bool, str]:
+    """Send a one-line message to the topic. Success = HTTP 200 with JSON id."""
+    if not n_cfg.server_url:
+        return False, "No server_url set. Use `https://ntfy.sh` for the public instance."
+    if not n_cfg.topic:
+        return False, "No topic set. Pick any string and subscribe to it on the ntfy app."
+
+    url = f"{n_cfg.server_url.rstrip('/')}/{n_cfg.topic.lstrip('/')}"
+    headers = {"Title": "HomelabSage test message", "Tags": "information_source"}
+    if n_cfg.auth_token:
+        headers["Authorization"] = f"Bearer {n_cfg.auth_token}"
+    try:
+        async with httpx.AsyncClient(timeout=TEST_TIMEOUT_S) as client:
+            r = await client.post(
+                url,
+                content=b"If you can read this, the topic is wired up.",
+                headers=headers,
+            )
+    except httpx.HTTPError as e:
+        return False, f"Could not reach {url}: {e}"
+
+    if r.status_code == 200:
+        return True, f"ntfy delivered the test message to topic {n_cfg.topic!r}."
+    if r.status_code in (401, 403):
+        return False, (
+            f"HTTP {r.status_code} — server requires authentication and the "
+            f"auth_token is missing or wrong."
+        )
+    return False, f"HTTP {r.status_code}: {r.text[:200]}"
+
+
+async def _test_gotify(g_cfg: GotifyOutputConfig) -> tuple[bool, str]:
+    """Post a low-priority test message via the app token."""
+    if not g_cfg.server_url:
+        return False, "No server_url set. Point this at your Gotify install (`https://...`)."
+    if not g_cfg.token:
+        return False, "No token set. Create an Application in Gotify and copy its token."
+
+    url = f"{g_cfg.server_url.rstrip('/')}/message"
+    payload = {
+        "title": "HomelabSage test message",
+        "message": "If you can read this, the app token is wired up.",
+        "priority": 1,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=TEST_TIMEOUT_S) as client:
+            r = await client.post(url, params={"token": g_cfg.token}, json=payload)
+    except httpx.HTTPError as e:
+        return False, f"Could not reach {url}: {e}"
+
+    if r.status_code == 200:
+        return True, f"Gotify accepted the test message on {g_cfg.server_url}."
+    if r.status_code == 401:
+        return False, "HTTP 401 — the token is invalid for this Gotify install."
+    if r.status_code == 404:
+        return False, (
+            "HTTP 404 — the `/message` endpoint isn't where expected. Double-check "
+            "that `server_url` is the Gotify root and not e.g. the admin UI URL."
+        )
+    return False, f"HTTP {r.status_code}: {r.text[:200]}"
+
+
 async def _test_homeassistant(ha_cfg: HAConfig) -> tuple[bool, str]:
     """`GET /api/` returns `{"message": "API running."}` on a working install."""
     if not ha_cfg.token:
@@ -270,6 +374,21 @@ def register_settings_test_routes(
         ok, msg = await _test_telegram(_fresh_cfg().outputs.telegram)
         return _render(ok, msg)
 
+    @app.post("/settings/outputs/discord/test", response_class=HTMLResponse)
+    async def test_discord() -> HTMLResponse:
+        ok, msg = await _test_discord(_fresh_cfg().outputs.discord)
+        return _render(ok, msg)
+
+    @app.post("/settings/outputs/ntfy/test", response_class=HTMLResponse)
+    async def test_ntfy() -> HTMLResponse:
+        ok, msg = await _test_ntfy(_fresh_cfg().outputs.ntfy)
+        return _render(ok, msg)
+
+    @app.post("/settings/outputs/gotify/test", response_class=HTMLResponse)
+    async def test_gotify() -> HTMLResponse:
+        ok, msg = await _test_gotify(_fresh_cfg().outputs.gotify)
+        return _render(ok, msg)
+
     @app.post("/settings/sources/homeassistant/test", response_class=HTMLResponse)
     async def test_homeassistant() -> HTMLResponse:
         ok, msg = await _test_homeassistant(_fresh_cfg().sources.homeassistant)
@@ -287,6 +406,9 @@ BLOCK_TEST_ENDPOINTS: dict[str, str] = {
     "llm": "/settings/llm/test",
     "outputs/notion": "/settings/outputs/notion/test",
     "outputs/telegram": "/settings/outputs/telegram/test",
+    "outputs/discord": "/settings/outputs/discord/test",
+    "outputs/ntfy": "/settings/outputs/ntfy/test",
+    "outputs/gotify": "/settings/outputs/gotify/test",
     "sources/homeassistant": "/settings/sources/homeassistant/test",
     "scheduler": "/settings/scheduler/heartbeat/test",
 }

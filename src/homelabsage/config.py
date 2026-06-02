@@ -289,9 +289,136 @@ class TelegramOutputConfig(BaseModel):
     )
 
 
+class DiscordOutputConfig(BaseModel):
+    enabled: bool = False
+    webhook_url: str = Field(
+        "",
+        description=(
+            "Channel webhook URL. In Discord: Server Settings → Integrations "
+            "→ Webhooks → New Webhook → Copy URL. Anyone with this URL can "
+            "post to the channel, so treat it as a secret."
+        ),
+    )
+    username: str = Field(
+        "HomelabSage",
+        description="Overrides the webhook's default display name on each message.",
+    )
+    avatar_url: str = Field(
+        "",
+        description="Optional avatar URL displayed next to each message.",
+    )
+    min_severity: Literal["critical", "high", "medium", "info"] = Field(
+        "high",
+        description="Only push updates at or above this severity.",
+    )
+
+
+class NtfyOutputConfig(BaseModel):
+    enabled: bool = False
+    server_url: str = Field(
+        "https://ntfy.sh",
+        description=(
+            "Base URL of the ntfy server. Use `https://ntfy.sh` for the "
+            "public instance or your own self-hosted URL."
+        ),
+    )
+    topic: str = Field(
+        "",
+        description=(
+            "Topic name. Subscribers will follow `<server_url>/<topic>`. Use "
+            "a random hard-to-guess string for anything sensitive — topics "
+            "are effectively shared secrets."
+        ),
+    )
+    auth_token: str = Field(
+        "",
+        description=(
+            "Optional bearer token for self-hosted ntfy with access control. "
+            "Leave empty for unauthenticated topics (the ntfy.sh default)."
+        ),
+    )
+    min_severity: Literal["critical", "high", "medium", "info"] = Field(
+        "high",
+        description="Only push updates at or above this severity.",
+    )
+
+
+class GotifyOutputConfig(BaseModel):
+    enabled: bool = False
+    server_url: str = Field(
+        "",
+        description="Base URL of the Gotify server, e.g. `https://gotify.example.com`.",
+    )
+    token: str = Field(
+        "",
+        description=(
+            "App token from Gotify. In the Gotify UI: APPS → Create Application → "
+            "copy the generated token. One token per application/inbox."
+        ),
+    )
+    min_severity: Literal["critical", "high", "medium", "info"] = Field(
+        "high",
+        description="Only push updates at or above this severity.",
+    )
+    priority_overrides: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Optional per-severity priority overrides (Gotify 1-10 scale). "
+            "Example: `{\"critical\": 10}` to force full-screen alerts."
+        ),
+    )
+
+
 class OutputsConfig(BaseModel):
     notion: NotionOutputConfig = Field(default_factory=NotionOutputConfig)
     telegram: TelegramOutputConfig = Field(default_factory=TelegramOutputConfig)
+    discord: DiscordOutputConfig = Field(default_factory=DiscordOutputConfig)
+    ntfy: NtfyOutputConfig = Field(default_factory=NtfyOutputConfig)
+    gotify: GotifyOutputConfig = Field(default_factory=GotifyOutputConfig)
+
+
+class DigestConfig(BaseModel):
+    """Weekly rollup posted to chosen notification channels.
+
+    The digest runs on a SEPARATE cron from the scan so users can do daily
+    scans + weekly digest without either drowning the other. Disabled by
+    default — most installs want to tune notification volume before opting
+    in to a second message stream.
+    """
+
+    enabled: bool = False
+    cron: str = Field(
+        "0 9 * * 0",
+        description=(
+            "When to post the digest. Default: Sundays at 09:00. Uses the "
+            "same timezone as `scheduler.timezone`."
+        ),
+        json_schema_extra={"ui_widget": "cron"},
+    )
+    lookback_days: int = Field(
+        7,
+        description="How many days of history the digest summarises (default: one week).",
+    )
+    channels: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Which notification channels receive the digest. Each entry must "
+            "be one of: `telegram`, `discord`, `ntfy`, `gotify`. Leave empty "
+            "to auto-pick every enabled channel."
+        ),
+    )
+
+    @field_validator("channels")
+    @classmethod
+    def _check_channels(cls, v: list[str]) -> list[str]:
+        allowed = {"telegram", "discord", "ntfy", "gotify"}
+        bad = [c for c in v if c not in allowed]
+        if bad:
+            raise ValueError(
+                f"unknown digest channels: {bad}. "
+                f"Allowed: {sorted(allowed)} (Notion is excluded — per-row only)."
+            )
+        return v
 
 
 class SchedulerConfig(BaseModel):
@@ -498,6 +625,7 @@ class Config(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     notes: NotesConfig = Field(default_factory=NotesConfig)
     curator: CuratorConfig = Field(default_factory=CuratorConfig)
+    digest: DigestConfig = Field(default_factory=DigestConfig)
 
 
 def get_active_llm_config(cfg: Config) -> LLMConfig:

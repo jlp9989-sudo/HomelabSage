@@ -6,6 +6,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
 from homelabsage.registries import (
     FloatingTagInfo,
     dockerhub_tag_info,

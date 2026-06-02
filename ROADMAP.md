@@ -25,8 +25,8 @@ All of these are additive: they enrich the `Update` payload that the LLM already
 - ✅ **New-volume detector.** Compare `VOLUME` declarations old vs new. Flag any new path that isn't already mounted — the classic data-loss-on-update trap.
 - ✅ **Network-capability diff.** `cap_add` / `privileged` / `network_mode` changes between versions. Tiny addition, large security win. Folds into the CVE block below.
 - ✅ **CVE adapter (Trivy/Grype output → LLM context).** Don't reimplement vulnerability scanning. Run `trivy image` (optional, only if binary present) and feed the JSON into the analyzer's prompt as one more `context` field. Single-purpose plugins are the project's discipline.
-- ✅ **Weekly digest output.** Sunday 09:00 cron entry that posts a single Telegram/email message: counts, top severities, abandoned containers (see below). The scheduler already exists — this is one new output module.
-- ✅ **Webhook-style outputs: Discord / Ntfy / Gotify.** Three of the four most-asked notification channels on r/selfhosted (the fourth is Telegram, already shipped). All three share the same shape — a small `Output` class that POSTs JSON to a configured URL, no auth juggling, no SDK dependency. Concretely:
+- ✅ **Weekly digest output.** _Shipped: `src/homelabsage/digest.py` + `digest:` config block + scheduler hook + `homelabsage digest` CLI. Rolls up the last N days, posts to every enabled notification channel, and pins the body to `notes/digest.md` so the next curator pass picks it up as context._
+- ✅ **Webhook-style outputs: Discord / Ntfy / Gotify.** _Shipped: `outputs/{discord,ntfy,gotify}.py` mirroring the Telegram shape (severity gate + idempotent POST), plus `/settings/outputs/<name>/test` connection-test endpoints._ Three of the four most-asked notification channels on r/selfhosted (the fourth is Telegram, already shipped). All three share the same shape — a small `Output` class that POSTs JSON to a configured URL, no auth juggling, no SDK dependency. Concretely:
    * **Discord** — `POST <webhook_url>` with `{"content": "...", "embeds": [{...}]}`. Per-severity colour mapping on the embed (`0xc0392b` red for critical, `0xe67e22` orange for high, …). Webhook URL is the only knob; no app registration required.
    * **Ntfy** — `POST <topic_url>` (e.g. `https://ntfy.sh/my-topic`) with a plain-text body + `Title:`, `Tags:`, `Priority:` headers. Self-host-friendly default (every homelabber knows about ntfy.sh or runs their own).
    * **Gotify** — `POST <server>/message?token=<token>` with `{"title":..., "message":..., "priority":N}`. Same shape as Telegram structurally, just a different endpoint and a numeric priority instead of a severity enum.
@@ -46,7 +46,7 @@ Bigger changes. Each one is a multi-day chunk.
 
 - ✅ **Watched repos plugin.** New source (`plugins/github_watched.py`) that analyzes GitHub repos the user explicitly marks for tracking, the same way the docker plugin analyzes running containers. Expands HomelabSage's scope beyond Docker: toolboxes (e.g. `kyuz0/amd-strix-halo-toolboxes`), scripts, dotfiles, firmware repos, anything the user runs in production that isn't a container. Authentication via `GITHUB_TOKEN` (already in `.env.example`); the plugin reuses the existing `homelabsage.github.latest_release` and `repo_metadata` helpers, so the actual scan logic is ~30 lines. The interesting part is **scoping**: we deliberately do NOT auto-import the user's full `starred` or `watching` list (too noisy — most people star things they'll never run). Instead, the user opts in per-repo. Storage: a new `watched_repos` table (owner/name + nickname + active flag + added_at). Management surface lives in the v0.5 UI (`/watched` page: add by `owner/name`, toggle active/inactive, delete) so non-technical users can curate without editing YAML. CLI access via `homelabsage watched add|list|remove|toggle` for power users. Same prompt rules that today fire on `repo_health` apply here without changes — the analyzer already knows what to do with a stale/abandoned repo. ~2 days for the plugin + CLI; the UI piece slots into v0.5 step 7 alongside interview-mode.
 
-- ✅ **CSI mode (post-mortem assistant).** New CLI subcommand `homelabsage csi <container>` that:
+- ✅ **CSI mode (post-mortem assistant).** _Shipped: `src/homelabsage/csi.py` + `homelabsage csi <container>` CLI (with `--evidence-only` for air-gapped use). Falls back to a raw-evidence report when the LLM is disabled/unreachable._ New CLI subcommand `homelabsage csi <container>` that:
   1. Greps SQLite for the latest update applied to that container,
   2. Pulls `docker logs --since=<that timestamp>`,
   3. Filters to ERROR/WARN/FATAL lines,
@@ -84,7 +84,9 @@ Pattern is borrowed from how Claude Code maintains its `MEMORY.md` — same shap
 
 This is the most architecturally invasive item on the roadmap; spec it as a separate design doc before coding.
 
-### System-level curator note (v0.4.1)
+### System-level curator note (v0.4.1) — ✅ shipped
+
+_Shipped: `src/homelabsage/curator/system.py` with pluggable probes (kernel, docker info, CPU, memory, GPUs via nvidia-smi/rocm-smi, ZFS pools, Unraid array, proxy binaries) + `homelabsage curate --system` CLI. Idempotent: re-runs skip the write when the fingerprint hasn't changed._
 
 Sibling feature of the per-container curator. One auto-generated `notes/system.md` that captures the **host environment** the containers run inside, so every subsequent LLM call (analyzer and per-container curator) has shared baseline context without paying the token cost of re-discovering it for each update.
 

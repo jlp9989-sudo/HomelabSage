@@ -16,7 +16,10 @@ from .llm import LLMClient
 from .models import AnalyzedUpdate, UpdateStatus
 from .notes import NotesProvider
 from .outputs import Output
+from .outputs.discord import DiscordOutput
+from .outputs.gotify import GotifyOutput
 from .outputs.notion import NotionOutput
+from .outputs.ntfy import NtfyOutput
 from .outputs.telegram import TelegramOutput
 from .plugins import Plugin
 from .plugins.docker import DockerPlugin
@@ -43,6 +46,12 @@ def build_outputs(cfg: Config, db: Database) -> list[Output]:
         outputs.append(NotionOutput(cfg.outputs.notion, db))
     if cfg.outputs.telegram.enabled:
         outputs.append(TelegramOutput(cfg.outputs.telegram))
+    if cfg.outputs.discord.enabled:
+        outputs.append(DiscordOutput(cfg.outputs.discord))
+    if cfg.outputs.ntfy.enabled:
+        outputs.append(NtfyOutput(cfg.outputs.ntfy))
+    if cfg.outputs.gotify.enabled:
+        outputs.append(GotifyOutput(cfg.outputs.gotify))
     return outputs
 
 

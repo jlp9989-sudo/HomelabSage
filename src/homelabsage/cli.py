@@ -56,6 +56,14 @@ EXPORT_REDACT_OPT = typer.Option(
     help="Strip IPs, hostnames, and credentials. Default: on. "
          "Turn off only when piping into a tool you fully trust.",
 )
+DIGEST_CHANNEL_OPT = typer.Option(
+    None,
+    "--channel",
+    help=(
+        "Restrict delivery to specific channels (telegram|discord|ntfy|"
+        "gotify). Repeat for several. Defaults to every enabled channel."
+    ),
+)
 
 
 @app.command()
@@ -124,6 +132,15 @@ def curate(
     show_prompt: bool = typer.Option(
         False, "--show-prompt", help="Print the rendered prompt for each target and exit."
     ),
+    system: bool = typer.Option(
+        False,
+        "--system",
+        help=(
+            "Generate `notes/system.md` from host probes (kernel, docker info, "
+            "GPU, ZFS, Unraid). Independent of --discover/--target; can run "
+            "alone or alongside them in the same invocation."
+        ),
+    ),
     verbose: bool = VERBOSE_OPT,
 ) -> None:
     """Generate one Markdown note per running container.
@@ -133,9 +150,9 @@ def curate(
     note without touching the filesystem.
     """
     _setup_logging(verbose)
-    if not discover and not (target or []):
+    if not discover and not (target or []) and not system:
         console.print(
-            "[red]Either --discover or at least one --target is required.[/red]"
+            "[red]One of --discover, --target, --system is required.[/red]"
         )
         raise typer.Exit(code=2)
 
@@ -143,6 +160,29 @@ def curate(
     if not cfg.curator.enabled:
         console.print("[yellow]curator.enabled is false in config — aborting.[/yellow]")
         raise typer.Exit(code=1)
+
+    if system:
+        from .curator.system import curate_system
+
+        notes_dir = cfg.curator.output_dir or cfg.notes.notes_dir
+        if not notes_dir:
+            console.print(
+                "[yellow]No notes_dir / curator.output_dir configured — "
+                "system.md would have nowhere to live.[/yellow]"
+            )
+            raise typer.Exit(code=1)
+        path, report = curate_system(notes_dir)
+        if path is None:
+            console.print("[red]system.md write failed (check logs).[/red]")
+            raise typer.Exit(code=1)
+        console.print(
+            f"[green]system.md[/green] written to {path} "
+            f"[dim](fingerprint {report.fingerprint()})[/dim]"
+        )
+        # When --system is the only flag, exit cleanly without entering the
+        # per-container path below.
+        if not discover and not (target or []):
+            return
 
     # Lazy import so the heavy docker SDK only loads for this subcommand.
     from .curator import Curator
@@ -360,6 +400,84 @@ def export(
     else:
         output.write_text(text + "\n")
         console.print(f"[green]Wrote[/green] {len(text)} bytes to {output}")
+
+
+@app.command()
+def csi(
+    container: str = typer.Argument(..., help="Container name (as in `docker ps`)."),
+    config: Path = CONFIG_OPT,
+    evidence_only: bool = typer.Option(
+        False,
+        "--evidence-only",
+        help="Skip the LLM call — print only the gathered logs/notes/update.",
+    ),
+    verbose: bool = VERBOSE_OPT,
+) -> None:
+    """Post-mortem assistant for a single container.
+
+    Pulls the last detected update + container logs since that timestamp,
+    filters to ERROR/WARN/FATAL lines, cross-references your notes, and
+    asks the LLM to diagnose. Use --evidence-only to skip the LLM and just
+    print the raw signals.
+    """
+    _setup_logging(verbose)
+    cfg = load_config(config)
+    from .csi import (
+        _evidence_only_report,
+        gather_evidence,
+        run_csi_blocking,
+    )
+
+    if evidence_only:
+        evidence = gather_evidence(cfg, container)
+        console.print(_evidence_only_report(evidence))
+        return
+    report, _ = run_csi_blocking(cfg, container)
+    console.print(report)
+
+
+@app.command()
+def digest(
+    config: Path = CONFIG_OPT,
+    days: int = typer.Option(
+        0,
+        "--days",
+        help="Override digest.lookback_days for this run (0 = use config).",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print the digest body to stdout instead of sending it.",
+    ),
+    channel: list[str] = DIGEST_CHANNEL_OPT,
+    verbose: bool = VERBOSE_OPT,
+) -> None:
+    """Build and send the weekly rollup. Useful for one-shot manual sends."""
+    _setup_logging(verbose)
+    cfg = load_config(config)
+    from .digest import run_digest_blocking
+
+    lookback = days if days > 0 else cfg.digest.lookback_days
+    body, results, notes_path = run_digest_blocking(
+        cfg,
+        days=lookback,
+        dry_run=dry_run,
+        channels=channel or None,
+    )
+    if dry_run:
+        console.print(body)
+        return
+    if notes_path:
+        console.print(f"[dim]Wrote digest to[/dim] {notes_path}")
+    if not results:
+        console.print(
+            "[yellow]No channels enabled — set `outputs.<name>.enabled: true` "
+            "or pass `--channel <name>` to deliver this digest.[/yellow]"
+        )
+        return
+    for ch, status in results.items():
+        colour = "green" if status == "sent" else "yellow"
+        console.print(f"[{colour}]{ch:<10}[/{colour}] {status}")
 
 
 @app.command()

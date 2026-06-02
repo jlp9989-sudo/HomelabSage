@@ -93,6 +93,41 @@ outputs:
     # Umbral mínimo de severity para notificar: critical | high | medium | info
     min_severity: high
 
+  # Discord webhook. Crear en Server Settings → Integrations → Webhooks.
+  discord:
+    enabled: false
+    webhook_url: "${DISCORD_WEBHOOK_URL:-}"
+    username: HomelabSage
+    avatar_url: ""
+    min_severity: high
+
+  # ntfy.sh (público) o instancia self-hosted. Topic = string libre.
+  ntfy:
+    enabled: false
+    server_url: https://ntfy.sh
+    topic: "${NTFY_TOPIC:-}"
+    auth_token: "${NTFY_TOKEN:-}"
+    min_severity: high
+
+  # Gotify self-hosted. Token = app token desde Gotify UI.
+  gotify:
+    enabled: false
+    server_url: "${GOTIFY_URL:-}"
+    token: "${GOTIFY_TOKEN:-}"
+    min_severity: high
+    # priority_overrides: {critical: 10}
+
+# ──────────────────────────────────────────────────────────────────────
+# Digest semanal — rollup en canales seleccionados (default: dom 09:00)
+# ──────────────────────────────────────────────────────────────────────
+digest:
+  enabled: false
+  cron: "0 9 * * 0"
+  lookback_days: 7
+  # Lista vacía = todos los canales habilitados arriba.
+  channels: []
+  # Ejemplo: channels: [telegram, ntfy]
+
 # ──────────────────────────────────────────────────────────────────────
 # Scheduler — cuándo escanea (cron syntax)
 # ──────────────────────────────────────────────────────────────────────

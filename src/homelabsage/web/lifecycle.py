@@ -13,6 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
 
 from ..config import Config
+from ..digest import run_digest
 from ..engine import Engine
 
 log = logging.getLogger(__name__)
@@ -33,10 +34,30 @@ def register_lifecycle(app: FastAPI, cfg: Config, engine: Engine) -> None:
                 id="run_once",
                 misfire_grace_time=3600,
             )
+            if cfg.digest.enabled:
+                async def _digest_job() -> None:
+                    # Reload cfg from disk so a settings edit during the
+                    # week takes effect on the next firing. We pass the
+                    # in-memory cfg as fallback so tests work without a
+                    # full overlay roundtrip.
+                    _, results, _ = await run_digest(
+                        cfg, days=cfg.digest.lookback_days
+                    )
+                    log.info("Digest delivered: %s", results)
+
+                scheduler.add_job(
+                    _digest_job,
+                    CronTrigger.from_crontab(
+                        cfg.digest.cron, timezone=cfg.scheduler.timezone
+                    ),
+                    id="digest",
+                    misfire_grace_time=3600,
+                )
             scheduler.start()
             log.info(
-                "Scheduler started: cron=%r tz=%s",
+                "Scheduler started: cron=%r tz=%s%s",
                 cfg.scheduler.cron, cfg.scheduler.timezone,
+                f" digest_cron={cfg.digest.cron!r}" if cfg.digest.enabled else "",
             )
 
     @app.on_event("shutdown")
