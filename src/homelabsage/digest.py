@@ -21,6 +21,15 @@ Output shape:
 The digest never invents content. Every line cites a concrete row from the
 DB; the LLM is not in the loop here on purpose (we'd be summarising
 summaries — opportunity for hallucination with no upside).
+
+Interaction with the parity gate (`parity_gate.enabled`):
+  - Per-update push notifications honour the gate (see `engine.run_once`).
+  - This digest does NOT honour the gate by default — it's the backstop
+    for missed real-time pings, so silencing it during parity would leave
+    no signal at all.
+  - Users who want strict silence flip `parity_gate.skip_digest_too =
+    true`; the scheduler hook in `web.lifecycle._digest_job` then
+    re-checks the gate before firing.
 """
 
 from __future__ import annotations

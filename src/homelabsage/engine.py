@@ -104,14 +104,21 @@ class Engine:
         # Probe parity once per run; outputs marked `is_push = True` are
         # skipped while it's active. Persistent outputs (Notion) keep
         # running so we don't lose state — the user just won't get a phone
-        # buzz mid-resync. The weekly digest is the backstop for missed
-        # real-time pings.
+        # buzz mid-resync. When the gate clears, we replay every push that
+        # was skipped from the `pending_dispatches` queue (auto-flush).
         push_gated = False
         if self.cfg.parity_gate.enabled:
             state = is_parity_running(mdstat_path=self.cfg.parity_gate.mdstat_path)
             if state.running:
                 push_gated = True
                 log.info("Push notifications gated by parity: %s", state.reason)
+
+        # Auto-flush: when the gate is NOT active, drain the queue of pushes
+        # that piled up during the last gated window. We dispatch in
+        # `queued_at` order so older items hit first, and DELETE the row on
+        # successful delivery so retries are bounded by output errors only.
+        if not push_gated:
+            await self._flush_pending_dispatches()
 
         for plugin in self.plugins:
             try:
@@ -148,10 +155,13 @@ class Engine:
                 self._incremental_hook(analyzed)
                 for output in self.outputs:
                     if push_gated and output.is_push:
-                        # Persistent outputs still run; push is queued
-                        # implicitly: the same (subject, new_version) row
-                        # will reappear on the next gate-clear scan and
-                        # dispatch then.
+                        # Queue for later flush rather than relying on the
+                        # item being re-detected — once analyzed, an Update
+                        # is dedupped by `(source, subject, new_version)`
+                        # and the per-item loop skips it entirely. The
+                        # auto-flush at the top of run_once dispatches when
+                        # the gate clears.
+                        self.db.queue_pending_dispatch(analyzed.id, output.id)
                         continue
                     try:
                         await output.send(analyzed)
@@ -161,6 +171,43 @@ class Engine:
         await self._heartbeat_ok()
         log.info("Run end — %s", stats)
         return stats
+
+    async def _flush_pending_dispatches(self) -> None:
+        """Replay every queued push dispatch through the matching output.
+
+        Each successful send DELETEs its queue row. Failures stay in the
+        queue and retry on the next scan — same semantics as the original
+        per-update loop, just resumed across runs.
+
+        Items whose `analysis` is gone (very old row, manually purged) are
+        skipped and their queue rows removed: stale entries shouldn't
+        block the queue forever.
+        """
+        queue = self.db.list_pending_dispatches()
+        if not queue:
+            return
+        outputs_by_id = {o.id: o for o in self.outputs}
+        for row in queue:
+            update_id = row["update_id"]
+            output_id = row["output_id"]
+            output = outputs_by_id.get(output_id)
+            if output is None:
+                # The output is no longer enabled — clearing the row is the
+                # safe call; without it the queue grows forever.
+                self.db.delete_pending_dispatch(update_id, output_id)
+                continue
+            item = self.db.get(update_id)
+            if item is None or item.analysis is None:
+                self.db.delete_pending_dispatch(update_id, output_id)
+                continue
+            try:
+                await output.send(item)
+                self.db.delete_pending_dispatch(update_id, output_id)
+            except Exception as e:
+                log.exception(
+                    "pending dispatch %s → %s failed; will retry: %s",
+                    update_id, output_id, e,
+                )
 
     def _incremental_hook(self, analyzed: AnalyzedUpdate) -> None:
         """Pin a one-line summary of a risky update to the curator's note.

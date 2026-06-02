@@ -16,6 +16,7 @@ from ..compose import build_graph as build_compose_graph
 from ..config import DockerSourceConfig
 from ..cve import scan_image as scan_image_cve
 from ..github import classify_repo_health, latest_release, repo_metadata
+from ..image_size import detect_growth as detect_image_growth
 from ..images import find_alternatives
 from ..models import Update
 from ..registries import (
@@ -337,6 +338,32 @@ class DockerPlugin(Plugin):
                             for n in neighbours[:20]
                         ],
                     }
+
+            if self.cfg.image_size_growth_detect and image_tag:
+                # Local image's on-disk size (sum of writeable + layer cache).
+                # `c.image.attrs["Size"]` is set by `docker inspect`; falsy
+                # when the SDK can't reach the daemon or the image is gone.
+                try:
+                    local_size = int((c.image.attrs or {}).get("Size") or 0)
+                except (TypeError, ValueError):
+                    local_size = 0
+                if local_size > 0 and new_version:
+                    try:
+                        # The new tag for the same slug is `:<new_version>`;
+                        # Docker Hub tag-info covers most images. Non-Hub
+                        # registries fall through silently.
+                        growth = await detect_image_growth(
+                            image_tag,
+                            local_size,
+                            new_version,
+                            threshold_ratio=self.cfg.image_size_growth_ratio,
+                        )
+                        if growth is not None:
+                            ctx["image_size_growth"] = growth.to_context()
+                    except Exception as e:
+                        log.debug(
+                            "image-size probe failed for %s: %s", c.name, e
+                        )
 
             if self.cfg.cve_scan and image_tag:
                 try:

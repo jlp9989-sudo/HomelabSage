@@ -216,3 +216,104 @@ async def test_engine_skips_push_outputs_when_gated(monkeypatch, tmp_path: Path)
 
     # Push gated → only persistent fired
     assert sent_to == ["fake_persistent"]
+
+
+@pytest.mark.asyncio
+async def test_engine_queues_and_auto_flushes_when_gate_clears(monkeypatch, tmp_path: Path):
+    """Gated push → row in pending_dispatches. Next ungated scan → push fires."""
+
+    from homelabsage.config import (
+        Config,
+        OutputsConfig,
+        ParityGateConfig,
+    )
+    from homelabsage.db import Database
+    from homelabsage.engine import Engine
+    from homelabsage.models import Analysis, Severity, Update
+    from homelabsage.outputs import Output
+
+    sent_to: list[str] = []
+
+    class _FakePush(Output):
+        id = "fake_push"
+        is_push = True
+        async def send(self, item):
+            sent_to.append(item.id)
+
+    class _FakePlugin:
+        id = "fake_plugin"
+        _emitted = False
+        async def scan(self):
+            # Only emit on the FIRST scan — the engine de-dupes by id so a
+            # second emission of the same Update would be skipped anyway,
+            # but we keep the plugin honest.
+            if self._emitted:
+                return []
+            self._emitted = True
+            return [Update(
+                source="fake_plugin",
+                subject="alpha",
+                current_version="1.0",
+                new_version="2.0",
+            )]
+
+    cfg = Config(
+        outputs=OutputsConfig(),
+        parity_gate=ParityGateConfig(enabled=True),
+    )
+    cfg.storage.database_path = str(tmp_path / "state.sqlite")
+    # Enable the LLM so the engine analyzes the item; the flush refuses to
+    # dispatch items whose analysis is None (stale / partially populated).
+    cfg.llm.provider = "ollama"
+    cfg.llm.endpoint = "http://fake"
+    cfg.llm.model = "stub"
+
+    async def _fake_analyze(self, update, notes=""):
+        return Analysis(severity=Severity.HIGH, summary="ok")
+
+    monkeypatch.setattr("homelabsage.llm.LLMClient.analyze", _fake_analyze)
+
+    # Pass 1: gate ACTIVE
+    monkeypatch.setattr(
+        "homelabsage.engine.is_parity_running",
+        lambda *, mdstat_path: ParityState(True, "active"),
+    )
+    db = Database(cfg.storage.database_path)
+    engine = Engine(cfg, db)
+    plugin = _FakePlugin()
+    push = _FakePush()
+    engine.plugins = [plugin]  # type: ignore[list-item]
+    engine.outputs = [push]  # type: ignore[list-item]
+    await engine.run_once()
+    assert sent_to == []  # push was gated
+    queue = db.list_pending_dispatches()
+    assert len(queue) == 1
+    assert queue[0]["update_id"] == "fake_plugin:alpha:2.0"
+
+    # Pass 2: gate CLEAR — auto-flush should fire the push and DELETE the row
+    monkeypatch.setattr(
+        "homelabsage.engine.is_parity_running",
+        lambda *, mdstat_path: ParityState(False, "clear"),
+    )
+    await engine.run_once()
+    assert sent_to == ["fake_plugin:alpha:2.0"]
+    assert db.list_pending_dispatches() == []
+    engine.close()
+
+
+def test_queue_pending_dispatch_is_idempotent(tmp_path: Path):
+    from homelabsage.db import Database
+
+    db = Database(tmp_path / "s.sqlite")
+    try:
+        db.queue_pending_dispatch("u1", "telegram")
+        db.queue_pending_dispatch("u1", "telegram")
+        db.queue_pending_dispatch("u1", "telegram")
+        assert len(db.list_pending_dispatches()) == 1
+        db.queue_pending_dispatch("u1", "ntfy")
+        assert len(db.list_pending_dispatches()) == 2
+        db.delete_pending_dispatch("u1", "telegram")
+        rows = db.list_pending_dispatches()
+        assert len(rows) == 1 and rows[0]["output_id"] == "ntfy"
+    finally:
+        db.close()

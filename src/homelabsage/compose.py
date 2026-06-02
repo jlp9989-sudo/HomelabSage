@@ -192,19 +192,86 @@ def parse_compose_file(path: Path) -> list[ComposeService]:
     return out
 
 
-def build_graph(scan_paths: Iterable[str | Path]) -> DependencyGraph:
-    """Walk every root, parse every compose file, build the graph."""
+# ─── mtime cache ────────────────────────────────────────────────────────
+#
+# The docker plugin rebuilds the dependency graph on every scan. The walk
+# itself is cheap, but the YAML parse for ~30 stacks adds up to ~30ms per
+# scan — which we pay even when nothing changed. Cache the graph keyed on
+# the aggregate mtime of every compose file under the scan roots so
+# unchanged inputs return immediately.
+#
+# The cache is intentionally tiny (one slot per scan-paths fingerprint) and
+# process-local: re-running the same scan paths after a config edit hits
+# the disk again only when the underlying files have actually changed.
+
+_GRAPH_CACHE: dict[str, tuple[tuple[tuple[str, int], ...], DependencyGraph]] = {}
+
+
+def _compose_files_signature(roots: Iterable[str | Path]) -> tuple[tuple[str, int], ...]:
+    """Aggregate mtime of every compose file under the roots.
+
+    Returns a sorted tuple of `(path, mtime_ns)` pairs so equality is
+    structural — adding, removing or editing any file invalidates the
+    cache entry on the next call.
+    """
+    items: list[tuple[str, int]] = []
+    for path in _iter_compose_files(roots):
+        try:
+            items.append((str(path), path.stat().st_mtime_ns))
+        except OSError:
+            # File disappeared between walk and stat; let the next caller
+            # rediscover it on the next scan.
+            continue
+    items.sort()
+    return tuple(items)
+
+
+def _cache_key(roots: Iterable[str | Path]) -> str:
+    """Stable key for `_GRAPH_CACHE` — roots are normalised + sorted."""
+    return "|".join(sorted(str(Path(r)) for r in roots))
+
+
+def build_graph(
+    scan_paths: Iterable[str | Path],
+    *,
+    use_cache: bool = True,
+) -> DependencyGraph:
+    """Walk every root, parse every compose file, build the graph.
+
+    Cached across calls when nothing under `scan_paths` has changed. Pass
+    `use_cache=False` to force a rebuild — handy in tests and in `homelabsage
+    diagnostics`-style probes where the user expects fresh data.
+    """
+    roots = list(scan_paths)
+    key = _cache_key(roots)
+    signature = _compose_files_signature(roots) if use_cache else None
+
+    if use_cache:
+        cached = _GRAPH_CACHE.get(key)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+
     services: dict[str, ComposeService] = {}
     dependents: dict[str, set[str]] = defaultdict(set)
-    for path in _iter_compose_files(scan_paths):
+    for path in _iter_compose_files(roots):
         for svc in parse_compose_file(path):
             # Same service name can recur across different compose projects;
             # keep the first occurrence and append the rest under a project-
             # qualified key so the graph remains queryable.
-            key = svc.name
-            if key in services and services[key].file != svc.file:
-                key = f"{svc.project}/{svc.name}"
-            services[key] = svc
+            svc_key = svc.name
+            if svc_key in services and services[svc_key].file != svc.file:
+                svc_key = f"{svc.project}/{svc.name}"
+            services[svc_key] = svc
             for dep in svc.depends_on:
-                dependents[dep].add(key)
-    return DependencyGraph(services=services, _dependents=dict(dependents))
+                dependents[dep].add(svc_key)
+
+    graph = DependencyGraph(services=services, _dependents=dict(dependents))
+    if use_cache and signature is not None:
+        _GRAPH_CACHE[key] = (signature, graph)
+    return graph
+
+
+def clear_graph_cache() -> None:
+    """Drop every cached graph. Tests use this between cases; runtime code
+    rarely needs it because the mtime check invalidates on file edits."""
+    _GRAPH_CACHE.clear()

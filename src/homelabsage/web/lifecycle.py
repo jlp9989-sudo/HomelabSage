@@ -36,10 +36,26 @@ def register_lifecycle(app: FastAPI, cfg: Config, engine: Engine) -> None:
             )
             if cfg.digest.enabled:
                 async def _digest_job() -> None:
-                    # Reload cfg from disk so a settings edit during the
-                    # week takes effect on the next firing. We pass the
-                    # in-memory cfg as fallback so tests work without a
-                    # full overlay roundtrip.
+                    # When the user opted into `parity_gate.skip_digest_too`,
+                    # mirror the per-update gate behaviour for the digest:
+                    # suppress this firing if parity is active. Otherwise the
+                    # digest fires unconditionally — it's the backstop for
+                    # missed real-time pings, so silencing it during parity
+                    # leaves no signal at all.
+                    if (
+                        cfg.parity_gate.enabled
+                        and cfg.parity_gate.skip_digest_too
+                    ):
+                        from ..parity import is_parity_running
+                        state = is_parity_running(
+                            mdstat_path=cfg.parity_gate.mdstat_path
+                        )
+                        if state.running:
+                            log.info(
+                                "Digest suppressed by parity gate: %s",
+                                state.reason,
+                            )
+                            return
                     _, results, _ = await run_digest(
                         cfg, days=cfg.digest.lookback_days
                     )

@@ -4,10 +4,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from homelabsage import compose as compose_mod
 from homelabsage.compose import (
     build_graph,
+    clear_graph_cache,
     parse_compose_file,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    """Tests assume a fresh cache — each test runs in isolation."""
+    clear_graph_cache()
+    yield
+    clear_graph_cache()
 
 COMPOSE_A = """\
 services:
@@ -126,3 +138,67 @@ def test_compose_files_with_legacy_filenames_are_picked_up(tmp_path: Path):
     _write(legacy, COMPOSE_B)
     graph = build_graph([tmp_path])
     assert "worker" in graph.services
+
+
+# ─── mtime cache ────────────────────────────────────────────────────────
+
+
+def test_build_graph_caches_unchanged_inputs(tmp_path: Path, monkeypatch):
+    """Second call with no file edits must not re-parse YAML."""
+    _write(tmp_path / "stack-a" / "compose.yaml", COMPOSE_A)
+
+    parse_calls = 0
+    original = compose_mod.parse_compose_file
+
+    def _counting(path):
+        nonlocal parse_calls
+        parse_calls += 1
+        return original(path)
+
+    monkeypatch.setattr(compose_mod, "parse_compose_file", _counting)
+    g1 = build_graph([tmp_path])
+    first_count = parse_calls
+    g2 = build_graph([tmp_path])
+    assert parse_calls == first_count  # no extra parsing on second call
+    assert g1 is g2  # cache returns the same instance
+
+
+def test_build_graph_invalidates_on_file_edit(tmp_path: Path):
+    f = tmp_path / "stack-a" / "compose.yaml"
+    _write(f, COMPOSE_A)
+    g1 = build_graph([tmp_path])
+    # Edit the file — mtime must change → cache must miss
+    import time
+    time.sleep(0.01)  # ensure mtime resolution > 0
+    f.write_text(COMPOSE_A.replace("postgres:16", "postgres:17"))
+    g2 = build_graph([tmp_path])
+    assert g1 is not g2
+    assert g2.services["postgres"].image == "postgres:17"
+
+
+def test_build_graph_invalidates_when_new_file_added(tmp_path: Path):
+    _write(tmp_path / "stack-a" / "compose.yaml", COMPOSE_A)
+    g1 = build_graph([tmp_path])
+    assert "worker" not in g1.services
+    _write(tmp_path / "stack-b" / "compose.yaml", COMPOSE_B)
+    g2 = build_graph([tmp_path])
+    assert g1 is not g2
+    assert "worker" in g2.services
+
+
+def test_build_graph_use_cache_false_forces_rebuild(tmp_path: Path, monkeypatch):
+    _write(tmp_path / "stack-a" / "compose.yaml", COMPOSE_A)
+
+    parse_calls = 0
+    original = compose_mod.parse_compose_file
+
+    def _counting(path):
+        nonlocal parse_calls
+        parse_calls += 1
+        return original(path)
+
+    monkeypatch.setattr(compose_mod, "parse_compose_file", _counting)
+    build_graph([tmp_path])
+    first = parse_calls
+    build_graph([tmp_path], use_cache=False)
+    assert parse_calls > first

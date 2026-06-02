@@ -136,6 +136,11 @@ class FloatingTagInfo:
     pushed_at: datetime | None
     tag: str
     raw: dict[str, Any] | None = None
+    #: Total layer size in bytes for the tag's primary platform. Populated
+    #: when the registry reports it (Docker Hub does, the OCI v2 API for
+    #: arbitrary registries does not without an extra manifest fetch).
+    #: `0` means "not reported"; callers must guard against the false-zero.
+    total_size_bytes: int = 0
 
 
 async def dockerhub_tag_info(
@@ -176,11 +181,29 @@ async def dockerhub_tag_info(
     if not digest:
         return None
 
+    # `full_size` is Docker Hub's top-level "total bytes" field. For multi-
+    # arch tags it reports the FIRST platform's size (which is usually what
+    # the host would pull). When absent — older tags, custom hubs — sum the
+    # per-image sizes ourselves.
+    size_bytes = 0
+    full_size = data.get("full_size")
+    if isinstance(full_size, int) and full_size > 0:
+        size_bytes = full_size
+    else:
+        images = data.get("images") or []
+        if isinstance(images, list) and images:
+            first = images[0]
+            if isinstance(first, dict):
+                s = first.get("size")
+                if isinstance(s, int):
+                    size_bytes = s
+
     return FloatingTagInfo(
         digest=digest,
         pushed_at=_parse_iso(data.get("last_updated")),
         tag=tag,
         raw=data,
+        total_size_bytes=size_bytes,
     )
 
 

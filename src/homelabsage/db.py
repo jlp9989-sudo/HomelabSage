@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS watched_repos (
 );
 
 CREATE INDEX IF NOT EXISTS idx_watched_active ON watched_repos(active);
+
+-- Pending push dispatches: each row marks "this (update, push_output) pair
+-- still needs to fire". Populated when the parity gate skips a real-time
+-- push; flushed by the engine on the next scan that finds the gate clear.
+CREATE TABLE IF NOT EXISTS pending_dispatches (
+    update_id  TEXT NOT NULL,
+    output_id  TEXT NOT NULL,
+    queued_at  TEXT NOT NULL,
+    PRIMARY KEY (update_id, output_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_output ON pending_dispatches(output_id);
 """
 
 
@@ -328,6 +340,37 @@ class Database:
         self._conn.execute(
             "UPDATE watched_repos SET current_version = ? WHERE id = ?",
             (version, watched_id),
+        )
+
+    # ─── pending push dispatches (parity gate catch-up) ──────────
+
+    def queue_pending_dispatch(self, update_id: str, output_id: str) -> None:
+        """Mark `(update, output)` as needing a push next time the gate clears.
+
+        Idempotent — the PRIMARY KEY on `(update_id, output_id)` collapses
+        repeat calls so a multi-day parity window doesn't grow the table
+        per scan.
+        """
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO pending_dispatches
+                (update_id, output_id, queued_at)
+            VALUES (?, ?, ?)
+            """,
+            (update_id, output_id, datetime.utcnow().isoformat()),
+        )
+
+    def list_pending_dispatches(self) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT update_id, output_id, queued_at FROM pending_dispatches "
+            "ORDER BY queued_at ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_pending_dispatch(self, update_id: str, output_id: str) -> None:
+        self._conn.execute(
+            "DELETE FROM pending_dispatches WHERE update_id = ? AND output_id = ?",
+            (update_id, output_id),
         )
 
     def count_interview_questions(self, status: InterviewStatus) -> int:

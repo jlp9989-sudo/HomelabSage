@@ -114,6 +114,11 @@ Rules:
   entirely if none of the alternatives is more popular than the current image
   by a margin you'd describe as "much more" (the gate filter already ensures
   that, but trust your reading of the data).
+- If the context block contains "image_size_growth" with `triggered=true`,
+  mention in `summary` that the image roughly tripled / doubled / etc in
+  size (cite the ratio VERBATIM, e.g. "image grew 2.4× — 80 → 195 MiB").
+  Add an entry to `breaking_changes` only when the user's notes flag
+  constrained storage; otherwise the growth is informational.
 - If the context block contains "cascade.depends_on_me" with any entries,
   mention in `recommended_action` that the listed services will also need
   to restart / be checked. Quote up to 3 service names verbatim. This is

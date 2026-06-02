@@ -95,15 +95,23 @@ Most release-note watchers (Diun, WatchTower, Renovate) tell you *that* there is
 
 ## Features
 
-- **Plugin-based sources.** One file = one source. See [docs/plugin-sdk.md](docs/plugin-sdk.md).
-- **Local LLM by default.** Ollama-compatible API; works with [Ollama](https://ollama.com), [llama.cpp server](https://github.com/ggml-org/llama.cpp), LM Studio, or any OpenAI-compat endpoint. Falls back to OpenAI / Anthropic if you really want to.
-- **Tolerant JSON parser.** Strips markdown fences, surrounding prose, accepts case-insensitive severity, falls back to a `summary`-only best-effort when the model bends the schema.
+- **Plugin-based sources.** One file = one source. Docker + Home Assistant + Fedora over SSH today; opt-in `watched_repos` plugin for arbitrary GitHub/Codeberg repos you run outside containers. See [docs/plugin-sdk.md](docs/plugin-sdk.md).
+- **Local LLM by default.** Ollama-compatible API; works with [Ollama](https://ollama.com), [llama.cpp server](https://github.com/ggml-org/llama.cpp), LM Studio, or any OpenAI-compat endpoint. Falls back to OpenAI / Anthropic / Groq / Gemini / OpenRouter if you really want to.
+- **Tolerant JSON parser.** Strips markdown fences, surrounding prose, accepts case-insensitive severity, falls back to a `summary`-only best-effort when the model bends the schema. Removes inline `<think>…</think>` blocks from reasoning models.
 - **Your notes are the secret sauce.** Point `notes.notes_dir` at a folder of `.md` files (your CLAUDE.md, ARCHITECTURE.md, OPS.md, etc). For each update, only the sections that mention the subject get injected — no token bloat.
-- **Web UI with editor.** Read the analyzed list and edit notes from the browser (HTMX-style, no SPA). HTTP Basic Auth optional but recommended.
+- **Curator auto-writes notes for you.** `homelabsage curate --discover` walks every running container and produces `notes/<service>.md` from `docker inspect` + the upstream README + container logs + your existing notes. `--system` adds a `notes/system.md` from host probes (kernel, docker info, GPUs, ZFS, Unraid).
+- **Rich update context.** Per Update we attach: `repo_health` (alive / stale / abandoned via GitHub pushed_at), `alternatives` (LSIO + Docker Hub cross-reference for better-maintained substitutes), `orphan_since_days` for stopped containers, `cve` (optional Trivy/Grype scan), `cascade.depends_on_me` (compose graph), `image_size_growth` (concrete bloatware signal), `puid_pgid` (LSIO permission hint).
+- **Webhook notifications.** Telegram, Discord, Ntfy, Gotify out of the box — same severity gate, same idempotent shape.
+- **Weekly digest.** Sunday-09:00 rollup of severity counts, top items, orphans, abandoned upstreams. Posts to every enabled channel and pins to `notes/digest.md` so next week's analyses see last week's misses as context. Backstop for missed real-time pings.
+- **CSI mode.** `homelabsage csi <container>` — post-mortem assistant: pulls logs since the last detected update, filters to ERROR/WARN/FATAL, cross-references your notes, asks the LLM what likely broke and what to try.
+- **On-demand URL analysis.** `homelabsage analyse https://github.com/owner/repo` — same analyzer, no scan required.
+- **"What I see" diagnostics page.** Per-container verdict at `/diagnostics`: tracked / floating_tag / no_repo / no_version / skipped_by_rule.
+- **Parity-aware notification gate.** On Unraid + plain mdraid, silences push channels while a parity check / resync is running. Queues skipped notifications and auto-flushes them when the gate clears (no manual catch-up needed; `homelabsage notify-pending` still available for edge cases).
+- **Web UI with editor.** Read the analyzed list, edit notes from the browser, configure every plugin from the `/settings` schema-driven forms (HTMX-style, no SPA). Three-step first-run wizard. HTTP Basic Auth optional but recommended.
 - **Path-traversal safe.** Notes editor refuses `..` and non-`.md`/`.txt` extensions.
 - **Stable IDs.** `source:subject:new_version` — re-running a scan doesn't create duplicates.
 - **Heartbeat-friendly.** Pings an Uptime Kuma push monitor (or any URL) after each successful scan.
-- **Outputs are pluggable too.** Notion + Telegram today; webhooks/email easy to add.
+- **Sanitised export.** `homelabsage export --redact` produces a single-file dump of compose configs + container env + recent analyses with IPs / hostnames / credentials scrubbed — ready to paste into a GitHub issue.
 
 ---
 
@@ -374,11 +382,36 @@ Want to add a benchmark? Run `homelabsage curate --discover --dry-run --limit 5`
 ## CLI
 
 ```bash
+# core scan / inspect
 homelabsage check                # one-shot: scan → analyze → output
 homelabsage list                 # show stored updates
 homelabsage list --source docker --status new --limit 20
 homelabsage serve                # web UI + scheduler (long-running)
 homelabsage version
+
+# diagnostics + notes
+homelabsage curate --discover    # auto-write `notes/<service>.md` per running container
+homelabsage curate --system      # write `notes/system.md` from host probes (kernel, docker info, GPUs, ZFS, Unraid)
+homelabsage scripts              # enumerate cron / systemd timers / Unraid User Scripts
+homelabsage export --redact      # sanitised JSON dump of containers + recent analyses
+homelabsage analyse <github-url> # one-shot analysis of any GitHub/Codeberg repo URL
+homelabsage csi <container>      # post-mortem assistant: last update + filtered logs + LLM diagnosis
+
+# notification flow
+homelabsage digest               # build + send the weekly rollup manually
+homelabsage digest --dry-run     # print the digest body without sending
+homelabsage notify-pending       # replay push notifications skipped during a parity check
+
+# external repos (no container)
+homelabsage watched add owner/repo --nickname halo
+homelabsage watched list
+homelabsage watched toggle <id>
+homelabsage watched remove <id>
+
+# curator interview (Rule 7 fallbacks)
+homelabsage interview list
+homelabsage interview answer <id> --text "what this container does for me"
+homelabsage interview dismiss <id>
 ```
 
 Add `-v` for debug logging, `-c /path/to/config.yaml` for a custom config.
@@ -387,10 +420,14 @@ Add `-v` for debug logging, `-c /path/to/config.yaml` for a custom config.
 
 ## Web UI
 
-`/`              dashboard of analyzed updates, severity-coloured
-`/notes`         list your markdown notes
+`/`                   dashboard of analyzed updates, severity-coloured
+`/notes`              list your markdown notes
 `/notes/edit/<file>`  edit a note in-browser
-`/healthz`       liveness (always 200, no auth — for healthchecks)
+`/diagnostics`        "what HomelabSage sees" — per-container verdict (tracked / floating_tag / no_repo / no_version / skipped_by_rule)
+`/interview`          unanswered curator questions (Rule 7 fallbacks)
+`/settings`           schema-driven settings forms, one card per config block
+`/setup`              first-run wizard (3 steps: LLM → plugins → outputs)
+`/healthz`            liveness (always 200, no auth — for healthchecks)
 
 Auth is HTTP Basic. `/healthz` is excluded so container/Kuma probes keep working.
 

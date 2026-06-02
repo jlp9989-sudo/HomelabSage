@@ -45,11 +45,17 @@ from pydantic import BaseModel, ValidationError
 from ..config import (
     Config,
     CuratorConfig,
+    DigestConfig,
+    DiscordOutputConfig,
     DockerSourceConfig,
+    GitHubWatchedConfig,
+    GotifyOutputConfig,
     HAConfig,
     LLMConfig,
     NotesConfig,
     NotionOutputConfig,
+    NtfyOutputConfig,
+    ParityGateConfig,
     SchedulerConfig,
     StorageConfig,
     TelegramOutputConfig,
@@ -70,15 +76,41 @@ from ..redact import _is_secret_key
 log = logging.getLogger(__name__)
 
 
+def _serialise_validation_errors(e: ValidationError) -> list[dict[str, Any]]:
+    """Convert Pydantic's structured errors into a JSON-safe payload.
+
+    Pydantic v2 emits validator-raised exceptions as `ctx={"error": <Exception>}`
+    which is not JSON-serialisable. We stringify the value so FastAPI's
+    `HTTPException` body survives the encoder.
+    """
+    out: list[dict[str, Any]] = []
+    for err in e.errors():
+        clean = dict(err)
+        ctx = clean.get("ctx")
+        if isinstance(ctx, dict):
+            clean["ctx"] = {
+                k: (str(v) if isinstance(v, BaseException) else v)
+                for k, v in ctx.items()
+            }
+        out.append(clean)
+    return out
+
+
 # URL segment → (dotted path inside Config, Pydantic submodel class).
 # Order in this dict drives the order returned by `GET /api/settings`.
 SETTING_BLOCKS: dict[str, tuple[str, type[BaseModel]]] = {
     "llm": ("llm", LLMConfig),
     "sources/docker": ("sources.docker", DockerSourceConfig),
     "sources/homeassistant": ("sources.homeassistant", HAConfig),
+    "sources/github_watched": ("sources.github_watched", GitHubWatchedConfig),
     "outputs/notion": ("outputs.notion", NotionOutputConfig),
     "outputs/telegram": ("outputs.telegram", TelegramOutputConfig),
+    "outputs/discord": ("outputs.discord", DiscordOutputConfig),
+    "outputs/ntfy": ("outputs.ntfy", NtfyOutputConfig),
+    "outputs/gotify": ("outputs.gotify", GotifyOutputConfig),
     "scheduler": ("scheduler", SchedulerConfig),
+    "digest": ("digest", DigestConfig),
+    "parity_gate": ("parity_gate", ParityGateConfig),
     "web": ("web", WebConfig),
     "storage": ("storage", StorageConfig),
     "notes": ("notes", NotesConfig),
@@ -240,7 +272,7 @@ def register_settings_routes(app: FastAPI, cfg: Config, cfg_path: Path | None) -
         try:
             _validate_overlay(cfg_path, new_overlay)
         except ValidationError as e:
-            raise HTTPException(400, {"validation_errors": e.errors()}) from e
+            raise HTTPException(400, {"validation_errors": _serialise_validation_errors(e)}) from e
 
         atomic_write_yaml(user_overlay_path(cfg_path), new_overlay)
         log.info("settings: PATCH %s wrote keys %s", block, list(body))
@@ -279,7 +311,7 @@ def register_settings_routes(app: FastAPI, cfg: Config, cfg_path: Path | None) -
         try:
             _validate_overlay(cfg_path, new_overlay)
         except ValidationError as e:
-            raise HTTPException(400, {"validation_errors": e.errors()}) from e
+            raise HTTPException(400, {"validation_errors": _serialise_validation_errors(e)}) from e
 
         atomic_write_yaml(user_overlay_path(cfg_path), new_overlay)
         return await settings_get(block)
