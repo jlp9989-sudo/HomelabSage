@@ -2,6 +2,66 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.4.2 — 2026-06-03
+
+Five backlog items shipped together. Each one is a self-contained
+module + tests; nothing forces the user to adopt them — every new
+feature is opt-in via its own config block.
+
+### Added — detectors
+
+- **Backup-staleness adapter** (`backup_health.py`, `homelabsage
+  backup-check`). Probes restic / borg / kopia for last-snapshot age
+  and emits a finding per repo (`info` / `medium` / `critical`) that
+  the auditor surfaces. Credentials never live in HomelabSage config —
+  each repo's `env:` block is passed straight through to the subprocess,
+  the same way the user's nightly cron already sources them. Severity
+  ladder defaults `warn=2d` / `critical=7d` and is per-repo overridable.
+- **Log-anomaly detector** (`log_anomaly.py`, `homelabsage
+  log-anomaly`). Walks every running container, samples the last hour
+  of logs, counts ERROR-class lines and compares the rate against a
+  per-container rolling baseline kept in `log_samples`. Fires a
+  `log_anomalies` row when the latest sample is ≥`sigma_threshold`
+  standard deviations above the baseline mean — but only after the
+  baseline has ≥`min_samples` samples, so freshly-added containers
+  spend a warm-up period instead of firing false positives. Disabled by
+  default.
+- **Post-update health check** (`health_check.py`, `homelabsage
+  health-check`). When the user marks an update APPLIED, a probe is
+  queued N minutes out. The probe scans recent logs for a small fixed
+  list of bad signals — silent CPU fallback from CUDA/ROCm, OOM kills,
+  panic backtraces, permission-denied — and writes one
+  `health_checks` row per probe. Catches the regressions release notes
+  don't mention (a workload that used to be fast quietly running on
+  CPU).
+
+### Added — UX / surfaces
+
+- **News article / changelog URL analyser** — sub-case (c) of the
+  URL analyser roadmap item. `homelabsage analyse https://blog/post`
+  now fetches the page, extracts the main content with `trafilatura`
+  (falling back to a naive HTML strip when the library isn't
+  installed), and runs the analyzer prompt against it. Subject becomes
+  `article:<host>` so it's distinct from container subjects in the
+  dashboard. The CLI dispatcher route is unchanged — the user pastes
+  any URL and the right path takes over.
+- **Spanish UI strings** (`i18n.py`, `i18n.lang` config). Minimal
+  catalog: nav + dashboard headings + status verbs + wizard labels.
+  English remains the source of truth; missing Spanish keys fall back
+  silently so a new template never crashes. Test ensures every English
+  key has a Spanish translation to catch drift early.
+
+### Internal
+
+- 844 → 908 tests (+64). Ruff clean, 0 mypy errors against 106 source files.
+- Four new DB tables: `health_checks`, `health_check_queue`,
+  `log_samples`, `log_anomalies`. Forward-only `CREATE IF NOT EXISTS`.
+- New mixins: `HealthCheckMixin`, `LogAnomalyMixin`.
+- Four new config blocks: `backup_health`, `health_check`,
+  `log_anomaly`, `i18n` — all default-off / default-English so existing
+  YAML keeps working unchanged.
+- New CLI commands: `backup-check`, `health-check`, `log-anomaly`.
+
 ## v0.4.1 — 2026-06-02
 
 Three high-value items promoted from the v0.5/v0.6 backlog now that the

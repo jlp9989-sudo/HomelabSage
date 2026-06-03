@@ -6,9 +6,12 @@ Supported URL shapes:
   - `https://codeberg.org/owner/repo`             (Forgejo-compatible)
   - `https://hub.docker.com/r/owner/image`        (Docker Hub user/org image)
   - `https://hub.docker.com/_/library_image`      (Docker Hub library image)
+  - any other `http(s)://` URL → treated as a news/blog/changelog article
+    and extracted with `trafilatura` (falls back to a naive HTML strip
+    when the library isn't installed).
 
-News articles + HuggingFace model cards remain roadmap'd separately; each
-sub-case is its own engineering chunk and they share only this dispatcher.
+HuggingFace model cards remain roadmap'd separately; the VRAM-vs-system
+synthesis is its own engineering chunk that doesn't fit the news shape.
 """
 
 from __future__ import annotations
@@ -209,6 +212,127 @@ async def analyse_dockerhub_url(
     return analyzed
 
 
+# ─── news / blog / changelog URL analyser ──────────────────────────────
+
+
+# Anchored on URLs that survive a real fetch. We treat anything http(s) as
+# potentially analysable; the LLM downgrades on noise. Excluded: localhost,
+# raw IPs, file:// — those are out of scope for "I read an article about X".
+_LIKELY_ARTICLE_HOSTS_BLOCKLIST = {"localhost", "127.0.0.1", "0.0.0.0"}
+
+
+def looks_like_article_url(url: str) -> bool:
+    """Liberal guard. Reject clearly-non-article shapes; accept the rest."""
+    try:
+        parsed = urlparse(url.strip())
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.netloc or "").lower().split(":")[0].removeprefix("www.")
+    return not (not host or host in _LIKELY_ARTICLE_HOSTS_BLOCKLIST)
+
+
+def _strip_html_fallback(html: str) -> str:
+    """Naive HTML stripper for when `trafilatura` isn't installed.
+
+    Removes `<script>` + `<style>` blocks entirely, then collapses all
+    tags to spaces, then squeezes whitespace. The output is noisier than
+    trafilatura's but lets the analyzer still see paragraph-level text.
+    """
+    body = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html,
+                  flags=re.DOTALL | re.IGNORECASE)
+    body = re.sub(r"<[^>]+>", " ", body)
+    body = re.sub(r"\s+", " ", body)
+    return body.strip()
+
+
+async def _fetch_article(url: str, *, timeout: float = 20.0) -> str | None:
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            r = await client.get(url, headers={
+                "User-Agent": "Mozilla/5.0 HomelabSage/analyse-url",
+            })
+            if r.status_code != 200:
+                return None
+            return r.text
+    except httpx.HTTPError as e:
+        log.debug("article fetch %s failed: %s", url, e)
+        return None
+
+
+def _extract_article_text(html: str, *, url: str) -> str:
+    """Try trafilatura first; fall back to the naive strip."""
+    try:
+        import trafilatura  # type: ignore[import-not-found]
+    except ImportError:
+        return _strip_html_fallback(html)
+    try:
+        extracted = trafilatura.extract(
+            html, url=url, include_comments=False, include_tables=False,
+        )
+    except Exception as e:
+        log.debug("trafilatura.extract failed: %s", e)
+        extracted = None
+    return (extracted or _strip_html_fallback(html)).strip()
+
+
+async def analyse_article_url(
+    cfg: Config,
+    url: str,
+    *,
+    current_version: str = "",
+) -> AnalyzedUpdate | None:
+    """Treat an arbitrary URL as a news/blog/changelog article.
+
+    Pulls + extracts main content, then runs the analyzer prompt with the
+    user's notes injected. Returns None when the page can't be fetched or
+    extraction produced an empty body — we'd rather say "nothing to
+    analyse" than feed the LLM a blob of nav HTML.
+    """
+    if not looks_like_article_url(url):
+        return None
+    html = await _fetch_article(url)
+    if not html:
+        return None
+    text = _extract_article_text(html, url=url)
+    # Reject excessively-thin extractions — those almost always indicate
+    # a JS-rendered page, a paywall, or a cookie wall.
+    if len(text) < 200:
+        log.info("article extraction too short (%d chars) — skipping", len(text))
+        return None
+
+    parsed = urlparse(url)
+    host = (parsed.netloc or "").lower().removeprefix("www.")
+    subject = f"article:{host}"
+    keywords = [host] + [t for t in re.split(r"\W+", text[:300]) if len(t) > 3][:8]
+
+    update = Update(
+        source="analyse_url",
+        subject=subject,
+        current_version=current_version or "(unknown)",
+        new_version="(article)",
+        release_url=url,
+        # Cap at 8 KB — the analyzer never needs the entire article,
+        # the first few KB carry the lead and the bullets.
+        release_notes=text[:8000],
+        context={"_note_keywords": keywords, "article_host": host},
+    )
+
+    analyzed = AnalyzedUpdate(update=update)
+    llm = LLMClient(get_active_llm_config(cfg))
+    if not llm.is_enabled():
+        return analyzed
+    notes = NotesProvider(
+        notes_dir=cfg.notes.notes_dir or None,
+        extra_docs=cfg.notes.extra_docs,
+        max_chars=cfg.notes.max_chars,
+    )
+    notes_ctx = notes.context_for(subject, keywords=keywords)
+    analyzed.analysis = await llm.analyze(update, notes=notes_ctx)
+    return analyzed
+
+
 # ─── unified entry point ────────────────────────────────────────────────
 
 
@@ -218,16 +342,19 @@ async def analyse_url(
     *,
     current_version: str = "",
 ) -> AnalyzedUpdate | None:
-    """Dispatch by URL shape — repo URL → analyse_repo_url, Hub URL → Hub variant.
+    """Dispatch by URL shape — repo → Hub → article.
 
-    Returns None when the URL doesn't match any supported shape. The CLI
-    `homelabsage analyse <url>` calls this single function so the user
-    doesn't have to know which path their URL goes through.
+    Returns None when the URL doesn't match any supported shape OR when
+    the article path returns no usable content (paywall, JS-only page).
+    The CLI `homelabsage analyse <url>` calls this single function so
+    the user doesn't have to know which path their URL goes through.
     """
     if parse_repo_url(url) is not None:
         return await analyse_repo_url(cfg, url, current_version=current_version)
     if parse_dockerhub_url(url) is not None:
         return await analyse_dockerhub_url(cfg, url, current_version=current_version)
+    if looks_like_article_url(url):
+        return await analyse_article_url(cfg, url, current_version=current_version)
     return None
 
 

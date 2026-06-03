@@ -27,7 +27,16 @@ from .outputs import (
     OutputsConfig,
     TelegramOutputConfig,
 )
-from .runtime import DigestConfig, ParityGateConfig, SchedulerConfig
+from .runtime import (
+    BackupHealthConfig,
+    BackupRepoConfig,
+    DigestConfig,
+    HealthCheckConfig,
+    I18nConfig,
+    LogAnomalyConfig,
+    ParityGateConfig,
+    SchedulerConfig,
+)
 from .sources import (
     DockerSourceConfig,
     FedoraSourceConfig,
@@ -72,6 +81,10 @@ class Config(BaseModel):
     curator: CuratorConfig = Field(default_factory=CuratorConfig)
     digest: DigestConfig = Field(default_factory=DigestConfig)
     parity_gate: ParityGateConfig = Field(default_factory=ParityGateConfig)
+    backup_health: BackupHealthConfig = Field(default_factory=BackupHealthConfig)
+    health_check: HealthCheckConfig = Field(default_factory=HealthCheckConfig)
+    log_anomaly: LogAnomalyConfig = Field(default_factory=LogAnomalyConfig)
+    i18n: I18nConfig = Field(default_factory=I18nConfig)
 
 
 def get_active_llm_config(cfg: Config) -> LLMConfig:
@@ -137,6 +150,11 @@ __all__ = [
     "SchedulerConfig",
     "DigestConfig",
     "ParityGateConfig",
+    "BackupHealthConfig",
+    "BackupRepoConfig",
+    "HealthCheckConfig",
+    "LogAnomalyConfig",
+    "I18nConfig",
     "WebAuthConfig",
     "WebConfig",
     "StorageConfig",

@@ -105,6 +105,59 @@ CREATE TABLE IF NOT EXISTS llm_usage (
 
 CREATE INDEX IF NOT EXISTS idx_usage_provider ON llm_usage(provider);
 CREATE INDEX IF NOT EXISTS idx_usage_created  ON llm_usage(created_at);
+
+-- Post-update health-check rows. One per probe (success or fail).
+-- The auditor surfaces only failures; the history table lets the user
+-- see whether a container has flapped between healthy/regressed.
+CREATE TABLE IF NOT EXISTS health_checks (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    update_id       TEXT NOT NULL,
+    container_name  TEXT NOT NULL,
+    ok              INTEGER NOT NULL,
+    signal          TEXT,                  -- e.g. cuda_fallback / oom / panic
+    excerpt         TEXT,                  -- matching log line, ≤500 chars
+    checked_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_health_update    ON health_checks(update_id);
+CREATE INDEX IF NOT EXISTS idx_health_container ON health_checks(container_name);
+CREATE INDEX IF NOT EXISTS idx_health_checked   ON health_checks(checked_at);
+
+-- Pending post-update probes — queued when status flips to APPLIED;
+-- consumed by the engine once `grace_minutes` have passed.
+CREATE TABLE IF NOT EXISTS health_check_queue (
+    update_id      TEXT PRIMARY KEY,
+    container_name TEXT NOT NULL,
+    queued_at      TEXT NOT NULL,
+    fire_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_health_queue_fire ON health_check_queue(fire_at);
+
+-- Per-container log-error rate samples. Rolling baseline for the anomaly
+-- detector. One row per (container, scan) tracking error/warn counts.
+CREATE TABLE IF NOT EXISTS log_samples (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    container_name  TEXT NOT NULL,
+    error_count     INTEGER NOT NULL DEFAULT 0,
+    warn_count      INTEGER NOT NULL DEFAULT 0,
+    window_minutes  INTEGER NOT NULL,
+    sampled_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_logsamples_container ON log_samples(container_name);
+CREATE INDEX IF NOT EXISTS idx_logsamples_sampled   ON log_samples(sampled_at);
+
+-- Flagged anomalies (the spike events themselves). One row per
+-- container-and-scan that fired; the audit reads this table.
+CREATE TABLE IF NOT EXISTS log_anomalies (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    container_name  TEXT NOT NULL,
+    error_rate      REAL NOT NULL,
+    baseline_mean   REAL NOT NULL,
+    baseline_std    REAL NOT NULL,
+    sigma           REAL NOT NULL,
+    detected_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_loganom_container ON log_anomalies(container_name);
+CREATE INDEX IF NOT EXISTS idx_loganom_detected  ON log_anomalies(detected_at);
 """
 
 

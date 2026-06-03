@@ -25,8 +25,10 @@ import sqlite3
 from pathlib import Path
 
 from .explainers import ExplainersMixin
+from .health import HealthCheckMixin
 from .interview import InterviewMixin
 from .interview import row_to_question as _row_to_question
+from .log_anom import LogAnomalyMixin
 from .pending import PendingMixin
 from .schema import SCHEMA, migrate
 from .updates import UpdatesMixin
@@ -40,7 +42,7 @@ from .watched import WatchedMixin
 
 class Database(
     UpdatesMixin, InterviewMixin, WatchedMixin, PendingMixin,
-    ExplainersMixin, UsageMixin,
+    ExplainersMixin, UsageMixin, HealthCheckMixin, LogAnomalyMixin,
 ):
     """Single connection wrapper. Thread-safe for reads, writes serialised
     at the engine level (one scan at a time)."""

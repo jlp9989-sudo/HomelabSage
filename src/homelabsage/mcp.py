@@ -109,7 +109,7 @@ def _tool_get_update(_cfg: Config, db: Database, params: dict) -> dict:
     return _full_update(item)
 
 
-def _tool_set_update_status(_cfg: Config, db: Database, params: dict) -> dict:
+def _tool_set_update_status(cfg: Config, db: Database, params: dict) -> dict:
     """Mark an update as applied or dismissed.
 
     The agent uses this after presenting the verdict to the user — the
@@ -121,9 +121,17 @@ def _tool_set_update_status(_cfg: Config, db: Database, params: dict) -> dict:
     if not update_id or not status_raw:
         raise ValueError("update_id and status are required")
     status = UpdateStatus(status_raw)
-    if db.get(update_id) is None:
+    item = db.get(update_id)
+    if item is None:
         raise ValueError(f"no update with id={update_id!r}")
     db.set_status(update_id, status)
+    if status == UpdateStatus.APPLIED and cfg.health_check.enabled and \
+            item.update.source == "docker":
+        from .health_check import queue_for_update
+        queue_for_update(
+            db, update_id=update_id,
+            container_name=item.update.subject, cfg=cfg.health_check,
+        )
     return {"ok": True, "update_id": update_id, "status": status.value}
 
 

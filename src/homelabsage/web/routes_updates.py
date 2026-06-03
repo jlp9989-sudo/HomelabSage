@@ -65,7 +65,19 @@ def register_updates_routes(
 
     @app.post("/updates/{update_id:path}/status")
     async def set_status(update_id: str, status: str = Form(...)) -> RedirectResponse:
-        db.set_status(update_id, UpdateStatus(status))
+        new_status = UpdateStatus(status)
+        db.set_status(update_id, new_status)
+        # Queue a post-update health probe when applying. Best-effort:
+        # missing the container_name (non-docker source) silently skips.
+        if new_status == UpdateStatus.APPLIED and engine.cfg.health_check.enabled:
+            it = db.get(update_id)
+            if it and it.update.source == "docker":
+                from ..health_check import queue_for_update
+                queue_for_update(
+                    db, update_id=update_id,
+                    container_name=it.update.subject,
+                    cfg=engine.cfg.health_check,
+                )
         return RedirectResponse("/", status_code=303)
 
     @app.get("/api/updates")

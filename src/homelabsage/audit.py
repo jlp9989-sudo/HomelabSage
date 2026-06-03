@@ -240,17 +240,104 @@ def _parity_findings(parity_active: bool, reason: str) -> list[AuditFinding]:
     )]
 
 
+def _backup_health_findings(report: object) -> list[AuditFinding]:
+    """Surface backup-staleness probe results.
+
+    `report` is a `BackupHealthReport`-shaped object (duck-typed so the
+    auditor's import surface stays narrow). One finding per repo that
+    failed or crossed a threshold; healthy repos stay silent.
+    """
+    if report is None:
+        return []
+    findings: list[AuditFinding] = []
+    for r in getattr(report, "results", []) or []:
+        if r.ok and r.severity in ("info",):
+            continue
+        if not r.ok:
+            findings.append(AuditFinding(
+                severity=r.severity, category="backup_health",
+                title=f"Backup repo `{r.repo_name}` probe failed",
+                detail=r.reason,
+                source_kind="backup_health", source_ref=f"backup:{r.repo_name}",
+                cite=f"{r.tool}: {r.reason}",
+            ))
+            continue
+        when = r.latest_snapshot_at.strftime("%Y-%m-%d %H:%M") if r.latest_snapshot_at else "?"
+        findings.append(AuditFinding(
+            severity=r.severity, category="backup_health",
+            title=f"Backup repo `{r.repo_name}` is {r.staleness_days} day(s) stale",
+            detail=(
+                f"Last {r.tool} snapshot at {when}; total snapshots in repo: "
+                f"{r.snapshot_count}."
+            ),
+            source_kind="backup_health", source_ref=f"backup:{r.repo_name}",
+            cite=f"staleness_days={r.staleness_days}",
+        ))
+    return findings
+
+
+def _health_check_findings(rows: list[dict]) -> list[AuditFinding]:
+    """One finding per failed post-update health check row."""
+    if not rows:
+        return []
+    findings: list[AuditFinding] = []
+    for row in rows:
+        if row.get("ok"):
+            continue
+        signal = row.get("signal") or "unknown"
+        excerpt = (row.get("excerpt") or "")[:140]
+        update_id = row.get("update_id") or "?"
+        findings.append(AuditFinding(
+            severity="high", category="post_update_regression",
+            title=f"Post-update probe flagged `{row.get('container_name')}`",
+            detail=f"Signal: `{signal}`. Log excerpt: `{excerpt or '(empty)'}`.",
+            source_kind="health_check", source_ref=update_id,
+            cite=f"signal={signal}",
+        ))
+    return findings
+
+
+def _log_anomaly_findings(rows: list[dict]) -> list[AuditFinding]:
+    """One finding per container whose recent error rate breached its baseline."""
+    if not rows:
+        return []
+    findings: list[AuditFinding] = []
+    for row in rows:
+        sigma = row.get("sigma") or 0
+        rate = row.get("error_rate") or 0
+        baseline = row.get("baseline_mean") or 0
+        findings.append(AuditFinding(
+            severity="high" if sigma >= 5 else "medium",
+            category="log_anomaly",
+            title=f"`{row.get('container_name')}` log error-rate spiked",
+            detail=(
+                f"Recent error/min={rate:.2f} vs baseline {baseline:.2f} "
+                f"(σ={sigma:.1f})."
+            ),
+            source_kind="log_anomaly", source_ref=row.get("container_name") or "?",
+            cite=f"sigma={sigma:.1f}",
+        ))
+    return findings
+
+
 # ─── orchestrator ───────────────────────────────────────────────────────
 
 
 _SEVERITY_ORDER = {"critical": 3, "high": 2, "medium": 1, "info": 0}
 
 
-def build_report(cfg: Config, db: Database, *, limit: int = 500) -> AuditReport:
+def build_report(
+    cfg: Config, db: Database, *, limit: int = 500,
+    backup_report: object | None = None,
+) -> AuditReport:
     """Walk every active signal in the DB + live state probes.
 
     `limit` caps how many updates we read from the DB. 500 covers a
     busy month of scans; raise it if you batch-import historic data.
+
+    `backup_report` is passed in by the engine (which probes once per scan
+    and reuses the result here + in the analyzer context) — when None,
+    the auditor runs its own probe lazily so the CLI works standalone.
     """
     findings: list[AuditFinding] = []
     items = db.list(limit=limit)
@@ -273,6 +360,29 @@ def build_report(cfg: Config, db: Database, *, limit: int = 500) -> AuditReport:
         state = is_parity_running(mdstat_path=cfg.parity_gate.mdstat_path)
         parity_active, parity_reason = state.running, state.reason
     findings.extend(_parity_findings(parity_active, parity_reason))
+
+    # Backup health: prefer the engine-provided cached report; fall back
+    # to a fresh probe so `homelabsage audit` works without a scan.
+    if backup_report is None and cfg.backup_health.enabled and cfg.backup_health.repos:
+        from .backup_health import BackupHealthReport, probe_repo
+        results = []
+        for repo in cfg.backup_health.repos:
+            results.append(probe_repo(
+                name=repo.name, tool=repo.tool, env=repo.env,
+                binary=(repo.binary or None),
+                warn_after_days=repo.warn_after_days,
+                critical_after_days=repo.critical_after_days,
+                timeout=float(repo.timeout_seconds),
+            ))
+        backup_report = BackupHealthReport(results=results)
+    findings.extend(_backup_health_findings(backup_report))
+
+    # Post-update regressions + log anomalies — read from their tables when
+    # the DB exposes them (no-op when the mixins aren't wired in).
+    if hasattr(db, "list_recent_health_checks"):
+        findings.extend(_health_check_findings(db.list_recent_health_checks(limit=200)))
+    if hasattr(db, "list_recent_log_anomalies"):
+        findings.extend(_log_anomaly_findings(db.list_recent_log_anomalies(limit=200)))
 
     # Severity first (critical → info), then category alphabetical so the
     # same input always produces the same output.

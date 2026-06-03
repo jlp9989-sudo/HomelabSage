@@ -67,6 +67,12 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
         loader=FileSystemLoader(TEMPLATES_DIR),
         autoescape=select_autoescape(["html"]),
     )
+    # i18n: expose `t(key)` + `lang` to every template. Translations are
+    # additive — missing keys silently fall back to English, so a new
+    # template never crashes on a missing string.
+    from ..i18n import translator
+    env.globals["lang"] = cfg.i18n.lang
+    env.globals["t"] = translator(cfg.i18n.lang)
 
     # Middleware ordering in Starlette: registered first runs INNERMOST,
     # last runs OUTERMOST (it's `reversed(user_middleware)` in the build
