@@ -380,6 +380,12 @@ class DockerPlugin(Plugin):
                 if matches:
                     ctx["sidecars"] = [link.to_context() for link in matches]
 
+            if self.cfg.detect_resource_limits:
+                from ..resource_limits import evaluate as eval_limits
+                rl = eval_limits(c.attrs)
+                if rl is not None:
+                    ctx["resource_limits"] = rl.to_context()
+
             if self.cfg.image_size_growth_detect and image_tag:
                 # Local image's on-disk size (sum of writeable + layer cache).
                 # `c.image.attrs["Size"]` is set by `docker inspect`; falsy

@@ -81,6 +81,10 @@ class DockerSourceConfig(BaseModel):
     # knows their VPN / init container will restart too. One bool, no
     # per-pattern config — the detection is mechanical.
     detect_sidecars: bool = True
+    # Flag containers running without `mem_limit:` / `cpus:` set. One
+    # unbounded leak can OOM the host; the seatbelt is one config line.
+    # Attaches `Update.context.resource_limits` when either limit missing.
+    detect_resource_limits: bool = True
 
 
 class HAConfig(BaseModel):

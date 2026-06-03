@@ -2,6 +2,72 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.4.8 — 2026-06-03
+
+The big one. Eight features across notification, detection, observability
+and agent surfaces. Total: 8 modules added, 32 new tests, all opt-in.
+
+### Added — outputs
+
+- **Apprise output** (`outputs/apprise.py`, `outputs.apprise`). Universal
+  push wrapper via the `apprise` PyPI library — speaks 100+ services
+  through a single URL syntax (Pushover, Mattermost, MS Teams, Slack,
+  Mailgun, AWS SNS, …). The library is OPTIONAL; missing
+  installation downgrades to a one-time WARN log line, output stays
+  silent. Severity maps to apprise `notify_type` so services that
+  visualise urgency colour the message correctly.
+- **SMTP / email output** (`outputs/smtp.py`, `outputs.smtp`). Direct
+  stdlib `smtplib`-based output. 587 → STARTTLS, 465 → implicit SSL,
+  other ports → cleartext. Optional auth. One message per recipient.
+  Subject carries severity for inbox filtering. Sync send runs in
+  `asyncio.to_thread` so the engine's event loop never stalls on
+  STARTTLS handshake.
+
+### Added — detectors
+
+- **Resource-limit absence detector** (`resource_limits.py`,
+  `sources.docker.detect_resource_limits` on by default). Flags
+  containers running without `mem_limit:` / `cpus:` — one OOMing
+  container can take down the host. Treats default `CpuShares=1024`
+  as "no real limit". Attaches `Update.context.resource_limits`.
+- **Architecture-mismatch detector** (`arch_mismatch.py`). Maps the
+  host's `platform.machine()` to docker's `os/arch` notation and
+  checks the new image's multi-arch manifest for a matching entry.
+  Variant suffixes (`arm64/v8`) are matched as covering the plain
+  form. Surfaces as `Update.context.arch_mismatch`.
+
+### Added — surfaces
+
+- **Stack-health endpoint** (`GET /api/stack-health`). One-shot
+  aggregator for dashboards: audit summary + update counts by status +
+  parity state + pending-dispatches count + 24h heartbeat counts +
+  backup-staleness verdicts + recent post-update failures. Schema is
+  stable across responses (always-present keys with zero/empty
+  defaults). Auth-bypassed like `/widget/*`.
+- **CSV scan-diff** (`scan_diff.py`, `homelabsage scan-diff old.csv new.csv`).
+  Compares two `homelabsage history` dumps and emits added / removed
+  / status_changed / severity_changed sections in Markdown. Exits 1
+  when any change.
+- **MCP `analyze_url` + `csi` tools**. Agents can now invoke the URL
+  analyser AND pull post-mortem CSI evidence (`llm: false` for
+  air-gapped agents). The CLI/MCP gap closes — only `curate` stays
+  CLI-only (side-effectful + slow).
+- **`/profile` page + `GET /api/profile`**. Self-discoverable summary
+  of every config block: which sources are enabled, which detectors
+  are on, which outputs fire, severity floors, scheduler cron, i18n
+  language, etc. Pairs with `/audit` — `/profile` answers "what
+  could fire?", `/audit` answers "what did fire?".
+
+### Internal
+
+- 1118 → 1150 tests (+32), ruff clean, 0 mypy errors against 130 files.
+- 2 new push outputs (Apprise, SMTP), 1 new web route group, 1 new CLI
+  subcommand (`scan-diff`), 2 new MCP tools (`analyze_url`, `csi`).
+- 2 new config blocks (`AppriseOutputConfig`, `SMTPOutputConfig`),
+  2 new docker-source toggles (`detect_sidecars`, `detect_resource_limits`).
+- mypy `overrides` extended with `apprise.*` and `trafilatura.*` —
+  both are optional 3rd-party libs.
+
 ## v0.4.7 — 2026-06-03
 
 Four features + review-driven polish on v0.4.4-v0.4.6. The review

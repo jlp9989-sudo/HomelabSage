@@ -1,6 +1,6 @@
 [project]
 name = "homelabsage"
-version = "0.4.7"
+version = "0.4.8"
 description = "AI-powered homelab analyzer, update tracker and improvement advisor"
 readme = "README.md"
 license = { text = "AGPL-3.0-only" }
@@ -102,5 +102,9 @@ module = [
     "docker",
     "docker.*",
     "apscheduler.*",
+    "apprise",
+    "apprise.*",
+    "trafilatura",
+    "trafilatura.*",
 ]
 ignore_missing_imports = true

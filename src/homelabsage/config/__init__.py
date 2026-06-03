@@ -19,12 +19,14 @@ from pydantic import BaseModel, Field
 from ._env import _ENV_RE, _expand, _load_dotenv
 from .llm import LLMConfig
 from .outputs import (
+    AppriseOutputConfig,
     BatchingConfig,
     DiscordOutputConfig,
     GotifyOutputConfig,
     NotionOutputConfig,
     NtfyOutputConfig,
     OutputsConfig,
+    SMTPOutputConfig,
     TelegramOutputConfig,
 )
 from .runtime import (
@@ -153,6 +155,8 @@ __all__ = [
     "DiscordOutputConfig",
     "NtfyOutputConfig",
     "GotifyOutputConfig",
+    "AppriseOutputConfig",
+    "SMTPOutputConfig",
     "OutputsConfig",
     "BatchingConfig",
     "SchedulerConfig",

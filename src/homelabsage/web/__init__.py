@@ -38,9 +38,11 @@ from .routes_health import register_health_routes
 from .routes_interview import register_interview_routes
 from .routes_llm_profiles import register_llm_profiles_routes
 from .routes_notes import register_notes_routes
+from .routes_profile import register_profile_route
 from .routes_settings import register_settings_routes
 from .routes_settings_html import register_settings_html_routes
 from .routes_settings_test import register_settings_test_routes
+from .routes_stack_health import register_stack_health_routes
 from .routes_updates import register_updates_routes
 from .routes_usage import register_usage_routes
 from .routes_widgets import register_widget_routes
@@ -107,6 +109,8 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
     register_usage_routes(app, db, env)
     register_audit_routes(app, cfg, db, env)
     register_health_routes(app)
+    register_stack_health_routes(app, cfg, db)
+    register_profile_route(app, cfg, env)
 
     # Static assets (HTMX, favicon, future CSS sprites). Mounted last so
     # route handlers win on `/`-rooted paths.

@@ -1,0 +1,38 @@
+{% extends "_base.html" %}
+{% set nav = "profile" %}
+{% block title %}Profile · HomelabSage{% endblock %}
+{% block header_actions %}
+  <span class="muted">v{{ version }} · LLM: {{ llm_provider }}{% if llm_active %} ({{ llm_active }}){% endif %}</span>
+{% endblock %}
+{% block content %}
+
+<p class="muted">
+  Everything HomelabSage is currently configured to do. Toggle items
+  via <a href="/settings">Settings</a>.
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:30%">Signal</th>
+      <th style="width:10%">Status</th>
+      <th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.label }}</td>
+      <td>
+        {% if row.enabled %}
+          <span class="pill" style="background:#1c4a26; color:#b6f5c1">on</span>
+        {% else %}
+          <span class="pill" style="background:#2a3340; color:#8fa3b8">off</span>
+        {% endif %}
+      </td>
+      <td class="muted"><code>{{ row.note }}</code></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

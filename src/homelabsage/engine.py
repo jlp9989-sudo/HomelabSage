@@ -16,11 +16,13 @@ from .llm import LLMClient
 from .models import AnalyzedUpdate, Severity, UpdateStatus
 from .notes import NotesProvider
 from .outputs import Output
+from .outputs.apprise import AppriseOutput
 from .outputs.batch import below_threshold, dispatch_batch
 from .outputs.discord import DiscordOutput
 from .outputs.gotify import GotifyOutput
 from .outputs.notion import NotionOutput
 from .outputs.ntfy import NtfyOutput
+from .outputs.smtp import SMTPOutput
 from .outputs.telegram import TelegramOutput
 from .parity import is_parity_running
 from .plugins import Plugin
@@ -57,6 +59,10 @@ def build_outputs(cfg: Config, db: Database) -> list[Output]:
         outputs.append(NtfyOutput(cfg.outputs.ntfy))
     if cfg.outputs.gotify.enabled:
         outputs.append(GotifyOutput(cfg.outputs.gotify))
+    if cfg.outputs.apprise.enabled:
+        outputs.append(AppriseOutput(cfg.outputs.apprise))
+    if cfg.outputs.smtp.enabled:
+        outputs.append(SMTPOutput(cfg.outputs.smtp))
     return outputs
 
 

@@ -165,6 +165,78 @@ class GotifyOutputConfig(QuietHoursMixin):
     )
 
 
+class AppriseOutputConfig(QuietHoursMixin):
+    """Universal push wrapper via the apprise PyPI library.
+
+    Apprise speaks 100+ services through a single URL syntax (Pushover,
+    Mattermost, MS Teams, Slack, Mailgun, AWS SNS, etc.). The library
+    is OPTIONAL — when missing the output degrades to a no-op with a
+    one-time WARN log line.
+    """
+
+    enabled: bool = False
+    urls: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List of apprise notify URLs. Examples: "
+            "`pover://USER@TOKEN`, `slack://TOKEN_A/TOKEN_B/TOKEN_C`, "
+            "`mailtos://user:pass@gmail.com`. See "
+            "https://github.com/caronc/apprise/wiki for the full catalogue."
+        ),
+    )
+    min_severity: Literal["critical", "high", "medium", "info"] = Field(
+        "high",
+        description="Only push updates at or above this severity.",
+    )
+    tag_severity: bool = Field(
+        True,
+        description=(
+            "Map severity to apprise `notify_type` (failure/warning/info) "
+            "so services that visualize urgency colour the message correctly."
+        ),
+    )
+
+
+class SMTPOutputConfig(QuietHoursMixin):
+    """Direct SMTP email output. No 3rd-party deps — uses stdlib `smtplib`.
+
+    Most homelab users have an SMTP relay handy (the ISP's, a personal
+    Mailgun account, the postfix container the family runs). This output
+    is the no-frills "send a plain-text email when something fires" path.
+    """
+
+    enabled: bool = False
+    host: str = Field("", description="SMTP server hostname.")
+    port: int = Field(587, description=(
+        "TCP port. 587 → STARTTLS, 465 → implicit SSL, anything else → "
+        "cleartext (probably only OK for in-LAN relays)."
+    ))
+    username: str = Field("", description="Optional SMTP auth username.")
+    password: str = Field("", description="Optional SMTP auth password.")
+    use_tls: bool = Field(
+        False,
+        description=(
+            "Force STARTTLS upgrade regardless of port. Default behaviour "
+            "is: 587 always STARTTLS, 465 always implicit-SSL, other "
+            "ports stay cleartext."
+        ),
+    )
+    from_addr: str = Field("", description="Sender address (`From:` header).")
+    to_addrs: list[str] = Field(
+        default_factory=list,
+        description="Recipient addresses. Each gets a separate message.",
+    )
+    subject_prefix: str = Field(
+        "[HomelabSage]",
+        description="String prepended to every subject for inbox filtering.",
+    )
+    timeout: int = Field(30, description="Connection/auth timeout in seconds.")
+    min_severity: Literal["critical", "high", "medium", "info"] = Field(
+        "high",
+        description="Only push updates at or above this severity.",
+    )
+
+
 class BatchingConfig(BaseModel):
     """Severity-aware notification batching.
 
@@ -196,4 +268,6 @@ class OutputsConfig(BaseModel):
     discord: DiscordOutputConfig = Field(default_factory=DiscordOutputConfig)
     ntfy: NtfyOutputConfig = Field(default_factory=NtfyOutputConfig)
     gotify: GotifyOutputConfig = Field(default_factory=GotifyOutputConfig)
+    apprise: AppriseOutputConfig = Field(default_factory=AppriseOutputConfig)
+    smtp: SMTPOutputConfig = Field(default_factory=SMTPOutputConfig)
     batching: BatchingConfig = Field(default_factory=BatchingConfig)

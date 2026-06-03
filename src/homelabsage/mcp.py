@@ -224,6 +224,66 @@ def _tool_history_csv(_cfg: Config, db: Database, params: dict) -> dict:
     return {"csv": body, "rows": body.count("\n") - 1 if body else 0}
 
 
+def _tool_analyze_url(cfg: Config, _db: Database, params: dict) -> dict:
+    """Run the URL analyser on any supported URL shape.
+
+    Same dispatch as `homelabsage analyse <url>`: GitHub/Codeberg →
+    repo analyser; Docker Hub → hub analyser; HuggingFace → model
+    card + VRAM fit; everything else → article analyser via
+    trafilatura. Returns the analysed Update + analysis as JSON.
+    """
+    import asyncio
+    url = params.get("url")
+    if not url:
+        raise ValueError("url is required")
+    from .analyse_url import analyse_url
+    result = asyncio.run(analyse_url(
+        cfg, str(url), current_version=str(params.get("current_version") or ""),
+    ))
+    if result is None:
+        return {"matched": False, "reason": "no analyser path matched this URL"}
+    return {"matched": True, "item": result.model_dump(mode="json")}
+
+
+def _tool_csi(cfg: Config, _db: Database, params: dict) -> dict:
+    """Post-mortem evidence for a container.
+
+    Mirrors `homelabsage csi <name>`: pulls recent ERROR/WARN log lines
+    + last-detected update + notes excerpt, optionally runs the LLM.
+    `--evidence-only` is exposed as `llm: false` for air-gapped agents.
+    """
+    import asyncio
+    container_name = params.get("container_name")
+    if not container_name:
+        raise ValueError("container_name is required")
+    use_llm = bool(params.get("llm", True))
+    from .csi import build_prompt, gather_evidence, run_csi
+    if use_llm:
+        report, evidence = asyncio.run(run_csi(cfg, str(container_name)))
+        return {
+            "container_name": evidence.container_name,
+            "log_lines": evidence.log_lines,
+            "notes_excerpt": evidence.notes_excerpt,
+            "log_since": (
+                evidence.log_since.isoformat()
+                if evidence.log_since else None
+            ),
+            "report_markdown": report,
+        }
+    # Evidence-only: never touch the LLM
+    evidence = gather_evidence(cfg, str(container_name))
+    return {
+        "container_name": evidence.container_name,
+        "log_lines": evidence.log_lines,
+        "notes_excerpt": evidence.notes_excerpt,
+        "log_since": (
+            evidence.log_since.isoformat()
+            if evidence.log_since else None
+        ),
+        "prompt_only": build_prompt(evidence),
+    }
+
+
 def _tool_health_check_results(_cfg: Config, db: Database, params: dict) -> dict:
     """Recent post-update health-check rows.
 
@@ -333,6 +393,40 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_history_csv,
+    },
+    "analyze_url": {
+        "description": (
+            "Run the URL analyser on any supported URL "
+            "(GitHub/Codeberg, Docker Hub, HuggingFace, article). "
+            "Returns the analysed Update + analysis."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"},
+                "current_version": {"type": "string"},
+            },
+            "required": ["url"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_analyze_url,
+    },
+    "csi": {
+        "description": (
+            "Post-mortem evidence for a container — recent ERROR/WARN log "
+            "lines, last-detected update, user notes excerpt. Set llm=false "
+            "for the air-gapped evidence-only view."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "container_name": {"type": "string"},
+                "llm": {"type": "boolean", "default": True},
+            },
+            "required": ["container_name"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_csi,
     },
     "health_check_results": {
         "description": (

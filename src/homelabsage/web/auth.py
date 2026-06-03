@@ -30,7 +30,11 @@ def attach_basic_auth(app: FastAPI, cfg: WebAuthConfig) -> None:
         # Basic Auth headers (the dashboards themselves expect a public
         # endpoint behind a reverse proxy ACL).
         path = request.url.path
-        if path == "/healthz" or path.startswith("/widget/"):
+        if (
+            path == "/healthz"
+            or path.startswith("/widget/")
+            or path == "/api/stack-health"
+        ):
             return await call_next(request)
         header = request.headers.get("authorization", "")
         if header.startswith("Basic "):
