@@ -203,7 +203,34 @@ class LLMClient:
         self.last_call = None
         if not self.is_enabled():
             return None
-        prompt = build_prompt(update, notes=notes)
+        # Pre-LLM secret-leak guard: redact API keys / tokens / SSH keys from
+        # notes + context + release notes before assembling the prompt. ON by
+        # default for cloud providers, OFF for local/disabled. Override via
+        # `cfg.secret_guard` (true/false/None for default).
+        guarded_update = update
+        guarded_notes = notes
+        from .secret_guard import redact_context, redact_text, should_guard
+        guard_override = getattr(self.cfg, "secret_guard", None)
+        if should_guard(self.cfg.provider, override=guard_override):
+            from .secret_guard import GuardReport
+            rep = GuardReport()
+            new_notes, _ = redact_text(notes, report=rep)
+            new_release_notes, _ = redact_text(
+                update.release_notes or "", report=rep,
+            )
+            new_ctx, _ = redact_context(update.context or {}, report=rep)
+            if rep.redacted_count:
+                log.info(
+                    "secret_guard: redacted %d items (%s) for %s",
+                    rep.redacted_count, ",".join(rep.matched_categories),
+                    update.subject,
+                )
+            guarded_update = update.model_copy(update={
+                "release_notes": new_release_notes,
+                "context": new_ctx,
+            })
+            guarded_notes = new_notes
+        prompt = build_prompt(guarded_update, notes=guarded_notes)
         started = time.monotonic()
         try:
             raw, tin, tout, est = await self._call_with_usage(

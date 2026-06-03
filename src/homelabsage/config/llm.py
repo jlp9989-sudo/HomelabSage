@@ -51,3 +51,12 @@ class LLMConfig(BaseModel):
         True,
         description="Force the model to return strict JSON (provider-specific). Disable only when the model rejects the response_format header.",
     )
+    secret_guard: bool | None = Field(
+        None,
+        description=(
+            "Pre-LLM secret-leak guard: redact API keys / tokens / SSH keys "
+            "from prompts before sending. `null` (default) = on for cloud "
+            "providers, off for local (`ollama` / `disabled`). `true` forces "
+            "on, `false` forces off."
+        ),
+    )

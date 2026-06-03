@@ -6,18 +6,17 @@ Supported URL shapes:
   - `https://codeberg.org/owner/repo`             (Forgejo-compatible)
   - `https://hub.docker.com/r/owner/image`        (Docker Hub user/org image)
   - `https://hub.docker.com/_/library_image`      (Docker Hub library image)
+  - `https://huggingface.co/owner/model`          (model card + fit check)
   - any other `http(s)://` URL → treated as a news/blog/changelog article
     and extracted with `trafilatura` (falls back to a naive HTML strip
     when the library isn't installed).
-
-HuggingFace model cards remain roadmap'd separately; the VRAM-vs-system
-synthesis is its own engineering chunk that doesn't fit the news shape.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
@@ -212,6 +211,204 @@ async def analyse_dockerhub_url(
     return analyzed
 
 
+# ─── HuggingFace model card analyser ───────────────────────────────────
+
+
+_HF_PATH_RE = re.compile(r"^/([\w.\-]+)/([\w.\-]+?)(?:/.*)?$")
+
+
+def parse_huggingface_url(url: str) -> str | None:
+    """Map an HF model URL to `owner/model`. None for non-HF URLs.
+
+    Examples
+    --------
+    >>> parse_huggingface_url("https://huggingface.co/Qwen/Qwen3.6-35B")
+    'Qwen/Qwen3.6-35B'
+    >>> parse_huggingface_url("https://huggingface.co/Qwen/Qwen3.6-35B/tree/main")
+    'Qwen/Qwen3.6-35B'
+    >>> parse_huggingface_url("https://github.com/foo/bar")  # not HF
+    None
+    """
+    try:
+        parsed = urlparse(url.strip())
+    except ValueError:
+        return None
+    host = (parsed.netloc or "").lower().removeprefix("www.")
+    if host != "huggingface.co":
+        return None
+    m = _HF_PATH_RE.match(parsed.path)
+    if not m:
+        return None
+    return f"{m.group(1)}/{m.group(2)}"
+
+
+async def _fetch_hf_model_meta(slug: str) -> dict | None:
+    """`huggingface.co/api/models/<slug>` — public model metadata."""
+    api = f"https://huggingface.co/api/models/{slug}"
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            r = await client.get(api, headers={"Accept": "application/json"})
+            if r.status_code != 200:
+                return None
+            return r.json()
+    except httpx.HTTPError as e:
+        log.debug("HF model meta %s failed: %s", slug, e)
+        return None
+
+
+# Crude VRAM/RAM estimator: parameters * bytes_per_param. Quantised
+# models are detected via filename suffixes (Q4_K_M, Q5_K_S, fp8, mxfp4,
+# nf4, etc) and the bytes-per-param drops accordingly. Pure heuristic;
+# the prompt mentions "approximate" in the verdict.
+_QUANT_BYTES: dict[str, float] = {
+    "fp32": 4.0, "f32": 4.0,
+    "bf16": 2.0, "fp16": 2.0, "f16": 2.0, "half": 2.0,
+    "fp8": 1.0, "mxfp4": 0.6,
+    "int8": 1.0, "q8": 1.0,
+    "int4": 0.5, "q4": 0.5, "q5": 0.65, "q3": 0.4, "q2": 0.3,
+    "nf4": 0.5, "awq": 0.5, "gptq": 0.5,
+}
+
+
+def _bytes_per_param(filenames: list[str], reported_quant: str | None) -> float:
+    """Best-guess bytes-per-param from siblings + reported quantisation.
+
+    Prefers the explicit `quant` field on the HF API when available,
+    falls back to scanning sibling filenames for known suffixes, defaults
+    to bf16 (2.0).
+    """
+    if reported_quant:
+        key = reported_quant.lower()
+        for q, b in _QUANT_BYTES.items():
+            if q in key:
+                return b
+    blob = " ".join(filenames).lower()
+    for q, b in sorted(_QUANT_BYTES.items(), key=lambda kv: -len(kv[0])):
+        if q in blob:
+            return b
+    return 2.0  # bf16/fp16 default
+
+
+def estimate_vram_gib(params_billion: float, bytes_per_param: float) -> float:
+    """params_billion * bytes_per_param / 1024^3 — plus 15% KV-cache headroom."""
+    raw_gib = params_billion * 1e9 * bytes_per_param / (1024**3)
+    return round(raw_gib * 1.15, 1)
+
+
+def _extract_params_billion(meta: dict) -> float | None:
+    """HF doesn't always report params. Try `safetensors.parameters`,
+    fall back to size in tags / config."""
+    safe = (meta.get("safetensors") or {}).get("parameters")
+    if isinstance(safe, dict):
+        total = sum(int(v) for v in safe.values() if isinstance(v, int))
+        if total > 0:
+            return round(total / 1e9, 2)
+    # Some model cards encode it as a top-level integer
+    direct = meta.get("config", {}).get("num_parameters") if isinstance(meta.get("config"), dict) else None
+    if isinstance(direct, int) and direct > 0:
+        return round(direct / 1e9, 2)
+    return None
+
+
+def _read_system_vram_gib(notes_dir: str | None) -> float | None:
+    """Read `system.md` (written by the curator) for a VRAM line.
+
+    Format we look for: `- GPU: ... (NN GiB VRAM)` — the curator's
+    system probe writes this. None when notes_dir is missing or the
+    file doesn't carry the pattern.
+    """
+    if not notes_dir:
+        return None
+    path = Path(notes_dir) / "system.md"
+    if not path.exists():
+        return None
+    try:
+        body = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    m = re.search(r"(\d+(?:\.\d+)?)\s*GiB\s*VRAM", body, re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
+async def analyse_huggingface_url(
+    cfg: Config,
+    url: str,
+    *,
+    current_version: str = "",
+) -> AnalyzedUpdate | None:
+    """Pull HF model card, estimate VRAM, cross with system.md if available."""
+    slug = parse_huggingface_url(url)
+    if slug is None:
+        return None
+    meta = await _fetch_hf_model_meta(slug)
+    if meta is None:
+        return None
+    siblings = [
+        s.get("rfilename") or s.get("filename") or ""
+        for s in (meta.get("siblings") or []) if isinstance(s, dict)
+    ]
+    quant_str = meta.get("safetensors", {}).get("total") if isinstance(meta.get("safetensors"), dict) else None
+    bytes_per_param = _bytes_per_param(siblings, str(quant_str) if quant_str else None)
+    params_b = _extract_params_billion(meta)
+    vram_estimate_gib: float | None = None
+    if params_b:
+        vram_estimate_gib = estimate_vram_gib(params_b, bytes_per_param)
+
+    system_vram = _read_system_vram_gib(cfg.notes.notes_dir or None)
+    fit_verdict = "unknown"
+    if vram_estimate_gib is not None and system_vram is not None:
+        if vram_estimate_gib > system_vram:
+            fit_verdict = "wont_fit"
+        elif vram_estimate_gib > system_vram * 0.9:
+            fit_verdict = "tight"
+        else:
+            fit_verdict = "fits"
+
+    ctx: dict = {
+        "hf_slug": slug,
+        "params_billion": params_b,
+        "bytes_per_param": bytes_per_param,
+        "vram_estimate_gib": vram_estimate_gib,
+        "system_vram_gib": system_vram,
+        "fit_verdict": fit_verdict,
+        "tags": meta.get("tags") or [],
+        "library_name": meta.get("library_name"),
+        "_note_keywords": [slug, slug.split("/")[-1]],
+    }
+    summary = (
+        f"HuggingFace model `{slug}`. "
+        f"Params: {params_b or 'unknown'}B. "
+        f"VRAM estimate: {vram_estimate_gib or '?'} GiB "
+        f"({fit_verdict} vs reported system VRAM {system_vram or 'unknown'} GiB)."
+    )
+    update = Update(
+        source="analyse_url",
+        subject=f"hf:{slug}",
+        current_version=current_version or "(unknown)",
+        new_version="(model card)",
+        release_url=url,
+        release_notes=summary,
+        context=ctx,
+    )
+    analyzed = AnalyzedUpdate(update=update)
+    llm = LLMClient(get_active_llm_config(cfg))
+    if not llm.is_enabled():
+        return analyzed
+    notes = NotesProvider(
+        notes_dir=cfg.notes.notes_dir or None,
+        extra_docs=cfg.notes.extra_docs,
+        max_chars=cfg.notes.max_chars,
+    )
+    notes_ctx = notes.context_for(slug, keywords=[slug, slug.split("/")[-1]])
+    analyzed.analysis = await llm.analyze(update, notes=notes_ctx)
+    return analyzed
+
+
 # ─── news / blog / changelog URL analyser ──────────────────────────────
 
 
@@ -353,6 +550,8 @@ async def analyse_url(
         return await analyse_repo_url(cfg, url, current_version=current_version)
     if parse_dockerhub_url(url) is not None:
         return await analyse_dockerhub_url(cfg, url, current_version=current_version)
+    if parse_huggingface_url(url) is not None:
+        return await analyse_huggingface_url(cfg, url, current_version=current_version)
     if looks_like_article_url(url):
         return await analyse_article_url(cfg, url, current_version=current_version)
     return None

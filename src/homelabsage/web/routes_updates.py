@@ -64,8 +64,26 @@ def register_updates_routes(
         return RedirectResponse("/", status_code=303)
 
     @app.post("/updates/{update_id:path}/status")
-    async def set_status(update_id: str, status: str = Form(...)) -> RedirectResponse:
+    async def set_status(
+        update_id: str,
+        status: str = Form(...),
+        ack: str = Form(""),
+    ) -> RedirectResponse:
         new_status = UpdateStatus(status)
+        # Pre-flight gate: if the user is APPLYING and the analysis carries
+        # breaking_changes, force a confirmation page. The gate is opt-in
+        # via `web.preflight_gate` so single-user installs can keep the
+        # one-click flow if they prefer.
+        if (
+            new_status == UpdateStatus.APPLIED
+            and getattr(engine.cfg.web, "preflight_gate", False)
+            and ack != "yes"
+        ):
+            it = db.get(update_id)
+            if it and it.analysis and it.analysis.breaking_changes:
+                return RedirectResponse(
+                    f"/updates/{update_id}/preflight", status_code=303,
+                )
         db.set_status(update_id, new_status)
         # Queue a post-update health probe when applying. Best-effort:
         # missing the container_name (non-docker source) silently skips.
@@ -79,6 +97,17 @@ def register_updates_routes(
                     cfg=engine.cfg.health_check,
                 )
         return RedirectResponse("/", status_code=303)
+
+    @app.get("/updates/{update_id:path}/preflight", response_class=HTMLResponse)
+    async def preflight(update_id: str) -> HTMLResponse:
+        """Confirmation wall shown when applying an update with breaking
+        changes. Renders the breaking_changes + recommended_action and
+        requires an explicit ack POST before the status flips."""
+        it = db.get(update_id)
+        if it is None:
+            return HTMLResponse("Not found", status_code=404)
+        tmpl = env.get_template("preflight.html")
+        return HTMLResponse(tmpl.render(item=it))
 
     @app.get("/api/updates")
     async def api_updates() -> list[dict]:

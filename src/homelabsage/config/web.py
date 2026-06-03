@@ -23,3 +23,12 @@ class WebConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     auth: WebAuthConfig = Field(default_factory=WebAuthConfig)
+    preflight_gate: bool = Field(
+        False,
+        description=(
+            "Show a confirmation wall when applying an update whose "
+            "analysis carries `breaking_changes`. Off by default to keep "
+            "the one-click flow; on for installs where the user wants a "
+            "circuit-breaker before destructive actions."
+        ),
+    )

@@ -30,12 +30,14 @@ from .outputs import (
 from .runtime import (
     BackupHealthConfig,
     BackupRepoConfig,
+    ComposeLintConfig,
     DigestConfig,
     HealthCheckConfig,
     I18nConfig,
     LogAnomalyConfig,
     ParityGateConfig,
     SchedulerConfig,
+    TagLagConfig,
 )
 from .sources import (
     DockerSourceConfig,
@@ -84,6 +86,8 @@ class Config(BaseModel):
     backup_health: BackupHealthConfig = Field(default_factory=BackupHealthConfig)
     health_check: HealthCheckConfig = Field(default_factory=HealthCheckConfig)
     log_anomaly: LogAnomalyConfig = Field(default_factory=LogAnomalyConfig)
+    compose_lint: ComposeLintConfig = Field(default_factory=ComposeLintConfig)
+    tag_lag: TagLagConfig = Field(default_factory=TagLagConfig)
     i18n: I18nConfig = Field(default_factory=I18nConfig)
 
 
@@ -154,6 +158,8 @@ __all__ = [
     "BackupRepoConfig",
     "HealthCheckConfig",
     "LogAnomalyConfig",
+    "ComposeLintConfig",
+    "TagLagConfig",
     "I18nConfig",
     "WebAuthConfig",
     "WebConfig",

@@ -128,9 +128,15 @@ def _form_to_block_patch(
             prop_schema.get("type") == "boolean"
             or any(s.get("type") == "boolean" for s in prop_schema.get("anyOf", []))
         )
+        # Nullable bools (`bool | None`) absent from the form mean
+        # "no change" — submitting an unchanged form must not flip
+        # the field to False and pollute the overlay.
+        is_nullable = any(
+            s.get("type") == "null" for s in prop_schema.get("anyOf", [])
+        )
         if name not in form:
             # Missing checkbox → False; everything else means "no change".
-            if is_bool:
+            if is_bool and not is_nullable:
                 out[name] = False
             continue
         raw = form[name]

@@ -190,6 +190,40 @@ def _alternative_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
     )]
 
 
+def _tag_lag_findings(
+    item: AnalyzedUpdate,
+    *,
+    warn_after_days: int,
+    critical_after_days: int,
+) -> list[AuditFinding]:
+    """Floating-tag containers where the registry moved but the local
+    image didn't."""
+    ctx = item.update.context or {}
+    if "remote_pushed_at" not in ctx and "local_pulled_at" not in ctx:
+        return []
+    from .tag_lag import derive_tag_lag
+    lag = derive_tag_lag(
+        ctx,
+        warn_after_days=warn_after_days,
+        critical_after_days=critical_after_days,
+    )
+    if lag is None or lag.severity == "info":
+        return []
+    return [AuditFinding(
+        severity=lag.severity, category="tag_lag",
+        title=(
+            f"{item.update.subject} is {lag.days_local_behind} day(s) "
+            f"behind the registry"
+        ),
+        detail=(
+            f"The floating tag has been bumped upstream {lag.days_since_remote_push} "
+            f"day(s) ago. Pull a fresh image to catch up."
+        ),
+        source_kind="tag_lag", source_ref=item.id,
+        cite=f"days_local_behind={lag.days_local_behind}",
+    )]
+
+
 def _bloatware_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
     """`image_size_growth.triggered=true` from the docker plugin."""
     ctx = item.update.context or {}
@@ -297,6 +331,28 @@ def _health_check_findings(rows: list[dict]) -> list[AuditFinding]:
     return findings
 
 
+def _compose_lint_findings(report: object) -> list[AuditFinding]:
+    """Surface compose-lint findings as auditor entries.
+
+    Each compose smell becomes one row tagged `category=compose_lint`
+    with the rule name in `source_kind`. Source-ref carries the
+    file path so the user can grep for it locally.
+    """
+    if report is None:
+        return []
+    findings: list[AuditFinding] = []
+    for f in getattr(report, "findings", []) or []:
+        findings.append(AuditFinding(
+            severity=f.severity, category="compose_lint",
+            title=f"{f.rule} on {f.service}",
+            detail=f.detail,
+            source_kind=f.rule,
+            source_ref=str(f.file),
+            cite=f"{f.rule}={f.service}",
+        ))
+    return findings
+
+
 def _log_anomaly_findings(rows: list[dict]) -> list[AuditFinding]:
     """One finding per container whose recent error rate breached its baseline."""
     if not rows:
@@ -351,6 +407,12 @@ def build_report(
         findings.extend(_orphan_findings(it))
         findings.extend(_alternative_findings(it))
         findings.extend(_bloatware_findings(it))
+        if cfg.tag_lag.enabled:
+            findings.extend(_tag_lag_findings(
+                it,
+                warn_after_days=cfg.tag_lag.warn_after_days,
+                critical_after_days=cfg.tag_lag.critical_after_days,
+            ))
 
     # State-level signals — not per-update.
     findings.extend(_pending_dispatch_findings(db.list_pending_dispatches()))
@@ -383,6 +445,13 @@ def build_report(
         findings.extend(_health_check_findings(db.list_recent_health_checks(limit=200)))
     if hasattr(db, "list_recent_log_anomalies"):
         findings.extend(_log_anomaly_findings(db.list_recent_log_anomalies(limit=200)))
+
+    # Compose linter — same scan paths as the cascade detector so the
+    # user doesn't configure two lists. No-op when paths empty.
+    if cfg.sources.docker.compose_scan_paths and cfg.compose_lint.enabled:
+        from .compose_lint import lint_paths
+        lint_report = lint_paths(cfg.sources.docker.compose_scan_paths)
+        findings.extend(_compose_lint_findings(lint_report))
 
     # Severity first (critical → info), then category alphabetical so the
     # same input always produces the same output.

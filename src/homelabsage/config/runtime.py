@@ -278,6 +278,33 @@ class LogAnomalyConfig(BaseModel):
     )
 
 
+class ComposeLintConfig(BaseModel):
+    """Compose-file linter. Same scan paths as the cascade detector
+    (`sources.docker.compose_scan_paths`) so the user configures one list."""
+
+    enabled: bool = False
+
+
+class TagLagConfig(BaseModel):
+    """Tag-promotion-lag detector — flag containers whose floating tag
+    (`latest` / `main` / `stable`) has been bumped upstream but the
+    local image hasn't pulled.
+
+    The detector reads `track_floating_tags`'s manifest comparison and
+    just adds the days-since-bump signal on top.
+    """
+
+    enabled: bool = False
+    warn_after_days: int = Field(
+        14,
+        description="`medium` severity when registry tag moved > N days ago.",
+    )
+    critical_after_days: int = Field(
+        60,
+        description="`high` severity when registry tag moved > N days ago.",
+    )
+
+
 class I18nConfig(BaseModel):
     """UI language selector. Minimal — only nav + dashboard headings are
     translated for now; per-page deep i18n stays a non-goal until usage

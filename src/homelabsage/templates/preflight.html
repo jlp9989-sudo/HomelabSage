@@ -1,0 +1,49 @@
+{% extends "_base.html" %}
+{% set nav = "updates" %}
+{% block title %}Confirm apply · {{ item.update.subject }}{% endblock %}
+{% block content %}
+
+<h2>Confirm: applying <code>{{ item.update.subject }}</code> {{ item.update.current_version }} → {{ item.update.new_version }}</h2>
+
+<p class="muted">
+  This update was flagged as carrying <strong>breaking changes</strong>.
+  Please read the list below before marking it applied.
+</p>
+
+<div class="field" style="border-left:3px solid #c0392b">
+  <h3 style="margin-top:0; color:#f5b6b6">Breaking changes</h3>
+  <ul>
+    {% for line in item.analysis.breaking_changes %}
+      <li>{{ line }}</li>
+    {% endfor %}
+  </ul>
+
+  {% if item.analysis.config_obsolete %}
+    <h3 style="color:#ffc77a">Config that may be obsolete</h3>
+    <ul>
+      {% for line in item.analysis.config_obsolete %}
+        <li>{{ line }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if item.analysis.recommended_action %}
+    <h3 style="color:#cfe5ff">Recommended action</h3>
+    <p>{{ item.analysis.recommended_action }}</p>
+  {% endif %}
+
+  {% if item.update.release_url %}
+    <p><a href="{{ item.update.release_url }}" target="_blank" rel="noopener">Full release notes →</a></p>
+  {% endif %}
+</div>
+
+<div style="display:flex; gap:.5rem; margin-top:1rem">
+  <form method="post" action="/updates/{{ item.id }}/status">
+    <input type="hidden" name="status" value="applied">
+    <input type="hidden" name="ack" value="yes">
+    <button type="submit" class="danger">Yes, I read this — mark applied</button>
+  </form>
+  <a href="/" class="btn ghost">Back to dashboard</a>
+</div>
+
+{% endblock %}

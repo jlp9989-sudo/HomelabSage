@@ -2,6 +2,70 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.4.3 — 2026-06-03
+
+Five safety + correctness features in one batch, opt-in via their own
+config blocks. The theme: catching footguns before they fire.
+
+### Added — safety
+
+- **Pre-LLM secret-leak guard** (`secret_guard.py`). Every prompt about
+  to be sent to a cloud LLM is scanned for API keys, OAuth tokens, SSH
+  private key blocks, AWS access keys, Slack/Discord/Telegram webhook
+  URLs, and `KEY=value` lines whose key matches a secret marker. Each
+  match is replaced with `<redacted-by-homelabsage>` before assembly.
+  On by default for cloud providers (openai/groq/gemini/openrouter/
+  anthropic), off by default for local providers (ollama/disabled).
+  Override per-profile via `llm.secret_guard`. Composes with the
+  existing `redact.py` (export sanitiser) — different audiences,
+  different aggressiveness.
+- **Pre-flight breaking-change gate** (`web.preflight_gate`, new
+  `/updates/<id>/preflight` template). Off by default. When on,
+  clicking "Applied" on an update whose analysis carries non-empty
+  `breaking_changes` redirects to a confirmation page listing the
+  breaking lines + recommended action; an explicit ack POST flips the
+  status. Dismiss flow unchanged.
+
+### Added — detectors
+
+- **Compose-file linter** (`compose_lint.py`, `compose_lint.enabled`).
+  Walks the same paths as the cascade detector
+  (`sources.docker.compose_scan_paths`) and emits findings: deprecated
+  `links:`, `:latest` (or implicit-latest) image tag, missing
+  `healthcheck:`, missing `restart:`, `privileged: true` without
+  `cap_add:`, `network_mode: host`, LSIO PUID/PGID gotcha (bind to
+  `/config` or `/data` without `user:`). Surfaced under `compose_lint`
+  category in the auditor.
+- **Tag-promotion-lag detector** (`tag_lag.py`, `tag_lag.enabled`).
+  For floating-tag containers (`latest` / `main` / `stable`), derives
+  `days_local_behind` from `remote_pushed_at` − `local_pulled_at`
+  (both attached by the existing `track_floating_tags` pipeline) and
+  emits a `medium` finding after 14 days, `high` after 60.
+
+### Added — surfaces
+
+- **HuggingFace model URL analyser** — sub-case (d) of the URL
+  analyser. `homelabsage analyse https://huggingface.co/Owner/Model`
+  fetches the model card, estimates VRAM (params × bytes-per-param,
+  + 15% KV-cache headroom; quantisation detected from sibling
+  filenames or the reported `safetensors` block), cross-references
+  with `system.md` (the curator's host probe) and emits a fit
+  verdict — `fits` / `tight` / `wont_fit` / `unknown`. Subject is
+  `hf:Owner/Model`.
+
+### Changed
+
+- Settings UI: `bool | None` fields absent from the submitted form now
+  mean "no change" instead of being coerced to False. Fixes overlay
+  pollution when adding nullable bool fields like `secret_guard`.
+
+### Internal
+
+- 908 → 971 tests (+63). Ruff clean. 0 mypy errors against 109 files.
+- 3 new config blocks: `compose_lint`, `tag_lag`, `web.preflight_gate`.
+- 3 new CLI dispatch paths (no new commands — extends `analyse` via
+  the URL dispatcher).
+
 ## v0.4.2 — 2026-06-03
 
 Five backlog items shipped together. Each one is a self-contained
