@@ -228,6 +228,21 @@ class DockerPlugin(Plugin):
             except Exception as e:
                 log.warning("compose graph build failed: %s", e)
 
+        # Sidecar discovery runs ONCE per scan — same shape as the
+        # compose graph cache. Empty list on any failure.
+        sidecar_links: list = []
+        if self.cfg.detect_sidecars:
+            try:
+                from ..sidecars import (
+                    discover_from_compose_graph,
+                    discover_runtime,
+                )
+                sidecar_links = discover_runtime(containers)
+                if compose_graph is not None:
+                    sidecar_links.extend(discover_from_compose_graph(compose_graph))
+            except Exception as e:
+                log.debug("sidecar discovery failed: %s", e)
+
         for c in containers:
             if self._should_skip(c.name):
                 continue
@@ -358,6 +373,12 @@ class DockerPlugin(Plugin):
                             for n in neighbours[:20]
                         ],
                     }
+
+            if sidecar_links:
+                from ..sidecars import sidecars_for
+                matches = sidecars_for(c.name, sidecar_links)
+                if matches:
+                    ctx["sidecars"] = [link.to_context() for link in matches]
 
             if self.cfg.image_size_growth_detect and image_tag:
                 # Local image's on-disk size (sum of writeable + layer cache).

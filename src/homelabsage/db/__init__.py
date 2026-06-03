@@ -26,6 +26,7 @@ from pathlib import Path
 
 from .explainers import ExplainersMixin
 from .health import HealthCheckMixin
+from .heartbeats import HeartbeatsMixin
 from .interview import InterviewMixin
 from .interview import row_to_question as _row_to_question
 from .log_anom import LogAnomalyMixin
@@ -43,6 +44,7 @@ from .watched import WatchedMixin
 class Database(
     UpdatesMixin, InterviewMixin, WatchedMixin, PendingMixin,
     ExplainersMixin, UsageMixin, HealthCheckMixin, LogAnomalyMixin,
+    HeartbeatsMixin,
 ):
     """Single connection wrapper. Thread-safe for reads, writes serialised
     at the engine level (one scan at a time)."""

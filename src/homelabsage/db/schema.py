@@ -158,6 +158,23 @@ CREATE TABLE IF NOT EXISTS log_anomalies (
 );
 CREATE INDEX IF NOT EXISTS idx_loganom_container ON log_anomalies(container_name);
 CREATE INDEX IF NOT EXISTS idx_loganom_detected  ON log_anomalies(detected_at);
+
+-- Heartbeat history. One row per ping (success OR failure) so the user
+-- can verify their Uptime Kuma / Healthchecks.io receiver is hearing
+-- HomelabSage. The full history accumulates; the auditor or `/usage`-style
+-- page can read the last N rows to render a "last 24h: 24/24 succeeded"
+-- pill.
+CREATE TABLE IF NOT EXISTS heartbeats (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    url         TEXT NOT NULL,
+    ok          INTEGER NOT NULL,
+    status_code INTEGER,
+    error       TEXT,
+    duration_ms INTEGER,
+    pinged_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_heartbeats_pinged ON heartbeats(pinged_at);
+CREATE INDEX IF NOT EXISTS idx_heartbeats_ok     ON heartbeats(ok);
 """
 
 

@@ -125,17 +125,24 @@ class InterviewMixin:
         """Auto-dismiss PENDING rows older than `older_than_days` days.
 
         Returns the number of rows touched. Idempotent: re-runs against
-        the same window mark zero new rows. Used by the
-        `homelabsage interview cleanup` cron-friendly subcommand.
+        the same window mark zero new rows. `answered_at` stays NULL —
+        auto-dismissal is not an answer, and conflating the two pollutes
+        the field's semantics.
+
+        Negative `older_than_days` is treated as a no-op (a 0 return)
+        because the alternative would silently dismiss future-dated
+        rows that crept in via clock skew.
         """
+        if older_than_days < 0:
+            return 0
         from datetime import timedelta
         cutoff = (utcnow() - timedelta(days=older_than_days)).isoformat()
         cur = self._conn.execute(
             """
             UPDATE interview_questions
-               SET status = 'dismissed', answered_at = ?
+               SET status = 'dismissed'
              WHERE status = 'pending' AND created_at < ?
             """,
-            (utcnow().isoformat(), cutoff),
+            (cutoff,),
         )
         return int(cur.rowcount or 0)

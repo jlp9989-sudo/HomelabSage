@@ -126,10 +126,22 @@ def register_updates_routes(
         dismissed 1, 2 not found". Pre-flight gate IS NOT applied here:
         bulk action implies the user already reviewed the list.
         """
-        ids = payload.get("ids") or []
+        # Validate the envelope before touching anything — non-list `ids`
+        # used to silently iterate string characters when callers passed
+        # `"ids": "abc"`. Now any non-list shape is a 400.
+        ids = payload.get("ids")
         status_raw = payload.get("status")
-        if not isinstance(ids, list) or not status_raw:
-            raise HTTPException(400, "payload must be {ids: [...], status: '...'}")
+        if not isinstance(ids, list) or not isinstance(status_raw, str) or not status_raw:
+            raise HTTPException(
+                400, "payload must be {ids: [<string>...], status: '...'}",
+            )
+        # Soft cap so a 10k-id POST can't block the event loop with
+        # synchronous SQLite writes.
+        BULK_MAX = 500
+        if len(ids) > BULK_MAX:
+            raise HTTPException(
+                400, f"too many ids ({len(ids)}); cap is {BULK_MAX}",
+            )
         try:
             new_status = UpdateStatus(status_raw)
         except ValueError as e:

@@ -114,9 +114,19 @@ def auto_commit(
         # twice in a row (idempotent re-curate). Not an error.
         return False
 
+    # Author may be either "Name <email>" or just a free-form string.
+    # When the angle-bracket form is missing we fall back to a default
+    # placeholder email so `git commit -c user.email=` never raises.
+    if "<" in author and ">" in author:
+        name = author.split("<", 1)[0].strip() or "homelabsage"
+        email = author.split("<", 1)[1].split(">", 1)[0].strip() or \
+            "noreply@homelabsage.local"
+    else:
+        name = author.strip() or "homelabsage"
+        email = "noreply@homelabsage.local"
     commit = _run_git(
-        ["-c", f"user.name={author.split('<')[0].strip()}",
-         "-c", f"user.email={author.split('<')[1].rstrip('>')}",
+        ["-c", f"user.name={name}",
+         "-c", f"user.email={email}",
          "commit", "-m", message],
         cwd=p,
     )

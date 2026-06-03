@@ -73,6 +73,14 @@ class DockerSourceConfig(BaseModel):
     # update, cheap relative to the signal it produces. Set to false to
     # skip the request budget.
     release_cadence: bool = True
+    # Detect sidecar / init containers tightly coupled to a primary.
+    # When ON, the plugin walks every container's `HostConfig.NetworkMode`
+    # / `PidMode` for `container:<name>` references and emits
+    # `Update.context.sidecars` listing them on the PRIMARY's row. The
+    # analyzer prompt mentions sidecars in the recommendation so the user
+    # knows their VPN / init container will restart too. One bool, no
+    # per-pattern config — the detection is mechanical.
+    detect_sidecars: bool = True
 
 
 class HAConfig(BaseModel):

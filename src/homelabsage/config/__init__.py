@@ -28,6 +28,7 @@ from .outputs import (
     TelegramOutputConfig,
 )
 from .runtime import (
+    AutoApplyConfig,
     BackupHealthConfig,
     BackupRepoConfig,
     ComposeLintConfig,
@@ -90,6 +91,7 @@ class Config(BaseModel):
     compose_lint: ComposeLintConfig = Field(default_factory=ComposeLintConfig)
     tag_lag: TagLagConfig = Field(default_factory=TagLagConfig)
     image_pins: ImagePinsConfig = Field(default_factory=ImagePinsConfig)
+    auto_apply: AutoApplyConfig = Field(default_factory=AutoApplyConfig)
     i18n: I18nConfig = Field(default_factory=I18nConfig)
 
 
@@ -163,6 +165,7 @@ __all__ = [
     "ComposeLintConfig",
     "TagLagConfig",
     "ImagePinsConfig",
+    "AutoApplyConfig",
     "I18nConfig",
     "WebAuthConfig",
     "WebConfig",

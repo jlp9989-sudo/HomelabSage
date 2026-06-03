@@ -140,6 +140,9 @@ class Engine:
                 # Image-pin enforcement runs BEFORE the analyzer so the LLM
                 # already sees the verdict in `context.pin_violation` and
                 # frames its recommendation against it. Empty pins → no-op.
+                # The Update's context dict is REPLACED (not mutated in
+                # place) so plugins that cache context across runs aren't
+                # polluted by this scan's pin verdict.
                 if self.cfg.image_pins.enabled and self.cfg.image_pins.pins:
                     from .image_pins import evaluate as evaluate_pin
                     verdict = evaluate_pin(
@@ -148,7 +151,10 @@ class Engine:
                         pins=self.cfg.image_pins.pins,
                     )
                     if verdict is not None:
-                        update.context["pin_violation"] = verdict.to_context()
+                        update.context = {
+                            **(update.context or {}),
+                            "pin_violation": verdict.to_context(),
+                        }
                 analyzed = AnalyzedUpdate(update=update)
                 # Skip LLM call if we already analyzed this exact (subject, new_version)
                 existing = self.db.get(analyzed.id)
@@ -198,6 +204,24 @@ class Engine:
                     except Exception as e:
                         log.exception("LLM failed on %s: %s", update.subject, e)
                 self.db.upsert(analyzed)
+                # Auto-apply whitelist — runs AFTER analysis + persistence
+                # so the LLM's `breaking_changes` + severity inform the
+                # decision. Records a fresh status to the DB if it fires.
+                if self.cfg.auto_apply.enabled and analyzed.analysis is not None:
+                    from .auto_apply import should_auto_apply
+                    decision = should_auto_apply(
+                        analyzed,
+                        allowlist=self.cfg.auto_apply.allowlist,
+                        max_severity=self.cfg.auto_apply.max_severity,
+                    )
+                    if decision.should_apply:
+                        log.info(
+                            "auto_apply: %s → APPLIED (%s)",
+                            analyzed.id, decision.reason,
+                        )
+                        self.db.set_status(analyzed.id, UpdateStatus.APPLIED)
+                        analyzed.status = UpdateStatus.APPLIED
+                        stats["auto_applied"] = stats.get("auto_applied", 0) + 1
                 self._incremental_hook(analyzed)
                 # Batching short-circuit: when the item is below the rollup
                 # threshold AND we have a meaningful analysis, defer push
@@ -348,11 +372,30 @@ class Engine:
         url = self.cfg.scheduler.heartbeat_url
         if not url:
             return
+        import time as _time_mod
+        started = _time_mod.monotonic()
+        ok = False
+        status_code: int | None = None
+        err: str | None = None
         try:
             async with httpx.AsyncClient(timeout=5) as client:
-                await client.get(url)
-        except httpx.HTTPError:
-            pass  # best-effort; never break the run on a heartbeat failure
+                r = await client.get(url)
+                status_code = r.status_code
+                ok = 200 <= r.status_code < 300
+                if not ok:
+                    err = f"HTTP {r.status_code}"
+        except httpx.HTTPError as e:
+            err = str(e)[:200]
+        duration_ms = int((_time_mod.monotonic() - started) * 1000)
+        # Persist regardless of outcome; the failure path is the
+        # interesting one for debugging a flaky Uptime Kuma URL.
+        try:
+            self.db.record_heartbeat(
+                url=url, ok=ok, status_code=status_code,
+                error=err, duration_ms=duration_ms,
+            )
+        except Exception:
+            log.debug("heartbeat persistence failed (continuing)")
 
     def close(self) -> None:
         self.db.close()

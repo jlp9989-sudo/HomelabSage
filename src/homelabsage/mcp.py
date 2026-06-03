@@ -178,7 +178,7 @@ def _tool_audit(cfg: Config, db: Database, _params: dict) -> dict:
     return report.to_json()
 
 
-def _tool_rollback_recipe(_cfg: Config, db: Database, params: dict) -> dict:
+def _tool_rollback_recipe(cfg: Config, db: Database, params: dict) -> dict:
     """Return the rollback recipe (CLI + compose forms) for an update."""
     update_id = params.get("update_id")
     if not update_id:
@@ -187,7 +187,17 @@ def _tool_rollback_recipe(_cfg: Config, db: Database, params: dict) -> dict:
     if item is None:
         raise ValueError(f"no update with id={update_id!r}")
     from .rollback import build_recipe, render_markdown
-    recipe = build_recipe(item)
+    # Build the compose graph so the recipe surfaces the docker-compose
+    # form + cascade warnings. Empty when no compose_scan_paths are
+    # configured — the recipe still renders the CLI form.
+    graph = None
+    if cfg.sources.docker.compose_scan_paths:
+        try:
+            from .compose import build_graph as build_compose_graph
+            graph = build_compose_graph(cfg.sources.docker.compose_scan_paths)
+        except Exception as e:
+            log.debug("rollback_recipe compose graph failed: %s", e)
+    recipe = build_recipe(item, graph=graph)
     return {
         "container_name": recipe.container_name,
         "prior_image": recipe.prior_image,

@@ -74,7 +74,9 @@ def test_build_recipe_cascade_warnings(tmp_path: Path):
 
 
 def test_build_recipe_floating_tag_full_digest_warning():
-    """Floating-tag updates carry the prior digest truncated to 12 chars."""
+    """Floating-tag updates carry the prior digest truncated to 12 chars.
+    The prior_image stays a valid docker ref shape; the digest hint
+    travels in a separate field."""
     upd = AnalyzedUpdate(update=Update(
         source="docker", subject="watchtower",
         current_version="local @ abc123def456",
@@ -82,9 +84,10 @@ def test_build_recipe_floating_tag_full_digest_warning():
         context={"registry_slug": "containrrr/watchtower"},
     ))
     recipe = build_recipe(upd)
-    assert "<full-digest-needed>" in recipe.prior_image
+    assert "<previous-digest-needed>" in recipe.prior_image
+    assert recipe.prior_digest_short == "abc123def456"
     md = render_markdown(recipe)
-    assert "truncated" in md
+    assert "abc123def456" in md
     assert "docker images --digests" in md
 
 

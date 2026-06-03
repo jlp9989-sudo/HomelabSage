@@ -326,6 +326,47 @@ class ImagePinsConfig(BaseModel):
     pins: dict[str, str] = Field(default_factory=dict)
 
 
+class AutoApplyConfig(BaseModel):
+    """Opt-in safe-list of subjects allowed to flip APPLIED automatically.
+
+    Off by default. Allow-list only (no globs / regex / wildcards) — the
+    safety story rests on the user explicitly listing each container.
+    `max_severity` caps how far up the severity ladder auto-apply will
+    go; `breaking_changes` non-empty + `pin_violation` always block.
+
+    Example:
+
+      auto_apply:
+        enabled: true
+        max_severity: info
+        allowlist:
+          - my-personal-blog
+          - static-frontend
+          - hello-world
+    """
+
+    enabled: bool = False
+    max_severity: str = Field(
+        "info",
+        description=(
+            "Severity ceiling — items above this are NEVER auto-applied. "
+            "One of: info, medium, high, critical. Default: info."
+        ),
+    )
+    allowlist: list[str] = Field(
+        default_factory=list,
+        description="Exact-match subject list. No globs. Case-insensitive.",
+    )
+
+    @field_validator("max_severity")
+    @classmethod
+    def _check_severity(cls, v: str) -> str:
+        allowed = {"info", "medium", "high", "critical"}
+        if (v or "").lower() not in allowed:
+            raise ValueError(f"max_severity must be one of {sorted(allowed)}")
+        return v.lower()
+
+
 class I18nConfig(BaseModel):
     """UI language selector. Minimal — only nav + dashboard headings are
     translated for now; per-page deep i18n stays a non-goal until usage

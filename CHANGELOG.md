@@ -2,6 +2,87 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.4.7 — 2026-06-03
+
+Four features + review-driven polish on v0.4.4-v0.4.6. The review
+flagged 3 critical bugs and 12 important findings; all critical and
+most important are fixed here, with regression tests.
+
+### Added
+
+- **Watched-repo enrichment** (`watched_enrich.py`). For each
+  `github_watched` Update, the plugin now also fetches `topics` +
+  `homepage` + a README excerpt (≤3 KB, base64-decoded from the
+  GitHub `/readme` endpoint, fallback for Codeberg/Gitea). Surfaces
+  as `Update.context.watched_enrich`. Closes the parity gap with the
+  docker plugin's `fetch_readme` path.
+- **Sidecar discovery** (`sidecars.py`, `sources.docker.detect_sidecars`
+  on by default). Walks every running container's
+  `HostConfig.NetworkMode` / `PidMode` for `container:<name>` refs and
+  emits `SidecarLink` entries on the PRIMARY's `Update.context.sidecars`.
+  Compose-graph `init/setup/migrate`-suffixed services with exactly one
+  dependent count too. The analyzer prompt mentions sidecars in the
+  recommendation so the user knows "restarting qbittorrent will also
+  drop the gluetun VPN sidecar".
+- **Heartbeat history** (`db/heartbeats.py`, new `heartbeats` table).
+  The engine's `_heartbeat_ok` now records EVERY ping (success or
+  failure) with status_code + error + duration. `db.heartbeat_summary`
+  gives `{succeeded, failed, last_ok_at, last_failure_at}` over a
+  window — drop-in data for an Uptime-Kuma sanity widget.
+- **Auto-apply whitelist** (`auto_apply.py` + `AutoApplyConfig`).
+  Opt-in safe-list of subjects allowed to flip APPLIED automatically.
+  Five blocks before fire: not in allow-list, no analysis, severity >
+  ceiling, breaking_changes non-empty, pin_violation present. Records
+  `stats["auto_applied"]` per scan. Default disabled, allow-list only
+  (no globs), `max_severity="info"`.
+
+### Fixed (review-driven)
+
+- **MCP `rollback_recipe` returned only the CLI form** — `build_recipe`
+  was called without the compose graph, so the compose-file half was
+  always empty. Now builds the graph from `cfg.sources.docker.compose_scan_paths`.
+- **`rollback.prior_image` was an invalid docker ref** on floating-tag
+  containers (`slug@sha256:abc<full-digest-needed>` was bogus). Now
+  the ref stays a valid `<slug>:<previous-digest-needed>` placeholder,
+  and the 12-char digest hint travels in a separate `prior_digest_short`
+  field. Renderer surfaces the hint in the warning.
+- **`POST /api/updates/bulk` accepted non-list `ids`** — `"ids": "abc"`
+  silently iterated characters. Now strict `isinstance(list)` +
+  500-item cap before any DB writes.
+- **`dismiss_stale_interview_questions` set `answered_at`** for
+  auto-dismissed rows — conflated the field's semantics. Now stays
+  NULL. Negative `older_than_days` is a no-op (was silently
+  dismissing future-dated rows).
+- **`image_pins` glob shadowed exact-match keys** when the user's
+  YAML ordering put the glob first. Now exact-match keys win
+  unconditionally; globs are tier 2.
+- **`image_pins` operator path was overly conservative on parse
+  failure** — silently blocked legitimate updates. Now returns
+  `allowed=True` with an explanatory reason when `packaging` can't
+  parse a version, so the user sees the skip rather than a phantom
+  veto.
+- **`engine` mutated the plugin's `Update.context` dict in place**
+  when injecting `pin_violation`. Now replaces with a new dict so
+  plugin-cached contexts stay clean.
+- **`notes_git.auto_commit` crashed on non-`Name <email>` author
+  strings** (the default form works, but callers passing `"javi"`
+  hit IndexError on `split('<')[1]`). Now accepts free-form names
+  with a safe default email.
+- **`sidecars` regex rejected the `container:/name` form** docker
+  sometimes stores. Allowed-char set now includes `/`.
+- **`watched_enrich` mypy errors** — typo `base64.binascii.Error` →
+  `binascii.Error`; `_fetch_json` return-type union not narrowed
+  before `_decode_readme_body`.
+
+### Internal
+
+- 1075 → 1118 tests (+43), ruff clean, 0 mypy errors against 122 files.
+- 1 new config field (`sources.docker.detect_sidecars`), 1 new config
+  block (`AutoApplyConfig`), 1 new DB table (`heartbeats`), 1 new
+  Database mixin (`HeartbeatsMixin`).
+- All 4 critical findings from the review are fixed with regression
+  tests in `tests/test_polish_v047.py`.
+
 ## v0.4.6 — 2026-06-03
 
 Four leverage items. Each one extends an existing pipeline rather than

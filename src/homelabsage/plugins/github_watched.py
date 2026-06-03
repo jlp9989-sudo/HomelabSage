@@ -99,6 +99,17 @@ class WatchedReposPlugin(Plugin):
             except Exception as e:
                 log.debug("repo_metadata failed for %s: %s", w["repo"], e)
 
+            # Best-effort README + topics so the analyzer sees what a
+            # running-container plugin would get from docker inspect /
+            # docker hub. One extra HTTP round-trip per Update.
+            try:
+                from ..watched_enrich import enrich
+                ext = await enrich(w["repo"])
+                if ext.topics or ext.readme_excerpt or ext.homepage:
+                    ctx["watched_enrich"] = ext.to_context()
+            except Exception as e:
+                log.debug("watched_enrich failed for %s: %s", w["repo"], e)
+
             updates.append(Update(
                 source=self.id,
                 subject=w["nickname"] or w["repo"],

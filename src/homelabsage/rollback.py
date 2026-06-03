@@ -51,31 +51,36 @@ class RollbackRecipe:
     compose_steps: list[str]
     compose_file: Path | None
     cascade_warnings: list[str]
+    # Short prior-digest hint for the floating-tag pipeline (12-char
+    # prefix). None for semver / unknown current_version cases. The
+    # renderer uses it to remind the user to expand to the full digest.
+    prior_digest_short: str | None = None
 
 
-def _prior_image_ref(item: AnalyzedUpdate) -> str:
-    """Derive the prior image:tag from the Update's current_version.
+def _prior_image_ref(item: AnalyzedUpdate) -> tuple[str, str | None]:
+    """Derive the prior image reference + a short digest hint.
 
-    For container updates the plugin sets `context.image` to the new
-    image; the prior is constructed as `<registry_slug>:<old-tag>`.
-    Floating-tag containers carry digests so we use `<slug>@<digest>`.
+    Returns `(prior_image_ref, digest_short)`. The ref is a VALID docker
+    reference whenever we have enough information; otherwise it's a
+    `<slug>:<placeholder>` form the user is expected to substitute. The
+    digest_short field carries the 12-char fingerprint for the
+    floating-tag case so the renderer can surface "use the full digest"
+    instructions without polluting the ref itself with an invalid
+    placeholder fragment.
     """
     ctx = item.update.context or {}
     slug = ctx.get("registry_slug") or item.update.subject
-    # Floating-tag pipeline: `current_version` = `"local @ <digest12>"`
     cv = item.update.current_version or ""
     if cv.startswith("local @ "):
         digest = cv.removeprefix("local @ ").strip()
-        # Re-expand to a full sha256 reference. Docker accepts the
-        # 12-char prefix when the image is local, but for pulling we
-        # need the full digest the user has on disk — they should pull
-        # it via `docker images --digests` and substitute. We document
-        # this in the rendered recipe.
-        return f"{slug}@sha256:{digest}<full-digest-needed>"
+        # `<slug>:<placeholder>` keeps the ref shape parseable while
+        # making it obvious that the user must look up the real digest.
+        # The 12-char prefix travels in the second return value so the
+        # rendered recipe can quote it.
+        return f"{slug}:<previous-digest-needed>", digest
     if cv == "(unknown)":
-        return f"{slug}:<previous-tag-needed>"
-    # Plain semver tag
-    return f"{slug}:{cv}"
+        return f"{slug}:<previous-tag-needed>", None
+    return f"{slug}:{cv}", None
 
 
 def _new_image_ref(item: AnalyzedUpdate) -> str | None:
@@ -99,7 +104,7 @@ def build_recipe(
     therefore also need a restart).
     """
     container_name = item.update.subject
-    prior = _prior_image_ref(item)
+    prior, prior_digest = _prior_image_ref(item)
     new = _new_image_ref(item)
 
     # docker CLI form is always offered — it's the universal escape hatch.
@@ -144,6 +149,7 @@ def build_recipe(
         compose_steps=compose_steps,
         compose_file=compose_file,
         cascade_warnings=cascade_warnings,
+        prior_digest_short=prior_digest,
     )
 
 
@@ -186,12 +192,13 @@ def render_markdown(recipe: RollbackRecipe) -> str:
         ]
         lines.extend(f"- {w}" for w in recipe.cascade_warnings)
 
-    if "<full-digest-needed>" in recipe.prior_image:
+    if "<previous-digest-needed>" in recipe.prior_image and recipe.prior_digest_short:
         lines += [
             "",
-            "> ⚠️  The prior digest is truncated to 12 chars. Run "
+            f"> ⚠️  The prior digest is `{recipe.prior_digest_short}` "
+            "(12-char prefix). Run "
             "`docker images --digests | grep " + recipe.container_name.split('-')[0] + "` "
-            "and substitute the full `sha256:...` before pulling.",
+            "and substitute the full `sha256:...` reference before pulling.",
         ]
     elif "<previous-tag-needed>" in recipe.prior_image:
         lines += [

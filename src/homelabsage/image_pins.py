@@ -72,7 +72,14 @@ def _normalise(version: str) -> str:
 
 
 def _matches_pin(new_version: str, pin: str) -> tuple[bool, str]:
-    """Return (allowed, reason). `allowed=False` → the update CROSSES the pin."""
+    """Return (allowed, reason). `allowed=False` → the update CROSSES the pin.
+
+    When the `packaging` library is unavailable OR can't parse one side
+    of an operator pin, we return `allowed=True` with a warning reason.
+    The alternative (blocking on parse failure) silently freezes
+    legitimate upgrades; the user is better served by a no-op than a
+    silent veto they don't understand.
+    """
     new = _normalise(new_version)
     pin_stripped = _normalise(pin)
     # Operator prefix first — `<=2026.5`
@@ -81,27 +88,26 @@ def _matches_pin(new_version: str, pin: str) -> tuple[bool, str]:
         op, right = m.group(1), m.group(2)
         try:
             from packaging.version import InvalidVersion, Version
-            try:
-                left_v = Version(new)
-                right_v = Version(right)
-                cmp = {
-                    "<": left_v < right_v,
-                    "<=": left_v <= right_v,
-                    ">": left_v > right_v,
-                    ">=": left_v >= right_v,
-                    "==": left_v == right_v,
-                }[op]
-                if cmp:
-                    return True, f"satisfies {op}{right}"
-                return False, f"crosses pin {op}{right}"
-            except InvalidVersion:
-                pass
         except ImportError:
-            pass
-        # Fallback: string compare. `<` becomes `<=`-with-equal in this
-        # branch since we can't know without a real parser.
-        same = new == right
-        return same, f"string-compare {new} {op} {right}"
+            return True, f"packaging unavailable — could not enforce {op}{right}"
+        try:
+            left_v = Version(new)
+            right_v = Version(right)
+        except InvalidVersion:
+            return True, (
+                f"could not parse one of {new!r}/{right!r} as a Version — "
+                f"skipping operator pin {op}{right}"
+            )
+        cmp = {
+            "<": left_v < right_v,
+            "<=": left_v <= right_v,
+            ">": left_v > right_v,
+            ">=": left_v >= right_v,
+            "==": left_v == right_v,
+        }[op]
+        if cmp:
+            return True, f"satisfies {op}{right}"
+        return False, f"crosses pin {op}{right}"
     # Glob with `*`
     if "*" in pin_stripped:
         if fnmatch.fnmatch(new, pin_stripped):
@@ -121,12 +127,18 @@ def evaluate(
 ) -> PinVerdict | None:
     """Return a verdict when the update would cross a pin, else None.
 
-    `pins` maps `subject_pattern` → `pin_spec`. The first matching key
-    wins; subjects are case-insensitive. A pin whose key contains `*`
-    is treated as a glob (so `homeassistant/*: "<=2026.5"` works).
+    `pins` maps `subject_pattern` → `pin_spec`. Subjects are
+    case-insensitive. Exact-match keys take precedence over glob keys,
+    so a YAML order like `{"*": ..., "mealie": ...}` still hits the
+    explicit `mealie` entry. Within the same precedence tier the user's
+    insertion order wins (YAML preserves it).
     """
     subj_lower = subject.lower()
-    for key, spec in pins.items():
+    # Sort: exact-match keys first (no `*`), globs after. Stable across
+    # equally-specific entries (Python's sort is stable).
+    sorted_keys = sorted(pins.keys(), key=lambda k: ("*" in k, list(pins).index(k)))
+    for key in sorted_keys:
+        spec = pins[key]
         key_lower = key.lower()
         if "*" in key_lower:
             if not fnmatch.fnmatchcase(subj_lower, key_lower):
