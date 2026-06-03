@@ -16,7 +16,7 @@ from jinja2 import Environment
 
 from ..db import Database
 from ..engine import Engine
-from ..models import UpdateStatus
+from ..models import AnalyzedUpdate, UpdateStatus
 from .routes_wizard import is_wizard_complete
 
 
@@ -130,6 +130,67 @@ def register_updates_routes(
         if db.get(update_id) is None:
             raise HTTPException(404, f"no update with id={update_id}")
         return {"update_id": update_id, "note": db.get_user_note(update_id) or ""}
+
+    @app.get("/api/updates/search")
+    async def api_search(q: str = "", limit: int = 50) -> dict:
+        """Substring search across subject + summary + breaking_changes
+        + user_note. Empty `q` returns `{count: 0, items: []}`.
+        """
+        cap = max(1, min(int(limit) or 50, 200))
+        items = db.search(q, limit=cap)
+        return {
+            "query": q,
+            "count": len(items),
+            "items": [it.model_dump(mode="json") for it in items],
+        }
+
+    @app.post("/api/inbox/{source}")
+    async def api_inbox(source: str, payload: dict) -> dict:
+        """Webhook receiver — external systems POST update events here.
+
+        Accepts a flexible payload. Required: `subject`, `new_version`.
+        Optional: `current_version` (defaults to "(unknown)"),
+        `release_url`, `release_notes`, `context`. The receiver simply
+        upserts the event as an `Update` — the engine's analyzer will
+        pick it up on the next scan cycle (or you can trigger a scan
+        with `POST /run`).
+
+        Source string is used verbatim as the `Update.source` so the
+        analyzer's note matcher and the UI dashboard can group by it.
+        Restricted to `[a-z0-9_-]{1,32}` to avoid pollution.
+        """
+        import re as _re
+        if not _re.fullmatch(r"[a-z0-9_-]{1,32}", source):
+            raise HTTPException(
+                400, "source must match [a-z0-9_-]{1,32}",
+            )
+        if not isinstance(payload, dict):
+            raise HTTPException(400, "payload must be a JSON object")
+        subject = payload.get("subject")
+        new_version = payload.get("new_version")
+        if not isinstance(subject, str) or not subject.strip():
+            raise HTTPException(400, "subject is required")
+        if not isinstance(new_version, str) or not new_version.strip():
+            raise HTTPException(400, "new_version is required")
+        current_version = payload.get("current_version") or "(unknown)"
+        if not isinstance(current_version, str):
+            raise HTTPException(400, "current_version must be a string")
+        from ..models import Update as _Update
+        ctx = payload.get("context") or {}
+        if not isinstance(ctx, dict):
+            raise HTTPException(400, "context must be an object")
+        upd = _Update(
+            source=source,
+            subject=subject.strip(),
+            current_version=current_version,
+            new_version=new_version.strip(),
+            release_url=(payload.get("release_url") or None),
+            release_notes=(payload.get("release_notes") or None),
+            context=ctx,
+        )
+        analyzed = AnalyzedUpdate(update=upd)
+        db.upsert(analyzed)
+        return {"ok": True, "id": analyzed.id, "source": source}
 
     @app.post("/api/updates/bulk")
     async def api_updates_bulk(payload: dict) -> dict:

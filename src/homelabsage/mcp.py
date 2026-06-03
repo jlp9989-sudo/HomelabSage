@@ -284,6 +284,43 @@ def _tool_csi(cfg: Config, _db: Database, params: dict) -> dict:
     }
 
 
+def _tool_get_user_note(_cfg: Config, db: Database, params: dict) -> dict:
+    """Read the free-text user_note attached to an update."""
+    update_id = params.get("update_id")
+    if not update_id:
+        raise ValueError("update_id is required")
+    if db.get(update_id) is None:
+        raise ValueError(f"no update with id={update_id!r}")
+    return {"update_id": update_id, "note": db.get_user_note(update_id) or ""}
+
+
+def _tool_set_user_note(_cfg: Config, db: Database, params: dict) -> dict:
+    """Attach (or clear) the free-text user_note for an update."""
+    update_id = params.get("update_id")
+    if not update_id:
+        raise ValueError("update_id is required")
+    note = params.get("note")
+    if note is not None and not isinstance(note, str):
+        raise ValueError("note must be a string or null")
+    if not db.set_user_note(update_id, note or ""):
+        raise ValueError(f"no update with id={update_id!r}")
+    return {"ok": True, "update_id": update_id,
+            "note": db.get_user_note(update_id) or ""}
+
+
+def _tool_search_updates(_cfg: Config, db: Database, params: dict) -> dict:
+    """Substring search across subject + summary + breaking_changes + user_note."""
+    q = params.get("q")
+    if not isinstance(q, str) or not q.strip():
+        raise ValueError("q is required")
+    limit = int(params.get("limit") or 50)
+    items = db.search(q, limit=max(1, min(limit, 200)))
+    return {
+        "query": q, "count": len(items),
+        "items": [_summarise_update(it) for it in items],
+    }
+
+
 def _tool_health_check_results(_cfg: Config, db: Database, params: dict) -> dict:
     """Recent post-update health-check rows.
 
@@ -427,6 +464,42 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_csi,
+    },
+    "get_user_note": {
+        "description": "Read the free-text user_note for an update.",
+        "params_schema": {
+            "type": "object",
+            "properties": {"update_id": {"type": "string"}},
+            "required": ["update_id"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_get_user_note,
+    },
+    "set_user_note": {
+        "description": "Attach (or clear with null/empty) the user_note for an update.",
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "update_id": {"type": "string"},
+                "note": {"type": ["string", "null"]},
+            },
+            "required": ["update_id"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_set_user_note,
+    },
+    "search_updates": {
+        "description": "Substring search over subject/summary/breaking_changes/user_note.",
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "q": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+            },
+            "required": ["q"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_search_updates,
     },
     "health_check_results": {
         "description": (

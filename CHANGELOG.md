@@ -2,6 +2,36 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.6.1 — 2026-06-03
+
+Three connection-layer features. The dashboard becomes searchable,
+external systems can push events in, and the MCP surface picks up
+search + user-note tools.
+
+### Added
+
+- **Update search** (`GET /api/updates/search?q=`, `db.search()`).
+  Case-insensitive substring match over subject + summary +
+  breaking_changes JSON + user_note. Capped at `limit=200`; empty
+  query returns `{count: 0, items: []}` so the UI doesn't need a
+  guard.
+- **Webhook receiver** (`POST /api/inbox/<source>`). External systems
+  POST `{subject, new_version, current_version?, release_url?,
+  release_notes?, context?}` and HomelabSage creates an Update with
+  `source=<source>`. Source slug restricted to `[a-z0-9_-]{1,32}`.
+  Lets a Renovate/Dependabot/Watchtower webhook land in the same
+  pipeline as the docker scanner.
+- **MCP `get_user_note` / `set_user_note` / `search_updates`** tools.
+  Agents can now read+write the free-text note column and search the
+  history without falling back to raw JSON-RPC tools.
+
+### Internal
+
+- 1203 → 1220 tests (+17), ruff clean, 0 mypy errors against 138 files.
+- Fixed a mypy false positive: `UpdatesMixin.list()` shadows the
+  builtin in type annotations, so `search()`'s return is now spelled
+  `builtins.list[AnalyzedUpdate]`.
+
 ## v0.6.0 — 2026-06-03
 
 Observability + extensibility milestone. Three additive surfaces — the

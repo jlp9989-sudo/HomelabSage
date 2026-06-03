@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 import sqlite3
 
@@ -153,3 +154,33 @@ class UpdatesMixin:
         if row is None:
             return None
         return row["user_note"]
+
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 50,
+    ) -> "builtins.list[AnalyzedUpdate]":
+        """Substring search across subject + summary + breaking-changes JSON.
+
+        SQLite LIKE with `%query%` on each searchable column. Case-
+        insensitive (`COLLATE NOCASE`). Returns most-recently-detected
+        first, capped at `limit`. Empty / whitespace-only queries return
+        an empty list rather than every row — saves the caller a guard.
+        """
+        q = (query or "").strip()
+        if not q:
+            return []
+        pat = f"%{q}%"
+        rows = self._conn.execute(
+            """
+            SELECT * FROM updates
+             WHERE subject LIKE ? COLLATE NOCASE
+                OR summary LIKE ? COLLATE NOCASE
+                OR analysis_json LIKE ? COLLATE NOCASE
+                OR user_note LIKE ? COLLATE NOCASE
+             ORDER BY detected_at DESC LIMIT ?
+            """,
+            (pat, pat, pat, pat, limit),
+        ).fetchall()
+        return [row_to_item(r) for r in rows]
