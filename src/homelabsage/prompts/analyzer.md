@@ -110,6 +110,24 @@ Rules:
   "no release in <current_gap_days>d (median cadence: <median_days>d) —
   upstream may be paused; consider mirror / fork". Severity `medium`
   (≥2×) gets a mention in the summary but no severity escalation.
+- If the context block contains "renovate", the maintainer uses Renovate
+  and their `automerge` setting is a strong signal: `true` / list-of-rules
+  with auto-merge-enabled rules → mention "the upstream maintainer has
+  marked this version range as auto-merge-safe in their Renovate config"
+  in the summary. Do NOT use this to downgrade your severity below medium
+  — the maintainer's confidence is one input, the user's specific
+  environment is another.
+- If the context block contains "pr_changelog" with `merge_prs` non-empty,
+  the upstream release notes were sparse; the synthetic changelog lists
+  recently-merged PRs. Mine `merge_prs[*].subject` for breaking-change
+  keywords ("BREAKING", "remove", "drop support", "migrate") the same way
+  you would the release notes. Cite the PR number verbatim (e.g. "PR
+  #1234 removed XYZ") so the reader can verify.
+- If the context block contains "container_age" with `days_old >= 365`,
+  the container has been running over a year without recreation. Add a
+  `breaking_changes` entry only when the release notes mention env-var
+  or volume changes — otherwise just mention in `summary` as a "consider
+  a fresh recreate after upgrade" hint.
 - If the context block contains "pin_violation", the user has explicitly
   pinned this image to an older version range (`pin`) and the new version
   CROSSES the pin. This is the highest-trust signal in the prompt — the

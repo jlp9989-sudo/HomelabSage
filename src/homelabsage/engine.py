@@ -24,6 +24,7 @@ from .outputs.notion import NotionOutput
 from .outputs.ntfy import NtfyOutput
 from .outputs.smtp import SMTPOutput
 from .outputs.telegram import TelegramOutput
+from .outputs.webhook import WebhookOutput
 from .parity import is_parity_running
 from .plugins import Plugin
 from .plugins.docker import DockerPlugin
@@ -63,6 +64,8 @@ def build_outputs(cfg: Config, db: Database) -> list[Output]:
         outputs.append(AppriseOutput(cfg.outputs.apprise))
     if cfg.outputs.smtp.enabled:
         outputs.append(SMTPOutput(cfg.outputs.smtp))
+    if cfg.outputs.webhook.enabled:
+        outputs.append(WebhookOutput(cfg.outputs.webhook))
     return outputs
 
 

@@ -34,6 +34,7 @@ def attach_basic_auth(app: FastAPI, cfg: WebAuthConfig) -> None:
             path == "/healthz"
             or path.startswith("/widget/")
             or path == "/api/stack-health"
+            or path == "/metrics"
         ):
             return await call_next(request)
         header = request.headers.get("authorization", "")

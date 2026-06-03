@@ -386,6 +386,15 @@ class DockerPlugin(Plugin):
                 if rl is not None:
                     ctx["resource_limits"] = rl.to_context()
 
+            if self.cfg.container_age_warn_after_days > 0:
+                from ..container_age import evaluate as eval_age
+                age = eval_age(
+                    c.attrs,
+                    warn_after_days=self.cfg.container_age_warn_after_days,
+                )
+                if age is not None:
+                    ctx["container_age"] = age.to_context()
+
             if self.cfg.image_size_growth_detect and image_tag:
                 # Local image's on-disk size (sum of writeable + layer cache).
                 # `c.image.attrs["Size"]` is set by `docker inspect`; falsy

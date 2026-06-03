@@ -237,6 +237,25 @@ class SMTPOutputConfig(QuietHoursMixin):
     )
 
 
+class WebhookOutputConfig(QuietHoursMixin):
+    """Generic JSON-webhook output. Bring-your-own-receiver."""
+
+    enabled: bool = False
+    url: str = Field("", description="Endpoint URL. Receives a JSON POST.")
+    bearer_token: str = Field(
+        "",
+        description="Optional. Sent as `Authorization: Bearer <token>`.",
+    )
+    headers: dict[str, str] = Field(
+        default_factory=dict,
+        description="Extra headers merged into every request.",
+    )
+    min_severity: Literal["critical", "high", "medium", "info"] = Field(
+        "high",
+        description="Only push updates at or above this severity.",
+    )
+
+
 class BatchingConfig(BaseModel):
     """Severity-aware notification batching.
 
@@ -270,4 +289,5 @@ class OutputsConfig(BaseModel):
     gotify: GotifyOutputConfig = Field(default_factory=GotifyOutputConfig)
     apprise: AppriseOutputConfig = Field(default_factory=AppriseOutputConfig)
     smtp: SMTPOutputConfig = Field(default_factory=SMTPOutputConfig)
+    webhook: WebhookOutputConfig = Field(default_factory=WebhookOutputConfig)
     batching: BatchingConfig = Field(default_factory=BatchingConfig)

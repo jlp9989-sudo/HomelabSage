@@ -85,6 +85,11 @@ class DockerSourceConfig(BaseModel):
     # unbounded leak can OOM the host; the seatbelt is one config line.
     # Attaches `Update.context.resource_limits` when either limit missing.
     detect_resource_limits: bool = True
+    # Days-since-creation threshold. Containers older than this are
+    # flagged in `Update.context.container_age` so the analyzer can
+    # mention the cumulative drift (env vars, layer caches, drifted
+    # permissions). Set to 0 to disable. Default 180 days.
+    container_age_warn_after_days: int = 180
 
 
 class HAConfig(BaseModel):

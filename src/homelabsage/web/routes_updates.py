@@ -113,6 +113,24 @@ def register_updates_routes(
     async def api_updates() -> list[dict]:
         return [it.model_dump(mode="json") for it in db.list(limit=500)]
 
+    @app.post("/api/updates/{update_id:path}/note")
+    async def api_set_user_note(update_id: str, payload: dict) -> dict:
+        """Attach a free-text note. Body: {"note": "..."} (empty clears)."""
+        note = payload.get("note")
+        if note is not None and not isinstance(note, str):
+            raise HTTPException(400, "note must be a string or null")
+        ok = db.set_user_note(update_id, note or "")
+        if not ok:
+            raise HTTPException(404, f"no update with id={update_id}")
+        return {"ok": True, "update_id": update_id,
+                "note": db.get_user_note(update_id) or ""}
+
+    @app.get("/api/updates/{update_id:path}/note")
+    async def api_get_user_note(update_id: str) -> dict:
+        if db.get(update_id) is None:
+            raise HTTPException(404, f"no update with id={update_id}")
+        return {"update_id": update_id, "note": db.get_user_note(update_id) or ""}
+
     @app.post("/api/updates/bulk")
     async def api_updates_bulk(payload: dict) -> dict:
         """Bulk apply / dismiss many updates at once.

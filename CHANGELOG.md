@@ -2,6 +2,64 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.6.0 — 2026-06-03
+
+Observability + extensibility milestone. Three additive surfaces — the
+project is now ready for Prometheus monitoring, third-party automation,
+and inline user annotations.
+
+### Added
+
+- **Generic webhook output** (`outputs/webhook.py`, `outputs.webhook`).
+  Bring-your-own-receiver — POSTs every update as a stable JSON
+  envelope. Optional bearer token + extra headers. Use for Zapier,
+  n8n, IFTTT webhooks, or your own FastAPI endpoint.
+- **Prometheus `/metrics`** (`web/routes_metrics.py`). No 3rd-party
+  dep — emits the OpenMetrics text format directly. Gauges for
+  updates-by-status / updates-by-severity / pending-dispatches /
+  interview-questions; counters for 24h heartbeats + 30d LLM
+  token usage. Auth-bypassed so Prometheus scrapers work without
+  credentials.
+- **Per-update user notes** (DB column `user_note`, `POST/GET
+  /api/updates/<id>/note`). Free-text annotation attached to any
+  update. Forward-only ALTER at migrate time.
+
+### Internal
+
+- 1189 → 1203 tests (+14), ruff clean, 0 mypy errors against 138 files.
+- 1 new output (Webhook), 1 new web route group (`/metrics`),
+  1 new DB column + helper.
+
+## v0.5.0 — 2026-06-03
+
+Milestone release: every v0.4.x detector is now wired through the
+engine + analyzer + auditor. The v0.4.x modules shipped capabilities;
+v0.5.0 makes them all visible to the user without further config.
+
+### Wired
+
+- **Container age**: docker plugin attaches `Update.context.container_age`
+  when `Created` is older than the new
+  `sources.docker.container_age_warn_after_days` threshold (default
+  180). Auditor severity bucket: <365d=info, <730d=medium, ≥730d=high.
+- **Renovate config**: watched-repos plugin fetches `.renovaterc.json`
+  on each Update and attaches the maintainer's auto-merge intent
+  (`extends`, `automerge`, `automergeType`) on
+  `Update.context.renovate`. New prompt rule treats this as a "the
+  maintainer endorses this version range" signal.
+- **PR-changelog**: watched-repos plugin synthesises a merged-PR
+  list from `/compare/{base}...{head}` when the release body is
+  thin (<500 chars). Surfaces as `Update.context.pr_changelog`.
+  New prompt rule mines `merge_prs[*].subject` for breaking-change
+  keywords the same way it does release notes.
+
+### Internal
+
+- 1184 → 1189 tests (+5 smoke tests for the wiring).
+- 3 new prompt rules in `prompts/analyzer.md`.
+- 1 new docker-source field (`container_age_warn_after_days`).
+- 1 new auditor finding category (`container_age`).
+
 ## v0.4.9 — 2026-06-03
 
 Six pure-data modules. The theme: ground every analyzer verdict in

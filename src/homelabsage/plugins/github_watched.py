@@ -110,6 +110,31 @@ class WatchedReposPlugin(Plugin):
             except Exception as e:
                 log.debug("watched_enrich failed for %s: %s", w["repo"], e)
 
+            # Maintainer auto-merge intent — a strong "they say this
+            # version is OK" signal when the repo uses Renovate.
+            try:
+                from ..renovate_config import fetch_renovate_config
+                ren = await fetch_renovate_config(w["repo"])
+                if ren is not None:
+                    ctx["renovate"] = ren.to_context()
+            except Exception as e:
+                log.debug("renovate_config failed for %s: %s", w["repo"], e)
+
+            # Synthetic PR changelog when the release body is shallow
+            # (e.g. "Bump version"). Skipped when the body already
+            # carries useful content (>500 chars) to save API budget.
+            release_body = release.get("body") or ""
+            if current and new_version and len(release_body) < 500:
+                try:
+                    from ..pr_changelog import build_changelog
+                    cl = await build_changelog(
+                        w["repo"], base=f"v{current}", head=f"v{new_version}",
+                    )
+                    if cl is not None and cl.entries:
+                        ctx["pr_changelog"] = cl.to_context()
+                except Exception as e:
+                    log.debug("pr_changelog failed for %s: %s", w["repo"], e)
+
             updates.append(Update(
                 source=self.id,
                 subject=w["nickname"] or w["repo"],

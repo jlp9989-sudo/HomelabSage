@@ -133,3 +133,23 @@ class UpdatesMixin:
             "UPDATE updates SET status = ? WHERE id = ?",
             (status.value, update_id),
         )
+
+    def set_user_note(self, update_id: str, note: str) -> bool:
+        """Attach a free-text user note. Empty string clears the note.
+
+        Returns True iff the row exists. The note is shown alongside
+        the analyzer summary in the UI + exported in `history` CSV.
+        """
+        cur = self._conn.execute(
+            "UPDATE updates SET user_note = ? WHERE id = ?",
+            (note or None, update_id),
+        )
+        return (cur.rowcount or 0) > 0
+
+    def get_user_note(self, update_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT user_note FROM updates WHERE id = ?", (update_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return row["user_note"]

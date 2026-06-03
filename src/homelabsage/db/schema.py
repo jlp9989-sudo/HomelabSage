@@ -195,3 +195,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     }
     if iq_cols and "suggested_text" not in iq_cols:
         conn.execute("ALTER TABLE interview_questions ADD COLUMN suggested_text TEXT")
+
+    # v0.6.0: per-update free-text annotation set by the user via UI/API.
+    if "user_note" not in cols:
+        conn.execute("ALTER TABLE updates ADD COLUMN user_note TEXT")

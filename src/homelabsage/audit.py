@@ -224,6 +224,31 @@ def _tag_lag_findings(
     )]
 
 
+def _container_age_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
+    """Containers running past their threshold without recreation."""
+    ctx = item.update.context or {}
+    age = ctx.get("container_age")
+    if not isinstance(age, dict):
+        return []
+    days = int(age.get("days_old") or 0)
+    if days < 365:
+        sev = "info"
+    elif days < 730:
+        sev = "medium"
+    else:
+        sev = "high"
+    return [AuditFinding(
+        severity=sev, category="container_age",
+        title=f"{item.update.subject} hasn't been recreated in {days} days",
+        detail=(
+            "Long-running containers accumulate config drift. Consider "
+            "`docker compose down && docker compose up -d` to refresh."
+        ),
+        source_kind="container_age", source_ref=item.id,
+        cite=f"days_old={days}",
+    )]
+
+
 def _bloatware_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
     """`image_size_growth.triggered=true` from the docker plugin."""
     ctx = item.update.context or {}
@@ -407,6 +432,7 @@ def build_report(
         findings.extend(_orphan_findings(it))
         findings.extend(_alternative_findings(it))
         findings.extend(_bloatware_findings(it))
+        findings.extend(_container_age_findings(it))
         if cfg.tag_lag.enabled:
             findings.extend(_tag_lag_findings(
                 it,

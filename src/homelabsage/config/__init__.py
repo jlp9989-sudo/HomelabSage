@@ -28,6 +28,7 @@ from .outputs import (
     OutputsConfig,
     SMTPOutputConfig,
     TelegramOutputConfig,
+    WebhookOutputConfig,
 )
 from .runtime import (
     AutoApplyConfig,
@@ -157,6 +158,7 @@ __all__ = [
     "GotifyOutputConfig",
     "AppriseOutputConfig",
     "SMTPOutputConfig",
+    "WebhookOutputConfig",
     "OutputsConfig",
     "BatchingConfig",
     "SchedulerConfig",
