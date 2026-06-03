@@ -137,6 +137,18 @@ class Engine:
                 continue
             stats["scanned"] += len(items)
             for update in items:
+                # Image-pin enforcement runs BEFORE the analyzer so the LLM
+                # already sees the verdict in `context.pin_violation` and
+                # frames its recommendation against it. Empty pins → no-op.
+                if self.cfg.image_pins.enabled and self.cfg.image_pins.pins:
+                    from .image_pins import evaluate as evaluate_pin
+                    verdict = evaluate_pin(
+                        subject=update.subject,
+                        new_version=update.new_version,
+                        pins=self.cfg.image_pins.pins,
+                    )
+                    if verdict is not None:
+                        update.context["pin_violation"] = verdict.to_context()
                 analyzed = AnalyzedUpdate(update=update)
                 # Skip LLM call if we already analyzed this exact (subject, new_version)
                 existing = self.db.get(analyzed.id)
@@ -209,6 +221,12 @@ class Engine:
                         continue
                     if deferred_to_batch and output.is_push:
                         # Sent later via dispatch_batch.
+                        continue
+                    # Quiet-hours gate composes with the parity gate. It is
+                    # per-output (each push channel has its own window) and
+                    # only applies to push outputs — Notion always writes.
+                    if output.is_push and self._quiet_blocks(output, analyzed):
+                        self.db.queue_pending_dispatch(analyzed.id, output.id)
                         continue
                     try:
                         await output.send(analyzed)
@@ -292,6 +310,39 @@ class Engine:
             return
         if path is not None:
             log.info("incremental: appended %s → %s", analyzed.id, path)
+
+    def _quiet_blocks(self, output, analyzed) -> bool:
+        """True iff this push output's quiet hours apply right now.
+
+        Resolves the per-output config from `cfg.outputs.<id>`. Missing
+        config (placeholder output, future-output) returns False so the
+        gate is never accidentally active. `bypass_severity` lets
+        critical messages escape — even at 3 AM the user wants to know
+        their array is on fire.
+        """
+        from .quiet_hours import is_quiet_now, should_bypass
+        outputs_cfg = self.cfg.outputs
+        cfg = getattr(outputs_cfg, output.id, None)
+        if cfg is None:
+            return False
+        spec = getattr(cfg, "quiet_hours", "")
+        if not spec:
+            return False
+        if should_bypass(
+            analyzed.analysis.severity if analyzed.analysis else None,
+            getattr(cfg, "quiet_hours_bypass_severity", "critical"),
+        ):
+            return False
+        state = is_quiet_now(
+            window_spec=spec,
+            timezone_name=getattr(cfg, "quiet_hours_timezone", "UTC"),
+        )
+        if state.quiet:
+            log.info(
+                "Quiet hours skip: %s → %s (%s)",
+                analyzed.id, output.id, state.reason,
+            )
+        return state.quiet
 
     async def _heartbeat_ok(self) -> None:
         url = self.cfg.scheduler.heartbeat_url

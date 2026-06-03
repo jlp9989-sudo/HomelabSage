@@ -305,6 +305,27 @@ class TagLagConfig(BaseModel):
     )
 
 
+class ImagePinsConfig(BaseModel):
+    """User-declared pins that block crossing-version updates.
+
+    Example:
+
+        image_pins:
+          enabled: true
+          pins:
+            elasticsearch: "8.*"
+            postgres: "15.*"
+            "homeassistant/core": "<=2026.5"
+
+    When a detected update would cross the pin, the analyzer's
+    `Update.context.pin_violation` carries the reason and a prompt
+    rule downgrades the recommended action to `hold`.
+    """
+
+    enabled: bool = False
+    pins: dict[str, str] = Field(default_factory=dict)
+
+
 class I18nConfig(BaseModel):
     """UI language selector. Minimal — only nav + dashboard headings are
     translated for now; per-page deep i18n stays a non-goal until usage

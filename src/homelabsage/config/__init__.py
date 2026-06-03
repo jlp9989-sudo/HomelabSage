@@ -34,6 +34,7 @@ from .runtime import (
     DigestConfig,
     HealthCheckConfig,
     I18nConfig,
+    ImagePinsConfig,
     LogAnomalyConfig,
     ParityGateConfig,
     SchedulerConfig,
@@ -88,6 +89,7 @@ class Config(BaseModel):
     log_anomaly: LogAnomalyConfig = Field(default_factory=LogAnomalyConfig)
     compose_lint: ComposeLintConfig = Field(default_factory=ComposeLintConfig)
     tag_lag: TagLagConfig = Field(default_factory=TagLagConfig)
+    image_pins: ImagePinsConfig = Field(default_factory=ImagePinsConfig)
     i18n: I18nConfig = Field(default_factory=I18nConfig)
 
 
@@ -160,6 +162,7 @@ __all__ = [
     "LogAnomalyConfig",
     "ComposeLintConfig",
     "TagLagConfig",
+    "ImagePinsConfig",
     "I18nConfig",
     "WebAuthConfig",
     "WebConfig",

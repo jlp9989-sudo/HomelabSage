@@ -124,6 +124,52 @@ def interview_answer(
         db.close()
 
 
+@interview_app.command("cleanup")
+def interview_cleanup(
+    config: Path = CONFIG_OPT,
+    days: int = typer.Option(
+        30, "--days",
+        help="Auto-dismiss PENDING questions older than this many days.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print what WOULD be dismissed; touch nothing.",
+    ),
+) -> None:
+    """Cron-friendly auto-dismiss of pending interview questions that have
+    aged out. Useful when the curator emitted a question the user never
+    intends to answer (one-off containers, throwaway experiments)."""
+    cfg = load_config(config)
+    db = Database(cfg.storage.database_path)
+    try:
+        if dry_run:
+            from datetime import timedelta
+
+            from .._time import utcnow
+            cutoff = utcnow() - timedelta(days=days)
+            rows = db.list_interview_questions(
+                status=InterviewStatus.PENDING, limit=10000,
+            )
+            stale = [
+                q for q in rows
+                if q.created_at and q.created_at < cutoff
+            ]
+            console.print(
+                f"[yellow]Would dismiss {len(stale)} questions[/yellow] older than {days} days."
+            )
+            for q in stale[:10]:
+                created = q.created_at.strftime("%Y-%m-%d") if q.created_at else "?"
+                console.print(f"  #{q.id} {q.container_name} (created {created})")
+            if len(stale) > 10:
+                console.print(f"  … and {len(stale) - 10} more")
+            return
+        n = db.dismiss_stale_interview_questions(older_than_days=days)
+        console.print(
+            f"[green]Auto-dismissed {n} stale question(s)[/green] older than {days} days."
+        )
+    finally:
+        db.close()
+
+
 @interview_app.command("dismiss")
 def interview_dismiss(
     question_id: int = typer.Argument(..., help="ID of the question to dismiss."),

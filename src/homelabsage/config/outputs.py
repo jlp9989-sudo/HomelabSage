@@ -7,6 +7,41 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class QuietHoursMixin(BaseModel):
+    """Mixin field set shared by every push output.
+
+    Inheriting via mixin (not composition) so existing
+    `cfg.outputs.telegram.min_severity` access stays flat — the
+    settings UI's schema-driven renderer reads the JSON-Schema
+    `properties` map which sees the inherited fields.
+    """
+
+    quiet_hours: str = Field(
+        "",
+        description=(
+            "Quiet window in `HH:MM-HH:MM` form. During this window, push "
+            "notifications from this channel are queued into "
+            "`pending_dispatches` (same table the parity gate uses) and "
+            "replay on the next ungated scan. Empty disables. Crosses "
+            "midnight when start > end (e.g. `23:00-07:00`)."
+        ),
+    )
+    quiet_hours_timezone: str = Field(
+        "UTC",
+        description="IANA timezone the quiet window is evaluated in.",
+        json_schema_extra={"ui_widget": "timezone"},
+    )
+    quiet_hours_bypass_severity: Literal[
+        "", "info", "medium", "high", "critical"
+    ] = Field(
+        "critical",
+        description=(
+            "Severity floor that escapes quiet hours. Default `critical`. "
+            "Empty string = no escape — even critical messages queue."
+        ),
+    )
+
+
 class NotionOutputConfig(BaseModel):
     enabled: bool = False
     api_key: str = Field(
@@ -31,7 +66,7 @@ class NotionOutputConfig(BaseModel):
     )
 
 
-class TelegramOutputConfig(BaseModel):
+class TelegramOutputConfig(QuietHoursMixin):
     enabled: bool = False
     bot_token: str = Field(
         "",
@@ -50,7 +85,7 @@ class TelegramOutputConfig(BaseModel):
     )
 
 
-class DiscordOutputConfig(BaseModel):
+class DiscordOutputConfig(QuietHoursMixin):
     enabled: bool = False
     webhook_url: str = Field(
         "",
@@ -74,7 +109,7 @@ class DiscordOutputConfig(BaseModel):
     )
 
 
-class NtfyOutputConfig(BaseModel):
+class NtfyOutputConfig(QuietHoursMixin):
     enabled: bool = False
     server_url: str = Field(
         "https://ntfy.sh",
@@ -104,7 +139,7 @@ class NtfyOutputConfig(BaseModel):
     )
 
 
-class GotifyOutputConfig(BaseModel):
+class GotifyOutputConfig(QuietHoursMixin):
     enabled: bool = False
     server_url: str = Field(
         "",

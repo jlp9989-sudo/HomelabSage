@@ -101,6 +101,15 @@ Rules:
   real security liability over time. If status is `"stale"`, mention it in
   the summary as "upstream activity has slowed (no push in <N> days)" but do
   NOT change severity — slowdown is information, not a verdict.
+- If the context block contains "pin_violation", the user has explicitly
+  pinned this image to an older version range (`pin`) and the new version
+  CROSSES the pin. This is the highest-trust signal in the prompt — the
+  user knows something the release notes don't. Set `action_required` to
+  true, override `recommended_action` to "HOLD — image_pins.<pin_subject>
+  is set to <pin>; this update would cross it (<reason>). Lift the pin
+  intentionally before applying.", and ensure severity is at least
+  `medium`. Do NOT downgrade severity below medium even if the release
+  notes look benign; the pin is a user-asserted constraint.
 
 # Update
 - Source: {source}

@@ -2,6 +2,54 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.4.5 — 2026-06-03
+
+Four UX / operations features. All opt-in via their own config blocks
+or CLI flags.
+
+### Added
+
+- **Notification quiet hours** — every push output
+  (Telegram/Discord/Ntfy/Gotify) gains `quiet_hours: "23:00-07:00"`,
+  `quiet_hours_timezone: "Europe/Madrid"`, and
+  `quiet_hours_bypass_severity: "critical"`. During the window, push
+  notifications queue into `pending_dispatches` (the same table the
+  parity gate uses) and replay on the next ungated scan. Critical
+  messages escape by default; flip the bypass field to `""` to
+  enforce the window unconditionally. Window crosses midnight when
+  start > end. Implemented as a mixin on each output config so the
+  schema-driven settings renderer picks it up without per-output
+  template work.
+- **CSV history export** — `homelabsage history --csv -o file.csv` (or
+  `-o -` for stdout). Dumps every `updates` row with severity, status,
+  breaking_changes (joined with ` | ` for single-line cells), and the
+  recommended_action. Lets the user pivot the audit log in
+  Numbers/Excel/Sheets without reaching for `sqlite3`.
+- **Image-pin enforcement** — `image_pins: {pins: {subject: spec}}`.
+  When a detected update's `new_version` crosses the pin, the analyzer
+  sees `Update.context.pin_violation` BEFORE running the prompt; a new
+  prompt rule overrides the verdict to `hold` and frames the
+  recommendation around the user-asserted constraint. Specs accept
+  exact-match (`8.5.2`), glob (`8.*`), and operator (`<=2026.5`,
+  `<2026.5`, `>=2026.5`, `==2026.5`) forms; the subject key itself can
+  be a glob so `homeassistant/*: <=2026.5` works.
+- **Stale interview cleanup** — `homelabsage interview cleanup
+  --days N` dismisses PENDING interview questions older than N days.
+  Cron-friendly + `--dry-run` mode that prints what would change
+  without touching the table. Useful when the curator emitted a
+  question the user never intends to answer (one-off containers,
+  throwaway experiments).
+
+### Internal
+
+- 1004 → 1045 tests (+41), ruff clean, 0 mypy errors against 116 files.
+- 1 new config block (`image_pins`), 3 new fields on each of the 4
+  push outputs (`quiet_hours`, `quiet_hours_timezone`,
+  `quiet_hours_bypass_severity`).
+- 1 new prompt rule (`pin_violation`).
+- 2 new CLI commands (`history`, `interview cleanup`).
+- 1 new DB method (`dismiss_stale_interview_questions`).
+
 ## v0.4.4 — 2026-06-03
 
 Three operations features + a polish pass triggered by a code-review

@@ -120,3 +120,22 @@ class InterviewMixin:
             (status.value,),
         ).fetchone()
         return int(row["n"]) if row else 0
+
+    def dismiss_stale_interview_questions(self, *, older_than_days: int) -> int:
+        """Auto-dismiss PENDING rows older than `older_than_days` days.
+
+        Returns the number of rows touched. Idempotent: re-runs against
+        the same window mark zero new rows. Used by the
+        `homelabsage interview cleanup` cron-friendly subcommand.
+        """
+        from datetime import timedelta
+        cutoff = (utcnow() - timedelta(days=older_than_days)).isoformat()
+        cur = self._conn.execute(
+            """
+            UPDATE interview_questions
+               SET status = 'dismissed', answered_at = ?
+             WHERE status = 'pending' AND created_at < ?
+            """,
+            (utcnow().isoformat(), cutoff),
+        )
+        return int(cur.rowcount or 0)
