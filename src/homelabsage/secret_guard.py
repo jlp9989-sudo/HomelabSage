@@ -62,10 +62,10 @@ _INLINE_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 # `KEY=value` / `KEY: value` shaped lines whose key matches a secret marker.
-# We use a non-greedy capture for the value so we don't eat the rest of a
-# multi-pair line, and a `[^\n]` value to keep it on one line.
+# The prefix is OPTIONAL so bare `PASSWORD=...` / `TOKEN=...` / `API_KEY=...`
+# match alongside the namespaced `DB_PASSWORD=...` / `GITHUB_TOKEN=...` forms.
 _KV_LINE_RE = re.compile(
-    r"(?i)\b([A-Z][A-Z0-9_]{1,}(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|AUTH|CREDENTIAL|PRIVATE|SESSION|SALT|SIGNING_KEY|CLIENT_SECRET))\s*[:=]\s*([^\s\n][^\n]*)"
+    r"(?i)\b((?:[A-Z][A-Z0-9_]*?)?(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|AUTH|CREDENTIAL|PRIVATE|SESSION|SALT|SIGNING_KEY|CLIENT_SECRET))\s*[:=]\s*([^\s\n][^\n]*)"
 )
 
 
@@ -192,7 +192,25 @@ def redact_context(ctx: dict, *, report: GuardReport | None = None) -> tuple[dic
                     rep.note(f"key:{k}")
                     out[k] = PLACEHOLDER
                 else:
-                    out[k] = _walk(v)
+                    walked = _walk(v)
+                    # If the value is itself a dict of env vars (typical
+                    # `context["env"]` shape from the docker plugin),
+                    # apply the secret-marker pass to each key — that
+                    # catches `env.GITHUB_TOKEN=...` rather than relying
+                    # on the value pattern matching.
+                    if isinstance(k, str) and k.lower() in {"env", "environment"} \
+                            and isinstance(walked, dict):
+                        scrubbed: dict = {}
+                        for ek, ev in walked.items():
+                            if isinstance(ek, str) and any(
+                                m in ek.lower() for m in SECRET_KEY_MARKERS
+                            ):
+                                rep.note(f"env_key:{ek}")
+                                scrubbed[ek] = PLACEHOLDER
+                            else:
+                                scrubbed[ek] = ev
+                        walked = scrubbed
+                    out[k] = walked
             return out
         if isinstance(value, list):
             return [_walk(v) for v in value]

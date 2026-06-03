@@ -147,7 +147,10 @@ def probe_restic(
         when_raw = snap.get("time")
         if not when_raw:
             continue
-        when = parse_iso(when_raw)
+        try:
+            when = parse_iso(when_raw)
+        except ValueError:
+            continue  # malformed timestamp — skip this snapshot
         if when:
             times.append(when)
     if not times:
@@ -181,7 +184,10 @@ def probe_borg(
         when_raw = arc.get("time") or arc.get("start")
         if not when_raw:
             continue
-        when = parse_iso(when_raw)
+        try:
+            when = parse_iso(when_raw)
+        except ValueError:
+            continue  # malformed timestamp — skip this snapshot
         if when:
             times.append(when)
     if not times:
@@ -217,7 +223,10 @@ def probe_kopia(
         when_raw = snap.get("endTime") or snap.get("startTime")
         if not when_raw:
             continue
-        when = parse_iso(when_raw)
+        try:
+            when = parse_iso(when_raw)
+        except ValueError:
+            continue  # malformed timestamp — skip this snapshot
         if when:
             times.append(when)
     if not times:

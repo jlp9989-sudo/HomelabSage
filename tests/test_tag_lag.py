@@ -20,6 +20,12 @@ def test_derive_tag_lag_returns_none_without_signals():
     assert derive_tag_lag({}) is None
 
 
+def test_derive_tag_lag_returns_none_with_only_local():
+    """Regression: local-only context has no actionable lag signal."""
+    ctx = {"local_pulled_at": "2026-05-01T00:00:00Z"}
+    assert derive_tag_lag(ctx) is None
+
+
 def test_derive_tag_lag_local_behind_remote():
     """Remote pushed 2026-06-01, local pulled 2026-05-01 → 31 days behind."""
     ctx = {

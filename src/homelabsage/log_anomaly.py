@@ -166,14 +166,19 @@ def evaluate(
     )
 
 
-def _skip_container(name: str, skip_patterns: list[str]) -> bool:
+def _compile_skip(skip_patterns: list[str]) -> list[re.Pattern[str]]:
+    """Pre-compile the skip regexes once per scan instead of per container."""
+    out: list[re.Pattern[str]] = []
     for pat in skip_patterns:
         try:
-            if re.search(pat, name):
-                return True
+            out.append(re.compile(pat))
         except re.error:
             log.warning("log_anomaly: invalid skip regex %r — ignored", pat)
-    return False
+    return out
+
+
+def _skip_container(name: str, compiled_patterns: list[re.Pattern[str]]) -> bool:
+    return any(p.search(name) for p in compiled_patterns)
 
 
 async def run_log_anomaly_scan(
@@ -196,8 +201,9 @@ async def run_log_anomaly_scan(
         # blocking and we may be running inside the engine's event loop.
         container_names = await asyncio.to_thread(_list_running_containers, socket)
     signals: list[AnomalySignal] = []
+    compiled_skip = _compile_skip(cfg.container_skip)
     for name in container_names:
-        if _skip_container(name, cfg.container_skip):
+        if _skip_container(name, compiled_skip):
             continue
         sample = await asyncio.to_thread(
             scan_container, name,

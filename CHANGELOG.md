@@ -2,6 +2,72 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.4.4 — 2026-06-03
+
+Three operations features + a polish pass triggered by a code-review
+agent that surfaced real bugs in the v0.4.3 batch.
+
+### Added — operations
+
+- **Stack-level rollback recipe generator** (`rollback.py`). For any
+  `AnalyzedUpdate`, emits a copy-pasteable Markdown body with two
+  options: docker compose (when a compose file backs the container,
+  via the cascade detector's graph) and the universal docker CLI form.
+  Annotates with cascade warnings — services that `depends_on:` the
+  rolled-back one and therefore also need a restart. Pure data, never
+  applies anything: a broken-update incident is the wrong moment for
+  the tool to take destructive action without explicit user input.
+- **Compose-file update-diff generator** (`compose_diff.py`). Shows
+  the user exactly which line of exactly which compose file would
+  change to apply an update. Text-level swap (not YAML round-trip)
+  so comments, indentation and quoting style stay intact. Renders as
+  a unified diff inside a Markdown ```diff block.
+- **HACS Python-bump cascade detector** (`hacs_cascade.py`). When the
+  HA plugin emits an `Update` for `core`, fetches
+  `homeassistant/package_constraints.txt` at both the old and new
+  release tags from raw.githubusercontent.com, extracts the
+  `python_requires` floor, and attaches
+  `context.hacs_python_bump = {from: "3.12", to: "3.13", ...}` when
+  the floor moved. The analyzer prompt picks the signal up the same
+  way it does CVE / cascade / image-size-growth context.
+
+### Fixed (review-driven polish)
+
+- **secret_guard KV regex missed bare `PASSWORD=` / `TOKEN=` /
+  `API_KEY=`** — the prefix requirement was `[A-Z][A-Z0-9_]{1,}`,
+  which forced at least one char before the literal suffix. Bare
+  `KEY=value` lines silently escaped. Now matches both bare and
+  namespaced forms.
+- **tag_lag `and` vs `or` bug** — context with only `local_pulled_at`
+  (no remote) returned a misleading `TagLag` instead of None. Now
+  early-returns when no remote-push timestamp is available.
+- **health_check / backup_health crashed on malformed timestamps** —
+  `parse_iso` raises by design; the callers were missing the
+  try/except so a single corrupt row could nuke the whole probe loop.
+- **HF URL false-positives on `/datasets`, `/spaces`, `/papers`, etc.**
+  — produced garbage slugs. Now reject the well-known HF non-model
+  prefixes before returning.
+- **HF safetensors int-vs-string handling** — large param counts are
+  string-marshalled in some HF JSON responses; the `isinstance(v, int)`
+  filter dropped them silently and reported `params=0`. Now converts
+  with try/except so both shapes work.
+- **HF quant detection used `safetensors.total`** which is the
+  parameter count, not a quant marker. The first sibling-filename
+  check now wins instead of being shadowed by meaningless coercion.
+- **log_anomaly skip regexes recompiled per container** — now
+  compiled once per scan.
+- **secret_guard env-dict walk** — explicit pass that redacts known
+  secret keys inside `context["env"]` even when the value doesn't
+  match the credential pattern (covers `env.GITHUB_TOKEN=plain-text`).
+
+### Internal
+
+- 971 → 1004 tests (+33), ruff clean, 0 mypy errors against 112 files.
+- 3 new modules + 3 new test files. No new config blocks (the new
+  modules surface via existing pipelines — `rollback` reads
+  `compose.DependencyGraph`, `compose_diff` reads the same, HACS
+  cascade is wired into the HA plugin's `_scan_core`).
+
 ## v0.4.3 — 2026-06-03
 
 Five safety + correctness features in one batch, opt-in via their own

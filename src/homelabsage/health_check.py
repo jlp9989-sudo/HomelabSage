@@ -205,7 +205,17 @@ async def run_due_checks(
     rows = db.due_health_checks(now=now)
     results: list[ProbeResult] = []
     for row in rows:
-        queued_at = parse_iso(row.get("queued_at", "")) or utcnow()
+        # parse_iso raises on malformed strings by design; we want the
+        # probe to keep going on bad rows (fall back to "right now" so
+        # the log scan still produces something usable).
+        try:
+            queued_at = parse_iso(row.get("queued_at", "")) or utcnow()
+        except ValueError:
+            log.warning(
+                "health_check: malformed queued_at on row %s, using now()",
+                row.get("update_id"),
+            )
+            queued_at = utcnow()
         update_id = str(row["update_id"])
         container_name = str(row["container_name"])
         result = await asyncio.to_thread(

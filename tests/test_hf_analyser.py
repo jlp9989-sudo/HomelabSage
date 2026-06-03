@@ -33,6 +33,15 @@ def test_parse_huggingface_url_rejects_non_hf():
     assert parse_huggingface_url("https://huggingface.co/") is None
 
 
+def test_parse_huggingface_url_rejects_well_known_prefixes():
+    """Regression: /datasets, /spaces, /papers etc. are NOT model paths."""
+    assert parse_huggingface_url("https://huggingface.co/datasets/imagenet/x") is None
+    assert parse_huggingface_url("https://huggingface.co/spaces/gradio/hello") is None
+    assert parse_huggingface_url("https://huggingface.co/papers/2305.12345") is None
+    assert parse_huggingface_url("https://huggingface.co/blog/post") is None
+    assert parse_huggingface_url("https://huggingface.co/docs/x") is None
+
+
 # ─── bytes/param + estimator ─────────────────────────────────────────
 
 
@@ -138,6 +147,13 @@ def test_analyse_huggingface_url_fits_with_quantised(monkeypatch, tmp_path: Path
     out = asyncio.run(analyse_huggingface_url(cfg, "https://huggingface.co/x/y"))
     assert out is not None
     assert out.update.context["fit_verdict"] == "fits"
+
+
+def test_extract_params_billion_handles_string_marshalled_values(monkeypatch):
+    """Regression: HF marshals very large ints as strings sometimes."""
+    from homelabsage.analyse_url import _extract_params_billion
+    meta = {"safetensors": {"parameters": {"BF16": "35000000000"}}}
+    assert _extract_params_billion(meta) == 35.0
 
 
 def test_dispatcher_routes_hf(monkeypatch, tmp_path: Path):

@@ -216,6 +216,14 @@ async def analyse_dockerhub_url(
 
 _HF_PATH_RE = re.compile(r"^/([\w.\-]+)/([\w.\-]+?)(?:/.*)?$")
 
+# Well-known HF top-level prefixes that are NOT model owners. Reject early
+# so we don't return garbage slugs like `datasets/imagenet` masquerading
+# as a model.
+_HF_NON_MODEL_PREFIXES: frozenset[str] = frozenset({
+    "datasets", "spaces", "papers", "blog", "docs", "learn", "models",
+    "settings", "pricing", "api", "join", "login", "new",
+})
+
 
 def parse_huggingface_url(url: str) -> str | None:
     """Map an HF model URL to `owner/model`. None for non-HF URLs.
@@ -238,6 +246,8 @@ def parse_huggingface_url(url: str) -> str | None:
         return None
     m = _HF_PATH_RE.match(parsed.path)
     if not m:
+        return None
+    if m.group(1).lower() in _HF_NON_MODEL_PREFIXES:
         return None
     return f"{m.group(1)}/{m.group(2)}"
 
@@ -297,10 +307,19 @@ def estimate_vram_gib(params_billion: float, bytes_per_param: float) -> float:
 
 def _extract_params_billion(meta: dict) -> float | None:
     """HF doesn't always report params. Try `safetensors.parameters`,
-    fall back to size in tags / config."""
+    fall back to size in tags / config.
+
+    HF marshals very large counts as strings in some responses (JSON
+    can't safely round-trip integers > 2^53), so accept both shapes.
+    """
     safe = (meta.get("safetensors") or {}).get("parameters")
     if isinstance(safe, dict):
-        total = sum(int(v) for v in safe.values() if isinstance(v, int))
+        total = 0
+        for v in safe.values():
+            try:
+                total += int(v)
+            except (TypeError, ValueError):
+                continue
         if total > 0:
             return round(total / 1e9, 2)
     # Some model cards encode it as a top-level integer
@@ -352,8 +371,13 @@ async def analyse_huggingface_url(
         s.get("rfilename") or s.get("filename") or ""
         for s in (meta.get("siblings") or []) if isinstance(s, dict)
     ]
-    quant_str = meta.get("safetensors", {}).get("total") if isinstance(meta.get("safetensors"), dict) else None
-    bytes_per_param = _bytes_per_param(siblings, str(quant_str) if quant_str else None)
+    # `safetensors.total` is the parameter count, NOT a quantisation string —
+    # the right field is `quant_method` (on quantised cards), but most cards
+    # don't carry it. Fall back to sibling-filename scanning.
+    reported_quant = meta.get("quant_method") or meta.get("config", {}).get("quant_method")
+    bytes_per_param = _bytes_per_param(
+        siblings, str(reported_quant) if reported_quant else None,
+    )
     params_b = _extract_params_billion(meta)
     vram_estimate_gib: float | None = None
     if params_b:

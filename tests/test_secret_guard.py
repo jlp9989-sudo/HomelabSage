@@ -78,6 +78,35 @@ def test_redact_kv_line():
     assert rep.redacted_count >= 1
 
 
+def test_redact_kv_line_bare_password():
+    """Regression: bare `PASSWORD=...` (no namespace prefix) must be redacted."""
+    text = "PASSWORD=hunter2"
+    out, _ = redact_text(text)
+    assert "hunter2" not in out
+    assert "PASSWORD=" in out
+
+
+def test_redact_kv_line_bare_token():
+    text = "TOKEN=abc-123-very-secret-value"
+    out, _ = redact_text(text)
+    assert "abc-123" not in out
+
+
+def test_redact_kv_line_bare_api_key():
+    text = "API_KEY=xyz789verysecret"
+    out, _ = redact_text(text)
+    assert "xyz789" not in out
+
+
+def test_redact_context_env_dict_walks_keys():
+    """Regression: `context['env']` should redact env vars by key name
+    even when their values don't match a credential pattern."""
+    ctx = {"env": {"GITHUB_TOKEN": "plain-text", "PORT": "5432"}}
+    out, _ = redact_context(ctx)
+    assert out["env"]["GITHUB_TOKEN"] == PLACEHOLDER
+    assert out["env"]["PORT"] == "5432"
+
+
 def test_redact_aws_access_key():
     text = "key AKIAIOSFODNN7EXAMPLE more"
     out, _ = redact_text(text)

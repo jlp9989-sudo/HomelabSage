@@ -70,6 +70,19 @@ class HomeAssistantPlugin(Plugin):
             is_newer = new_version != current
         if not is_newer:
             return []
+        ctx: dict = {
+            "ha_url": self.cfg.url,
+            "components_loaded": len(cfg_data.get("components", [])),
+        }
+        # Cascade: when HA bumps Python the user's HACS integrations may
+        # break. Best-effort — fetch failures or unparseable constraints
+        # leave the context unchanged.
+        from ..hacs_cascade import detect_python_bump
+        bump = await detect_python_bump(
+            current_version=current, new_version=new_version,
+        )
+        if bump is not None:
+            ctx["hacs_python_bump"] = bump.to_context()
         return [
             Update(
                 source=self.id,
@@ -78,10 +91,7 @@ class HomeAssistantPlugin(Plugin):
                 new_version=new_version,
                 release_url=release.get("html_url"),
                 release_notes=release.get("body") or "",
-                context={
-                    "ha_url": self.cfg.url,
-                    "components_loaded": len(cfg_data.get("components", [])),
-                },
+                context=ctx,
             )
         ]
 

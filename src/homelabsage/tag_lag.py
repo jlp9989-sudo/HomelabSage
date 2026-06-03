@@ -79,7 +79,11 @@ def derive_tag_lag(
     """
     remote_raw = context.get("remote_pushed_at")
     local_raw = context.get("local_pulled_at")
-    if not remote_raw and not local_raw:
+    # We need at least the remote timestamp to derive any lag. Local-only
+    # tells us nothing (a freshly-pulled image with no registry signal is
+    # legitimately "unknown lag"). Remote-only is still actionable — the
+    # user hasn't pulled yet so the delta is the full age.
+    if not remote_raw:
         return None
     end = now or utcnow()
     if end.tzinfo is None:

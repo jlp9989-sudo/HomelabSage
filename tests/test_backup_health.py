@@ -78,6 +78,17 @@ def test_probe_restic_binary_missing(monkeypatch):
     assert "not on PATH" in reason
 
 
+def test_probe_restic_skips_unparseable_timestamps(monkeypatch):
+    """Regression: parse_iso raises on malformed strings — must not crash."""
+    snaps = [
+        {"time": "not-a-date"},
+        {"time": "2026-06-02T03:00:00Z"},
+    ]
+    _patch_run(monkeypatch, rc=0, stdout=json.dumps(snaps))
+    latest, _, _ = probe_restic()
+    assert latest == datetime(2026, 6, 2, 3, 0, tzinfo=UTC)
+
+
 def test_probe_restic_handles_bad_json(monkeypatch):
     _patch_run(monkeypatch, rc=0, stdout="not-json")
     latest, count, reason = probe_restic()
