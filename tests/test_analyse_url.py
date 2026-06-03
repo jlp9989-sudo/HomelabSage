@@ -125,3 +125,166 @@ async def test_analyse_repo_url_works_when_no_release(monkeypatch, tmp_path):
 
 async def _async(value):
     return value
+
+
+# ─── Docker Hub URL parser ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://hub.docker.com/r/linuxserver/plex", "linuxserver/plex"),
+    ("https://hub.docker.com/r/linuxserver/plex/", "linuxserver/plex"),
+    ("https://hub.docker.com/r/linuxserver/plex/tags", "linuxserver/plex"),
+    ("https://hub.docker.com/r/linuxserver/plex/general", "linuxserver/plex"),
+    ("https://hub.docker.com/_/nginx", "library/nginx"),
+    ("https://hub.docker.com/_/postgres/", "library/postgres"),
+    ("https://www.hub.docker.com/r/linuxserver/plex", "linuxserver/plex"),
+])
+def test_parse_dockerhub_url_accepts_supported_shapes(url, expected):
+    from homelabsage.analyse_url import parse_dockerhub_url
+    assert parse_dockerhub_url(url) == expected
+
+
+@pytest.mark.parametrize("url", [
+    "https://github.com/owner/repo",
+    "https://hub.docker.com/",
+    "https://docker.io/linuxserver/plex",
+    "not a url",
+    "",
+])
+def test_parse_dockerhub_url_returns_none_for_unsupported(url):
+    from homelabsage.analyse_url import parse_dockerhub_url
+    assert parse_dockerhub_url(url) is None
+
+
+# ─── Docker Hub analyser ────────────────────────────────────────────────
+
+
+async def test_analyse_dockerhub_returns_none_for_bad_url():
+    from homelabsage.analyse_url import analyse_dockerhub_url
+    cfg = Config()
+    cfg.llm.provider = "disabled"
+    assert await analyse_dockerhub_url(cfg, "not a url") is None
+
+
+async def test_analyse_dockerhub_builds_update_without_llm(monkeypatch, tmp_path):
+    from homelabsage import analyse_url as au_mod
+    from homelabsage.analyse_url import analyse_dockerhub_url
+    from homelabsage.images import FindAlternativesResult
+    from homelabsage.registries import FloatingTagInfo
+
+    cfg = Config()
+    cfg.llm.provider = "disabled"
+    cfg.storage.database_path = str(tmp_path / "s.sqlite")
+
+    async def fake_meta(slug):
+        assert slug == "linuxserver/plex"
+        return {
+            "description": "Plex Media Server container",
+            "full_description": "Detailed description text.",
+        }
+
+    async def fake_tag_info(slug, tag, *, client=None):
+        return FloatingTagInfo(
+            digest="sha256:abc", pushed_at=None, tag=tag, total_size_bytes=0,
+        )
+
+    async def fake_alts(image, description=""):
+        return FindAlternativesResult(candidates=[])
+
+    monkeypatch.setattr(au_mod, "_dockerhub_repo_meta", fake_meta)
+    monkeypatch.setattr(au_mod, "dockerhub_tag_info", fake_tag_info)
+    monkeypatch.setattr(au_mod, "find_alternatives", fake_alts)
+
+    result = await analyse_dockerhub_url(
+        cfg, "https://hub.docker.com/r/linuxserver/plex",
+    )
+    assert result is not None
+    assert result.update.subject == "linuxserver/plex"
+    assert result.update.context["registry"] == "docker.io"
+    assert "Detailed description" in result.update.release_notes
+    assert result.update.context["dockerhub_description"] == "Plex Media Server container"
+
+
+async def test_analyse_dockerhub_survives_meta_404(monkeypatch, tmp_path):
+    from homelabsage import analyse_url as au_mod
+    from homelabsage.analyse_url import analyse_dockerhub_url
+    from homelabsage.images import FindAlternativesResult
+
+    cfg = Config()
+    cfg.llm.provider = "disabled"
+    cfg.storage.database_path = str(tmp_path / "s.sqlite")
+
+    monkeypatch.setattr(au_mod, "_dockerhub_repo_meta",
+                        lambda slug: _async(None))
+    monkeypatch.setattr(au_mod, "dockerhub_tag_info",
+                        lambda slug, tag, *, client=None: _async(None))
+
+    async def empty_alts(image, description=""):
+        return FindAlternativesResult(candidates=[])
+    monkeypatch.setattr(au_mod, "find_alternatives", empty_alts)
+
+    out = await analyse_dockerhub_url(cfg, "https://hub.docker.com/r/private/repo")
+    assert out is not None
+    assert out.update.new_version == "latest"
+    assert out.update.release_notes == ""
+
+
+# ─── unified analyse_url dispatcher ─────────────────────────────────────
+
+
+async def test_analyse_url_dispatches_repo_to_repo_analyser(monkeypatch, tmp_path):
+    from homelabsage import analyse_url as au_mod
+
+    cfg = Config()
+    cfg.llm.provider = "disabled"
+    cfg.storage.database_path = str(tmp_path / "s.sqlite")
+
+    called: dict[str, str] = {}
+
+    async def fake_repo(cfg_arg, url, *, current_version=""):
+        called["repo"] = url
+        return None
+
+    async def fake_hub(cfg_arg, url, *, current_version=""):
+        called["hub"] = url
+        return None
+
+    monkeypatch.setattr(au_mod, "analyse_repo_url", fake_repo)
+    monkeypatch.setattr(au_mod, "analyse_dockerhub_url", fake_hub)
+
+    await au_mod.analyse_url(cfg, "https://github.com/owner/repo")
+    assert "repo" in called
+    assert "hub" not in called
+
+
+async def test_analyse_url_dispatches_hub_to_hub_analyser(monkeypatch, tmp_path):
+    from homelabsage import analyse_url as au_mod
+
+    cfg = Config()
+    cfg.llm.provider = "disabled"
+    cfg.storage.database_path = str(tmp_path / "s.sqlite")
+
+    called: dict[str, str] = {}
+
+    async def fake_repo(cfg_arg, url, *, current_version=""):
+        called["repo"] = url
+        return None
+
+    async def fake_hub(cfg_arg, url, *, current_version=""):
+        called["hub"] = url
+        return None
+
+    monkeypatch.setattr(au_mod, "analyse_repo_url", fake_repo)
+    monkeypatch.setattr(au_mod, "analyse_dockerhub_url", fake_hub)
+
+    await au_mod.analyse_url(cfg, "https://hub.docker.com/r/linuxserver/plex")
+    assert "hub" in called
+    assert "repo" not in called
+
+
+async def test_analyse_url_returns_none_for_unsupported_url():
+    from homelabsage.analyse_url import analyse_url as analyse_dispatch
+    cfg = Config()
+    cfg.llm.provider = "disabled"
+    out = await analyse_dispatch(cfg, "https://example.com/random")
+    assert out is None

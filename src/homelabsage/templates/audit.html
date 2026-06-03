@@ -1,0 +1,54 @@
+{% extends "_base.html" %}
+{% set nav = "audit" %}
+{% block title %}HomelabSage — audit{% endblock %}
+
+{% block content %}
+<style>
+  details summary { cursor:pointer; padding:.3rem 0; font-weight:600; }
+  .finding { background:#161c24; border:1px solid #2a3340; border-radius:6px; padding:.7rem 1rem; margin-bottom:.5rem; }
+  .finding .cite { color:#8fa3b8; font-size:.78rem; font-family:ui-monospace, monospace; margin-top:.3rem; }
+  .group h3 { margin-top:1.5rem; font-size:1.05rem; }
+</style>
+
+<h2>Homelab audit</h2>
+<p class="muted">
+  Generated {{ report.generated_at }}. Every finding cites its source
+  signal — nothing here is invented by the LLM, all rows trace back to
+  a concrete row in the database or a live probe.
+</p>
+
+{% if report.healthy %}
+<p class="flash success">All clear. No actionable findings.</p>
+{% else %}
+
+<div style="margin:1rem 0; display:flex; gap:.5rem; flex-wrap:wrap;">
+  {% for sev in ("critical","high","medium","info") %}
+    {% set n = report.counts_by_severity.get(sev, 0) %}
+    {% if n %}
+      <span class="pill"><span class="sev sev-{{ sev }}">{{ n }} {{ sev }}</span></span>
+    {% endif %}
+  {% endfor %}
+</div>
+
+{% set current_sev = namespace(value=None) %}
+{% for f in report.findings %}
+  {% if f.severity != current_sev.value %}
+    {% set current_sev.value = f.severity %}
+    <div class="group"><h3><span class="sev sev-{{ f.severity }}">{{ f.severity|upper }}</span></h3></div>
+  {% endif %}
+  <div class="finding">
+    <strong>{{ f.title }}</strong>
+    <div>{{ f.detail }}</div>
+    <div class="cite">
+      source: <code>{{ f.source_kind }}</code> on
+      <code>{{ f.source_ref }}</code> — <code>{{ f.cite }}</code>
+    </div>
+  </div>
+{% endfor %}
+
+<details style="margin-top:2rem;">
+  <summary>Show as Markdown (the same body is written to <code>notes/audit.md</code>)</summary>
+  <pre style="background:#0a0d11; padding:1rem; border-radius:6px; overflow:auto; white-space:pre-wrap; font: 12px/1.45 ui-monospace, monospace;">{{ body_md }}</pre>
+</details>
+{% endif %}
+{% endblock %}

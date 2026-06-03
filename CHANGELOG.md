@@ -2,6 +2,34 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.4.1 — 2026-06-02
+
+Three high-value items promoted from the v0.5/v0.6 backlog now that the
+detectors they need are all shipping data.
+
+### Added
+
+- **Proactive auditor** (`audit.py`, `/audit` + `/api/audit`,
+  `homelabsage audit` CLI). Synthesises every detector — repo_health,
+  alternatives, orphans, CVE counts, image-size growth, the
+  pending_dispatches queue, parity-active state — into one prioritised
+  Markdown report. Hard rule: every line cites the concrete source
+  signal verbatim. Writes `notes/audit.md` so the curator picks it up.
+- **Server chronicle** (`chronicle.py`, `homelabsage chronicle --days N`).
+  Narrative timeline of homelab events in a lookback window:
+  applied / dismissed / breaking / hold-recommended / severity_jump.
+  Plain Markdown for `notes/chronicle.md`. No LLM in the loop — the
+  analyzer already ran on each row.
+- **Docker Hub URL analyser** — `homelabsage analyse <hub-url>`. Sub-case
+  (b) of the URL analyser roadmap item lands; the CLI now dispatches
+  on URL shape (GitHub / Codeberg / Docker Hub). Pulls Docker Hub repo
+  metadata + latest-tag info + `find_alternatives` context.
+
+### Internal
+
+- 799 → 844 tests (+45). Ruff clean, 0 mypy errors.
+- New nav link `/audit` in the web UI.
+
 ## v0.4.0 — 2026-06-02
 
 The "Watchtower-was-archived" release — eight research-driven features that

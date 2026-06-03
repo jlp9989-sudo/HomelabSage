@@ -15,7 +15,9 @@ from __future__ import annotations
 # Import them all so the registrations happen at package load.
 from . import (  # noqa: F401  (imported for side-effect: command registration)
     analyse,
+    audit,
     check,
+    chronicle,
     csi,
     curate,
     digest,

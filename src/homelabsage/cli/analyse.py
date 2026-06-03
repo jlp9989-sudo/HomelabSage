@@ -26,17 +26,18 @@ def analyse(
     """One-shot analysis of a pasted repo URL. Uses your configured LLM + notes."""
     setup_logging(verbose)
     cfg = load_config(config)
-    from ..analyse_url import analyse_repo_url, parse_repo_url
+    from ..analyse_url import analyse_url as analyse_dispatch
+    from ..analyse_url import parse_dockerhub_url, parse_repo_url
 
-    repo = parse_repo_url(url)
-    if repo is None:
+    if parse_repo_url(url) is None and parse_dockerhub_url(url) is None:
         console.print(
-            f"[red]Could not parse a GitHub/Codeberg repo URL from {url!r}.[/red]"
+            f"[red]Could not parse a GitHub/Codeberg repo or Docker Hub URL "
+            f"from {url!r}.[/red]"
         )
         raise typer.Exit(code=2)
-    analyzed = asyncio.run(analyse_repo_url(cfg, url, current_version=version))
+    analyzed = asyncio.run(analyse_dispatch(cfg, url, current_version=version))
     if analyzed is None:
-        console.print(f"[red]Analysis failed for {repo}.[/red]")
+        console.print(f"[red]Analysis failed for {url}.[/red]")
         raise typer.Exit(code=1)
     u = analyzed.update
     a = analyzed.analysis
