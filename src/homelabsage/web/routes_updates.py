@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment
 
@@ -112,3 +112,53 @@ def register_updates_routes(
     @app.get("/api/updates")
     async def api_updates() -> list[dict]:
         return [it.model_dump(mode="json") for it in db.list(limit=500)]
+
+    @app.post("/api/updates/bulk")
+    async def api_updates_bulk(payload: dict) -> dict:
+        """Bulk apply / dismiss many updates at once.
+
+        Payload: {"ids": [...], "status": "applied" | "dismissed" | "failed"}.
+        Unknown ids are skipped silently (returned in `not_found`); the
+        valid ones get the same per-id treatment as `POST /updates/<id>/status`
+        including the post-update health-check queue when applicable.
+
+        Returns counts by outcome so the caller can render "applied 3,
+        dismissed 1, 2 not found". Pre-flight gate IS NOT applied here:
+        bulk action implies the user already reviewed the list.
+        """
+        ids = payload.get("ids") or []
+        status_raw = payload.get("status")
+        if not isinstance(ids, list) or not status_raw:
+            raise HTTPException(400, "payload must be {ids: [...], status: '...'}")
+        try:
+            new_status = UpdateStatus(status_raw)
+        except ValueError as e:
+            raise HTTPException(400, f"unknown status: {status_raw}") from e
+        applied = 0
+        not_found: list[str] = []
+        for uid in ids:
+            if not isinstance(uid, str):
+                continue
+            item = db.get(uid)
+            if item is None:
+                not_found.append(uid)
+                continue
+            db.set_status(uid, new_status)
+            applied += 1
+            if (
+                new_status == UpdateStatus.APPLIED
+                and engine.cfg.health_check.enabled
+                and item.update.source == "docker"
+            ):
+                from ..health_check import queue_for_update
+                queue_for_update(
+                    db, update_id=uid,
+                    container_name=item.update.subject,
+                    cfg=engine.cfg.health_check,
+                )
+        return {
+            "status": new_status.value,
+            "applied": applied,
+            "not_found": not_found,
+            "not_found_count": len(not_found),
+        }

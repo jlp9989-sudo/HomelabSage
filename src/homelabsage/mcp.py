@@ -166,6 +166,69 @@ def _tool_list_pending_dispatches(_cfg: Config, db: Database, _params: dict) -> 
     return {"count": len(rows), "items": rows}
 
 
+def _tool_audit(cfg: Config, db: Database, _params: dict) -> dict:
+    """Run the proactive auditor and return the rendered report.
+
+    Same shape as `/api/audit`: counts by severity/category +
+    every finding with its source signal cited. Useful for agents
+    that want to surface "is my homelab healthy?" at a glance.
+    """
+    from .audit import build_report
+    report = build_report(cfg, db)
+    return report.to_json()
+
+
+def _tool_rollback_recipe(_cfg: Config, db: Database, params: dict) -> dict:
+    """Return the rollback recipe (CLI + compose forms) for an update."""
+    update_id = params.get("update_id")
+    if not update_id:
+        raise ValueError("update_id is required")
+    item = db.get(update_id)
+    if item is None:
+        raise ValueError(f"no update with id={update_id!r}")
+    from .rollback import build_recipe, render_markdown
+    recipe = build_recipe(item)
+    return {
+        "container_name": recipe.container_name,
+        "prior_image": recipe.prior_image,
+        "new_image": recipe.new_image,
+        "cli_steps": recipe.cli_steps,
+        "compose_steps": recipe.compose_steps,
+        "compose_file": str(recipe.compose_file) if recipe.compose_file else None,
+        "cascade_warnings": recipe.cascade_warnings,
+        "markdown": render_markdown(recipe),
+    }
+
+
+def _tool_history_csv(_cfg: Config, db: Database, params: dict) -> dict:
+    """Dump the update history as CSV in the response body.
+
+    For agents that want to ingest the audit log directly. Output is
+    capped at `limit` rows (default 1000) so a busy DB doesn't blow
+    the JSON-RPC envelope.
+    """
+    from .history import dump_to_string
+    limit = int(params.get("limit") or 1000)
+    limit = max(1, min(limit, 5000))
+    body = dump_to_string(db, limit=limit)
+    return {"csv": body, "rows": body.count("\n") - 1 if body else 0}
+
+
+def _tool_health_check_results(_cfg: Config, db: Database, params: dict) -> dict:
+    """Recent post-update health-check rows.
+
+    Returns the failures by default (the actionable set); pass
+    `include_ok=true` for the full history.
+    """
+    if not hasattr(db, "list_recent_health_checks"):
+        return {"count": 0, "items": []}
+    limit = int(params.get("limit") or 100)
+    rows = db.list_recent_health_checks(limit=max(1, min(limit, 500)))
+    if not params.get("include_ok"):
+        rows = [r for r in rows if not r.get("ok")]
+    return {"count": len(rows), "items": rows}
+
+
 # Tool registry — name → (description, params_schema, impl_fn).
 # The schema follows JSON Schema draft-7 the way MCP clients expect.
 TOOLS: dict[str, dict[str, Any]] = {
@@ -228,6 +291,53 @@ TOOLS: dict[str, dict[str, Any]] = {
         "description": "Push notifications queued by the parity-gate (waiting for the gate to clear).",
         "params_schema": {"type": "object", "properties": {}, "additionalProperties": False},
         "impl": _tool_list_pending_dispatches,
+    },
+    "audit": {
+        "description": (
+            "Run the proactive auditor and return the report (counts + every "
+            "finding with its source signal cited). Same data as `/api/audit`."
+        ),
+        "params_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "impl": _tool_audit,
+    },
+    "rollback_recipe": {
+        "description": (
+            "Return the rollback recipe (docker CLI + compose forms) for an "
+            "update_id. Includes cascade warnings for `depends_on:` services."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {"update_id": {"type": "string"}},
+            "required": ["update_id"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_rollback_recipe,
+    },
+    "history_csv": {
+        "description": "Dump the update history as CSV (capped at 5000 rows).",
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 5000},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_history_csv,
+    },
+    "health_check_results": {
+        "description": (
+            "Recent post-update health-check rows. Defaults to failures only; "
+            "set include_ok=true to get the full history."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+                "include_ok": {"type": "boolean", "default": False},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_health_check_results,
     },
 }
 

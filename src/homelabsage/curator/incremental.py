@@ -199,4 +199,16 @@ def append_update_to_note(
     except OSError as e:
         log.warning("incremental: cannot write %s: %s", candidate, e)
         return None
+    # Auto-commit alongside the curator's full re-writes.
+    try:
+        from ..notes_git import commit_curator_write
+        commit_curator_write(
+            notes_dir,
+            target_kind="container",
+            target_name=analyzed.update.subject,
+            update_id=analyzed.id,
+            paths=[candidate],
+        )
+    except Exception as e:
+        log.debug("incremental notes_git commit failed: %s", e)
     return candidate

@@ -333,6 +333,17 @@ class DockerPlugin(Plugin):
                 except Exception as e:
                     log.debug("repo_health failed for %s: %s", repo, e)
 
+            if self.cfg.release_cadence:
+                try:
+                    from ..github import list_releases
+                    from ..release_cadence import detect_stagnation
+                    rels = await list_releases(repo, per_page=30)
+                    finding = detect_stagnation(rels)
+                    if finding is not None:
+                        ctx["release_cadence"] = finding.to_context()
+                except Exception as e:
+                    log.debug("release_cadence failed for %s: %s", repo, e)
+
             if compose_graph is not None:
                 deps = compose_graph.dependents_of(c.name)
                 neighbours = compose_graph.network_neighbours_of(c.name)

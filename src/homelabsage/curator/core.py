@@ -502,4 +502,14 @@ class Curator:
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(final, encoding="utf-8")
         tmp.replace(path)
+        # Best-effort git commit when the output directory is a git
+        # working tree. Never raises; logged at DEBUG on failure.
+        if self.output_dir:
+            from ..notes_git import commit_curator_write
+            commit_curator_write(
+                self.output_dir,
+                target_kind="container",
+                target_name=snapshot.name,
+                paths=[path],
+            )
         return CurateResult(snapshot=snapshot, status="written", path=path, body=final)

@@ -2,6 +2,49 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.4.6 — 2026-06-03
+
+Four leverage items. Each one extends an existing pipeline rather than
+introducing a new surface — the project is now wide enough that
+"connect the existing dots" pays better than "add another tool".
+
+### Added
+
+- **Release-cadence stagnation detector** (`release_cadence.py`,
+  `sources.docker.release_cadence`). Computes the median
+  days-between-releases over the last ~30 releases per repo and flags
+  when the current gap exceeds the median by ≥2× (medium) / ≥4×
+  (high). Surfaces as `Update.context.release_cadence` and a new
+  prompt rule that escalates severity + injects "no release in <N>d
+  (median cadence: <M>d)" into the summary. Distinct from
+  `repo_health` — that one cares about commits; this one cares about
+  releases (the relevant signal for the average user).
+- **Notes git auto-commit** (`notes_git.py`). When `notes_dir` is a
+  git working tree, every curator write auto-stages + commits the
+  changed file with a stable `curator: <kind>=<name> [update=<id>]`
+  message. `git log notes/mealie.md` becomes a per-service history;
+  weekly diffs are a single `git log --since=7d` away. Best-effort:
+  no git binary / no .git dir / nothing to commit are all silent
+  no-ops. Wired into both the full-rewrite curator (`curator/core.py`)
+  and the incremental hook (`curator/incremental.py`).
+- **MCP additional tools** — `audit`, `rollback_recipe`, `history_csv`,
+  `health_check_results`. The MCP server now mirrors most of the CLI
+  for agent use; the only commands still CLI-only are `curate` (it's
+  side-effectful and slow) and `csi` (long-running LLM call).
+- **Bulk action API** — `POST /api/updates/bulk` with
+  `{"ids": [...], "status": "applied"|"dismissed"|"failed"}`. Applies
+  the per-id treatment (including the post-update health-check queue
+  for applied/docker rows) and returns `{applied, not_found,
+  not_found_count}`. Pre-flight gate intentionally NOT applied — bulk
+  action implies the user already reviewed the list.
+
+### Internal
+
+- 1045 → 1075 tests (+30), ruff clean, 0 mypy errors against 118 files.
+- 1 new config field (`sources.docker.release_cadence`), 1 new prompt
+  rule (release_cadence severity escalation), 4 new MCP tools.
+- 1 new module (`notes_git.py`), 1 new pipeline (`release_cadence.py`).
+
 ## v0.4.5 — 2026-06-03
 
 Four UX / operations features. All opt-in via their own config blocks

@@ -101,6 +101,15 @@ Rules:
   real security liability over time. If status is `"stale"`, mention it in
   the summary as "upstream activity has slowed (no push in <N> days)" but do
   NOT change severity — slowdown is information, not a verdict.
+- If the context block contains "release_cadence" with severity `"high"`,
+  the project has not cut a release in MORE than 4× its historical
+  median cadence. This is a strong "going stale" signal — release the
+  project may have practical maintenance issues even if `repo_health`
+  still says "alive". Mention `current_gap_days` and `median_days`
+  verbatim in the summary and add a `breaking_changes` entry like
+  "no release in <current_gap_days>d (median cadence: <median_days>d) —
+  upstream may be paused; consider mirror / fork". Severity `medium`
+  (≥2×) gets a mention in the summary but no severity escalation.
 - If the context block contains "pin_violation", the user has explicitly
   pinned this image to an older version range (`pin`) and the new version
   CROSSES the pin. This is the highest-trust signal in the prompt — the

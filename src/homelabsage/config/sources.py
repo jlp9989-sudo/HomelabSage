@@ -64,6 +64,15 @@ class DockerSourceConfig(BaseModel):
         2.0,
         description="Trigger threshold: new_size_bytes / current_size_bytes ≥ ratio.",
     )
+    # Release-cadence stagnation: for each repo, compute the typical
+    # days-between-releases over the last 30 releases and flag when
+    # `now - latest_release` exceeds the historical median by ≥2× (medium)
+    # or ≥4× (high). Catches "active dev branch, no releases for months"
+    # which `repo_health` misses (it only looks at last push, not tag rate).
+    # On by default — one extra paginated `list_releases` HTTP call per
+    # update, cheap relative to the signal it produces. Set to false to
+    # skip the request budget.
+    release_cadence: bool = True
 
 
 class HAConfig(BaseModel):

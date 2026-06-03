@@ -188,3 +188,87 @@ def test_mcp_info_get_returns_tool_names(tmp_path):
         assert body["name"] == "homelabsage"
         assert body["protocol"] == "mcp/json-rpc-2.0"
         assert "health" in body["tools"]
+
+
+# ─── v0.4.6 new tools ───────────────────────────────────────────────
+
+
+def test_dispatch_audit_tool_returns_report(cfg_db):
+    cfg, db = cfg_db
+    resp = dispatch(cfg, db, {
+        "jsonrpc": "2.0", "method": "tools/call", "id": 1,
+        "params": {"name": "audit"},
+    })
+    data = resp["result"]["structuredContent"]
+    assert "findings" in data
+    assert "counts_by_severity" in data
+    assert "generated_at" in data
+
+
+def test_dispatch_rollback_recipe_requires_id(cfg_db):
+    cfg, db = cfg_db
+    resp = dispatch(cfg, db, {
+        "jsonrpc": "2.0", "method": "tools/call", "id": 1,
+        "params": {"name": "rollback_recipe", "arguments": {}},
+    })
+    assert resp["error"]["code"] == -32602
+    assert "update_id" in resp["error"]["message"]
+
+
+def test_dispatch_rollback_recipe_returns_markdown(cfg_db):
+    cfg, db = cfg_db
+    item = AnalyzedUpdate(
+        update=Update(
+            source="docker", subject="mealie",
+            current_version="1.0", new_version="2.0",
+            context={"image": "ghcr.io/mealie/mealie:2.0",
+                     "registry_slug": "ghcr.io/mealie/mealie"},
+        ),
+        analysis=Analysis(severity=Severity.MEDIUM, summary="x"),
+        status=UpdateStatus.ANALYZED,
+        detected_at=datetime(2026, 6, 1),
+    )
+    db.upsert(item)
+    resp = dispatch(cfg, db, {
+        "jsonrpc": "2.0", "method": "tools/call", "id": 1,
+        "params": {
+            "name": "rollback_recipe",
+            "arguments": {"update_id": item.id},
+        },
+    })
+    data = resp["result"]["structuredContent"]
+    assert "markdown" in data
+    assert "cli_steps" in data
+    assert data["container_name"] == "mealie"
+
+
+def test_dispatch_history_csv_returns_csv(cfg_db):
+    cfg, db = cfg_db
+    item = AnalyzedUpdate(
+        update=Update(source="docker", subject="x",
+                      current_version="1", new_version="2"),
+        analysis=Analysis(severity=Severity.HIGH, summary="hi"),
+        status=UpdateStatus.ANALYZED,
+        detected_at=datetime(2026, 6, 1),
+    )
+    db.upsert(item)
+    resp = dispatch(cfg, db, {
+        "jsonrpc": "2.0", "method": "tools/call", "id": 1,
+        "params": {"name": "history_csv"},
+    })
+    data = resp["result"]["structuredContent"]
+    assert "csv" in data
+    assert "id,source,subject" in data["csv"]
+    assert "docker:x:2" in data["csv"]
+
+
+def test_dispatch_health_check_results_default_failures_only(cfg_db):
+    cfg, db = cfg_db
+    # No rows yet — should still return cleanly.
+    resp = dispatch(cfg, db, {
+        "jsonrpc": "2.0", "method": "tools/call", "id": 1,
+        "params": {"name": "health_check_results"},
+    })
+    data = resp["result"]["structuredContent"]
+    assert data["count"] == 0
+    assert data["items"] == []
