@@ -2,6 +2,44 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.4.9 — 2026-06-03
+
+Six pure-data modules. The theme: ground every analyzer verdict in
+more signals from upstream + reality, so the LLM hallucinates less.
+
+### Added
+
+- **Container age tracker** (`container_age.py`). Reads each
+  container's `Created` timestamp and flags any older than 180 days.
+  Multi-format timestamp parser truncates docker's 9-digit nanos to
+  Python's 6-digit microseconds.
+- **Compose validator** (`compose_validate.py`). Wraps
+  `docker compose config -q` to catch SYNTAX errors the YAML loader
+  misses (interpolation failures, `${VAR:?required}` violations).
+  Pure subprocess; missing docker binary silently skips.
+- **Retry queue with exponential backoff** (`retry_queue.py`). Pure
+  scheduler: `should_retry_now(attempts, last_attempt_at, now)`
+  returns whether the next retry window has opened. Schedule:
+  `0/15min/1h/6h/24h` then give-up.
+- **Stack-level grouped digest** (`stack_digest.py`). When ≥3
+  services in the same compose project have updates, emit ONE
+  rollup per project. Builds on the docker plugin's existing
+  `compose_project` context field.
+- **Renovate config reader** (`renovate_config.py`). Fetches
+  `.renovaterc.json` / `renovate.json` from upstream repos and
+  exposes `extends`, `automerge`, `automergeType`, package_rules
+  count. Includes a forgiving JSON5 parser for comments + trailing
+  commas the strict json module rejects.
+- **PR-changelog summarizer** (`pr_changelog.py`). For repos with
+  sparse release notes, walks `/compare/{base}...{head}` and
+  extracts merged-PR titles. Matches both `(#1234)` squash form and
+  `Merge pull request #N` classic form. Caps at 30 PRs.
+
+### Internal
+
+- 1150 → 1184 tests (+34), ruff clean, 0 mypy errors against 136 files.
+- 6 new modules, all pure-data + best-effort.
+
 ## v0.4.8 — 2026-06-03
 
 The big one. Eight features across notification, detection, observability
