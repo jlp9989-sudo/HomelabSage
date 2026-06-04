@@ -27,6 +27,7 @@ from . import (  # noqa: F401  (imported for side-effect: command registration)
     export,
     health,
     history,
+    init,
     interview,
     list_cmd,
     log_anomaly,

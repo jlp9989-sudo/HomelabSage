@@ -2,6 +2,32 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.7.3 — 2026-06-04
+
+Audit-history persistence + `/api/audit/diff` + `homelabsage init`.
+
+### Added
+
+- **`audit_history.py`** — append-only JSONL log at
+  `<notes_dir>/audit_history.jsonl`. `run_audit()` writes one row
+  per scan. Diff helper computes `(new, resolved)` based on a
+  fingerprint of `(category, source_kind, source_ref)` — stable
+  across runs even when severity/title rephrase.
+- **`GET /api/audit/diff`** — returns
+  `{previous_snapshot, new, resolved}` against the latest persisted
+  snapshot. Lets a dashboard show "what changed since last scan?"
+  without polling the full report.
+- **`homelabsage init` CLI**. Interactive bootstrap of a minimal
+  `config.yaml` with sane defaults. `--non-interactive` for CI,
+  `--force` to overwrite, refuses to clobber an existing file
+  without explicit consent.
+
+### Internal
+
+- 1407 → 1420 tests (+13), ruff clean, 0 mypy errors against 165 files.
+- 1 new module, 1 new CLI subcommand, 1 new web route, 1 audit
+  side-effect (history append in `run_audit`).
+
 ## v0.7.2 — 2026-06-04
 
 Snooze surface tied off + audit JSONL for shell pipelines.

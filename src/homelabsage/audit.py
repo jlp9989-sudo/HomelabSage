@@ -663,8 +663,18 @@ def write_to_notes(notes_dir: str | Path, body: str) -> Path | None:
 
 
 def run_audit(cfg: Config, db: Database) -> tuple[AuditReport, Path | None]:
-    """End-to-end: build + render + (optionally) write to notes_dir."""
+    """End-to-end: build + render + (optionally) write to notes_dir.
+
+    Also appends a JSONL row to `<notes_dir>/audit_history.jsonl` so
+    the diff endpoint can show "what's new since last scan?". The
+    append is best-effort and best-isolated from the markdown write —
+    a JSONL failure doesn't block the audit.md write.
+    """
     report = build_report(cfg, db)
     body = render_markdown(report)
-    notes_path = write_to_notes(cfg.notes.notes_dir, body) if cfg.notes.notes_dir else None
+    notes_dir = cfg.notes.notes_dir
+    notes_path = write_to_notes(notes_dir, body) if notes_dir else None
+    if notes_dir:
+        from .audit_history import append as append_history
+        append_history(notes_dir, report.to_json())
     return report, notes_path

@@ -33,6 +33,23 @@ def register_audit_routes(app: FastAPI, cfg: Config, db: Database, env: Environm
         report = build_report(cfg, db)
         return JSONResponse(report.to_json())
 
+    @app.get("/api/audit/diff")
+    async def audit_diff_api() -> JSONResponse:
+        """Diff the current findings against the last persisted snapshot.
+
+        Reads `<notes_dir>/audit_history.jsonl` and returns
+        `{previous_snapshot, new, resolved}`. Useful for
+        "what's changed since last scan?" without polling the full
+        report.
+        """
+        from ..audit_history import diff_against_latest
+        report = build_report(cfg, db)
+        notes_dir = cfg.curator.output_dir or cfg.notes.notes_dir
+        diff = await asyncio.to_thread(
+            diff_against_latest, notes_dir, report.to_json(),
+        )
+        return JSONResponse(diff)
+
     @app.get("/api/audit/stream")
     async def audit_stream() -> StreamingResponse:
         """Server-Sent Events stream of audit findings.
