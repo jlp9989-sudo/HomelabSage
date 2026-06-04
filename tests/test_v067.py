@@ -144,7 +144,8 @@ def test_env_perms_matches_dotenv_suffix(tmp_path):
 # ─── recurring failures ───────────────────────────────────────────
 
 
-def test_recurring_failures_increments_on_failed_status(tmp_path):
+def test_recurring_failures_increments_only_on_transition(tmp_path):
+    """FAILED→FAILED is idempotent; only true transitions bump count."""
     from homelabsage.db import Database
     from homelabsage.models import (
         AnalyzedUpdate,
@@ -159,9 +160,14 @@ def test_recurring_failures_increments_on_failed_status(tmp_path):
         ),
     )
     db.upsert(item)
-    # Flip to FAILED 3 times
-    for _ in range(3):
-        db.set_status(item.id, UpdateStatus.FAILED)
+    # Flip NEW→FAILED→APPLIED→FAILED→FAILED→APPLIED→FAILED
+    # Real transitions to FAILED: 3 (initial, after applied, after applied)
+    db.set_status(item.id, UpdateStatus.FAILED)    # +1
+    db.set_status(item.id, UpdateStatus.APPLIED)   # 0
+    db.set_status(item.id, UpdateStatus.FAILED)    # +1
+    db.set_status(item.id, UpdateStatus.FAILED)    # idempotent: 0
+    db.set_status(item.id, UpdateStatus.APPLIED)   # 0
+    db.set_status(item.id, UpdateStatus.FAILED)    # +1
     rows = db.list_recurring_failures(min_count=2)
     assert len(rows) == 1
     assert rows[0]["failure_count"] == 3

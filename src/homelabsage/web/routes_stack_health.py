@@ -32,6 +32,23 @@ from ..parity import is_parity_running
 
 
 def register_stack_health_routes(app: FastAPI, cfg: Config, db: Database) -> None:
+    @app.get("/api/doctor")
+    async def api_doctor(skip_llm: bool = False) -> dict:
+        """JSON mirror of `homelabsage doctor`.
+
+        Same probes (LLM / TLS / DNS / disk / compose / audit) in a
+        structured shape suitable for HA / Homepage widgets / Kuma.
+        Read-only, auth-bypassed (matches `/api/stack-health`).
+        Set `skip_llm=1` for offline runs.
+        """
+        import asyncio
+
+        from ..doctor import build_report as build_doctor_report
+        # Doctor probes are sync + can do network I/O; offload.
+        return await asyncio.to_thread(
+            build_doctor_report, cfg, db, skip_llm=skip_llm,
+        )
+
     @app.get("/api/stack-health")
     async def stack_health() -> dict:
         report = build_report(cfg, db)

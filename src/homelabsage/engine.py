@@ -373,6 +373,14 @@ class Engine:
             if item is None or item.analysis is None:
                 self.db.delete_pending_dispatch(update_id, output_id)
                 continue
+            # Honour snooze in the flush path too. Without this check
+            # an update snoozed AFTER it was queued during a parity
+            # window would still fire when the parity gate clears —
+            # contradicting the contract that snooze suppresses pushes.
+            # We keep the queue row so the flush retries naturally
+            # after the snooze expires.
+            if output.is_push and self._snooze_active_for(update_id):
+                continue
             try:
                 await output.send(item)
                 self.db.delete_pending_dispatch(update_id, output_id)

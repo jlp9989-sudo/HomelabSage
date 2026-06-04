@@ -319,15 +319,24 @@ def register_updates_routes(
 
         raw_body = await request.body()
         secret = os.environ.get("GITHUB_RELEASE_WEBHOOK_SECRET", "")
-        if secret:
-            sig_header = request.headers.get("X-Hub-Signature-256", "")
-            if not sig_header.startswith("sha256="):
-                raise HTTPException(401, "missing or malformed signature")
-            expected = "sha256=" + hmac.new(
-                secret.encode(), raw_body, hashlib.sha256,
-            ).hexdigest()
-            if not hmac.compare_digest(expected, sig_header):
-                raise HTTPException(401, "signature mismatch")
+        # The endpoint is auth-bypassed at the app level so GitHub
+        # can reach it without Basic Auth — therefore the HMAC IS
+        # the auth. Refuse the request when no secret is configured
+        # rather than silently accepting unsigned requests.
+        if not secret:
+            raise HTTPException(
+                503,
+                "GITHUB_RELEASE_WEBHOOK_SECRET not configured — "
+                "set it in the environment to enable this endpoint",
+            )
+        sig_header = request.headers.get("X-Hub-Signature-256", "")
+        if not sig_header.startswith("sha256="):
+            raise HTTPException(401, "missing or malformed signature")
+        expected = "sha256=" + hmac.new(
+            secret.encode(), raw_body, hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(expected, sig_header):
+            raise HTTPException(401, "signature mismatch")
 
         try:
             payload = json.loads(raw_body or b"{}")

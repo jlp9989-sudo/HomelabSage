@@ -175,14 +175,23 @@ def _make_release_payload(*, tag="v1.0.0", repo="owner/repo",
     }
 
 
-def test_github_release_webhook_creates_update(tmp_path):
+def test_github_release_webhook_creates_update(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_RELEASE_WEBHOOK_SECRET", "topsecret")
     cfg = Config()
     cfg.storage.database_path = str(tmp_path / "t.db")
     app = create_app_for_test(cfg)
     client = TestClient(app)
+    payload_bytes = json.dumps(_make_release_payload()).encode()
+    sig = "sha256=" + hmac.new(
+        b"topsecret", payload_bytes, hashlib.sha256,
+    ).hexdigest()
     r = client.post(
         "/api/webhook/github-release",
-        json=_make_release_payload(),
+        content=payload_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": sig,
+        },
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -191,27 +200,61 @@ def test_github_release_webhook_creates_update(tmp_path):
     assert body["tag"] == "v1.0.0"
 
 
-def test_github_release_webhook_skips_non_released_action(tmp_path):
+def test_github_release_webhook_rejects_when_secret_unset(tmp_path):
+    """Without GITHUB_RELEASE_WEBHOOK_SECRET, endpoint refuses (503)."""
     cfg = Config()
     cfg.storage.database_path = str(tmp_path / "t.db")
     app = create_app_for_test(cfg)
     client = TestClient(app)
     r = client.post(
         "/api/webhook/github-release",
-        json=_make_release_payload(action="prereleased"),
+        json=_make_release_payload(),
+    )
+    assert r.status_code == 503
+
+
+def test_github_release_webhook_skips_non_released_action(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_RELEASE_WEBHOOK_SECRET", "topsecret")
+    cfg = Config()
+    cfg.storage.database_path = str(tmp_path / "t.db")
+    app = create_app_for_test(cfg)
+    client = TestClient(app)
+    payload_bytes = json.dumps(_make_release_payload(action="prereleased")).encode()
+    sig = "sha256=" + hmac.new(
+        b"topsecret", payload_bytes, hashlib.sha256,
+    ).hexdigest()
+    r = client.post(
+        "/api/webhook/github-release",
+        content=payload_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": sig,
+        },
     )
     assert r.status_code == 200
     assert r.json().get("skipped") is True
 
 
-def test_github_release_webhook_rejects_missing_tag(tmp_path):
+def test_github_release_webhook_rejects_missing_tag(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_RELEASE_WEBHOOK_SECRET", "topsecret")
     cfg = Config()
     cfg.storage.database_path = str(tmp_path / "t.db")
     app = create_app_for_test(cfg)
     client = TestClient(app)
     payload = _make_release_payload()
     del payload["release"]["tag_name"]
-    r = client.post("/api/webhook/github-release", json=payload)
+    payload_bytes = json.dumps(payload).encode()
+    sig = "sha256=" + hmac.new(
+        b"topsecret", payload_bytes, hashlib.sha256,
+    ).hexdigest()
+    r = client.post(
+        "/api/webhook/github-release",
+        content=payload_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": sig,
+        },
+    )
     assert r.status_code == 400
 
 

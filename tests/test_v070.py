@@ -39,7 +39,9 @@ def test_doctor_skips_llm_check_when_flag_set(tmp_path):
     result = runner.invoke(
         app, ["doctor", "--config", str(cfg_path), "--skip-llm"],
     )
-    assert "LLM check skipped" in result.stdout
+    # Skipped sections render with the `· ` prefix + the reason
+    assert "LLM" in result.stdout
+    assert "skip_llm flag" in result.stdout
 
 
 def test_doctor_reports_tls_when_urls_configured(tmp_path):

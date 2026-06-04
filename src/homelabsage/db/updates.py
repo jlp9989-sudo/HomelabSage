@@ -130,14 +130,19 @@ class UpdatesMixin:
         return [row_to_item(r) for r in self._conn.execute(sql, args).fetchall()]
 
     def set_status(self, update_id: str, status: UpdateStatus) -> None:
-        # Increment failure_count on every flip → FAILED. Idempotent
-        # against repeated "set to FAILED" calls (each is a fresh
-        # failure event from the user's perspective: 3 attempts to
-        # apply a broken update == 3 failures).
+        # Increment failure_count only on a true status TRANSITION
+        # into FAILED. Repeated "set to FAILED" calls on an already-
+        # FAILED row don't bump the counter — otherwise the bulk
+        # endpoint or a UI double-click silently inflates the
+        # recurring-failure audit signal. A genuine retry-then-fail
+        # loop will flip APPLIED→FAILED (or NEW→FAILED) and bump.
         if status == UpdateStatus.FAILED:
             self._conn.execute(
                 "UPDATE updates SET status = ?, "
-                "failure_count = COALESCE(failure_count, 0) + 1 "
+                "failure_count = "
+                "  CASE WHEN status = 'failed' "
+                "       THEN COALESCE(failure_count, 0) "
+                "       ELSE COALESCE(failure_count, 0) + 1 END "
                 "WHERE id = ?",
                 (status.value, update_id),
             )

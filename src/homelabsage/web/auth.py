@@ -24,7 +24,14 @@ from ..config import WebAuthConfig
 AUTH_BYPASS_EXACT: frozenset[str] = frozenset({
     "/healthz",
     "/api/stack-health",
+    "/api/doctor",
     "/metrics",
+    # GitHub webhooks don't send Authorization headers. We bypass
+    # Basic Auth here BUT only because the endpoint itself enforces
+    # `GITHUB_RELEASE_WEBHOOK_SECRET` HMAC-SHA256 — see
+    # `routes_updates.py::api_inbox_github_release` which refuses the
+    # request when the env var is unset.
+    "/api/webhook/github-release",
 })
 
 # Prefix-bypass paths. `/widget/*` for Homepage / Homarr scrapers.

@@ -2,6 +2,43 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.7.1 — 2026-06-04
+
+Doctor surface (HTTP + MCP) + review-driven fixes from a background
+code-review agent.
+
+### Added
+
+- **`homelabsage.doctor` module**. Shared probe orchestrator —
+  reused by the CLI, `GET /api/doctor`, and the new MCP `doctor`
+  tool. Structured per-section report: `ok` / `skipped` / `findings`.
+- **`GET /api/doctor`** — JSON mirror of the doctor CLI. Auth-bypassed
+  (in `AUTH_BYPASS_EXACT`) like `/api/stack-health` so HA / Homepage
+  widgets / Kuma can scrape. `?skip_llm=1` for offline runs.
+- **MCP `doctor` tool**. Returns the same structured report so agents
+  can ask "is the homelab healthy?" in one call.
+
+### Fixed (from review)
+
+- **`_flush_pending_dispatches` now honours snooze**. A queued push
+  for a since-snoozed update is held in the queue (not deleted)
+  rather than firing when the parity gate clears. Regression test
+  added.
+- **GitHub webhook security tightened**. `/api/webhook/github-release`
+  is now in `AUTH_BYPASS_EXACT` (so GitHub deliveries don't 401 when
+  Basic Auth is enabled) AND the HMAC secret is MANDATORY (endpoint
+  returns 503 when `GITHUB_RELEASE_WEBHOOK_SECRET` is unset).
+  Previously the secret was optional → bypassed endpoint accepted
+  anonymous DB writes.
+- **`set_status` idempotent on FAILED→FAILED**. `failure_count` only
+  bumps on a true transition into FAILED; repeated bulk / UI clicks
+  no longer inflate the recurring-failure audit signal. SQL `CASE`
+  expression instead of two separate UPDATEs.
+
+### Internal
+
+- 1389 → 1396 tests (+7), ruff clean, 0 mypy errors against 162 files.
+
 ## v0.7.0 — 2026-06-04 — milestone
 
 Consolidates everything since v0.5.0. New `homelabsage doctor`

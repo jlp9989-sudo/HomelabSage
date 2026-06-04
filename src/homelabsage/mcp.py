@@ -393,6 +393,17 @@ def _tool_list_starred(_cfg: Config, db: Database, _params: dict) -> dict:
             "items": [_summarise_update(it) for it in items]}
 
 
+def _tool_doctor(cfg: Config, db: Database, params: dict) -> dict:
+    """Run the bundled diagnostic (LLM / TLS / DNS / disk / compose / audit).
+
+    Same data as `homelabsage doctor` CLI and `GET /api/doctor`,
+    surfaced for agents. Set `skip_llm=true` for offline runs.
+    """
+    from .doctor import build_report as build_doctor_report
+    skip_llm = bool(params.get("skip_llm") or False)
+    return build_doctor_report(cfg, db, skip_llm=skip_llm)
+
+
 def _tool_snooze_update(_cfg: Config, db: Database, params: dict) -> dict:
     """Set or clear a snooze timestamp on an update.
 
@@ -779,6 +790,22 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_compose_overrides,
+    },
+    "doctor": {
+        "description": (
+            "One-shot diagnostic — runs every active probe (LLM "
+            "health, TLS certs, DNS resolution, disk pressure, "
+            "compose overrides + env perms, audit summary). Returns "
+            "a `healthy` boolean plus per-section detail."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "skip_llm": {"type": "boolean", "default": False},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_doctor,
     },
     "snooze_update": {
         "description": (
