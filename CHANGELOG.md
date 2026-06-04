@@ -2,6 +2,34 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.6.3 — 2026-06-04
+
+Four cleanup-and-quality-of-life items.
+
+### Added
+
+- **Star / bookmark updates** (new DB column `starred`, `POST/GET
+  /api/updates/<id>/star`, `GET /api/updates/starred`,
+  MCP `set_star` + `list_starred`). Lets the user flag updates for
+  follow-up — survives status changes, exported in CSV.
+- **Pushover output** (`outputs/pushover.py`, `outputs.pushover`).
+  Dedicated Pushover (separate from apprise) with per-severity
+  priority mapping. Emergency-mode (priority=2, retry-until-ack)
+  is opt-in via `emergency_at_critical=true`.
+- **MCP `explain` tool**. Returns the stored prompt + raw LLM response
+  for an update — same data the `/updates/<id>/explain` page renders.
+  Closes the last "agents can't audit AI verdicts" gap.
+- **`homelabsage notion-archive --days N`** CLI. Bulk-archives Notion
+  pages whose update is older than N days so a long-running install
+  doesn't accumulate years of "applied" rows in the Notion DB.
+  `--dry-run` for safety.
+
+### Internal
+
+- 1248 → 1265 tests (+17), ruff clean, 0 mypy errors against 143 files.
+- 1 new DB column (`starred`), 1 new output (Pushover), 3 new MCP
+  tools, 1 new CLI subcommand.
+
 ## v0.6.2 — 2026-06-03
 
 Four new surfaces + a review-driven security pass. The review surfaced

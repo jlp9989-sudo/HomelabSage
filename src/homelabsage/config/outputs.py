@@ -237,6 +237,46 @@ class SMTPOutputConfig(QuietHoursMixin):
     )
 
 
+class PushoverOutputConfig(QuietHoursMixin):
+    """Dedicated Pushover output. Apprise can also push to Pushover —
+    use this when you want first-class Pushover semantics (per-severity
+    priority, emergency-mode opt-in, device targeting)."""
+
+    enabled: bool = False
+    token: str = Field(
+        "",
+        description=(
+            "Pushover **application token** (the one you got when "
+            "creating the app at pushover.net)."
+        ),
+    )
+    user_key: str = Field(
+        "",
+        description=(
+            "Pushover **user or group key** — the recipient. Find it "
+            "on your Pushover dashboard top-right."
+        ),
+    )
+    device: str = Field(
+        "",
+        description=(
+            "Optional. Target a specific device by name (Pushover's "
+            "`device` form field). Empty = all the user's devices."
+        ),
+    )
+    emergency_at_critical: bool = Field(
+        False,
+        description=(
+            "Send `priority=2` (emergency, repeats until ack'd) for "
+            "CRITICAL severity. Off by default — opt-in."
+        ),
+    )
+    min_severity: Literal["critical", "high", "medium", "info"] = Field(
+        "high",
+        description="Only push updates at or above this severity.",
+    )
+
+
 class SlackOutputConfig(QuietHoursMixin):
     """Slack incoming-webhook output (Block Kit message)."""
 
@@ -313,4 +353,5 @@ class OutputsConfig(BaseModel):
     smtp: SMTPOutputConfig = Field(default_factory=SMTPOutputConfig)
     webhook: WebhookOutputConfig = Field(default_factory=WebhookOutputConfig)
     slack: SlackOutputConfig = Field(default_factory=SlackOutputConfig)
+    pushover: PushoverOutputConfig = Field(default_factory=PushoverOutputConfig)
     batching: BatchingConfig = Field(default_factory=BatchingConfig)

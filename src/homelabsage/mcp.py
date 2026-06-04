@@ -354,6 +354,45 @@ def _tool_search_updates(_cfg: Config, db: Database, params: dict) -> dict:
     }
 
 
+def _tool_explain(_cfg: Config, db: Database, params: dict) -> dict:
+    """Return the stored prompt + raw LLM response for an update.
+
+    Same data the `/updates/<id>/explain` web page renders. Useful for
+    an agent that wants to audit a verdict ("show me what the model
+    actually said") without scraping HTML.
+    """
+    update_id = params.get("update_id")
+    if not update_id:
+        raise ValueError("update_id is required")
+    if not hasattr(db, "get_explainer"):
+        raise ValueError("explainers mixin not wired into this DB")
+    row = db.get_explainer(update_id)
+    if row is None:
+        raise ValueError(f"no explainer for update_id={update_id!r}")
+    return row
+
+
+def _tool_set_star(_cfg: Config, db: Database, params: dict) -> dict:
+    """Toggle the bookmark flag on an update."""
+    update_id = params.get("update_id")
+    starred = params.get("starred")
+    if not update_id:
+        raise ValueError("update_id is required")
+    if not isinstance(starred, bool):
+        raise ValueError("starred must be a boolean")
+    if not db.set_starred(update_id, starred):
+        raise ValueError(f"no update with id={update_id!r}")
+    return {"ok": True, "update_id": update_id,
+            "starred": db.is_starred(update_id)}
+
+
+def _tool_list_starred(_cfg: Config, db: Database, _params: dict) -> dict:
+    """List bookmarked updates."""
+    items = db.list_starred(limit=200)
+    return {"count": len(items),
+            "items": [_summarise_update(it) for it in items]}
+
+
 def _tool_health_check_results(_cfg: Config, db: Database, params: dict) -> dict:
     """Recent post-update health-check rows.
 
@@ -533,6 +572,38 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_search_updates,
+    },
+    "explain": {
+        "description": (
+            "Return the stored LLM prompt + raw response for an "
+            "update (same data as `/updates/<id>/explain`)."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {"update_id": {"type": "string"}},
+            "required": ["update_id"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_explain,
+    },
+    "set_star": {
+        "description": "Toggle the bookmark flag on an update.",
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "update_id": {"type": "string"},
+                "starred": {"type": "boolean"},
+            },
+            "required": ["update_id", "starred"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_set_star,
+    },
+    "list_starred": {
+        "description": "List bookmarked updates (newest first, capped 200).",
+        "params_schema": {"type": "object", "properties": {},
+                          "additionalProperties": False},
+        "impl": _tool_list_starred,
     },
     "health_check_results": {
         "description": (

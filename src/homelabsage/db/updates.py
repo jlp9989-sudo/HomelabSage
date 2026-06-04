@@ -147,6 +147,31 @@ class UpdatesMixin:
         )
         return (cur.rowcount or 0) > 0
 
+    def set_starred(self, update_id: str, starred: bool) -> bool:
+        """Toggle the bookmark flag. Returns True iff the row existed."""
+        cur = self._conn.execute(
+            "UPDATE updates SET starred = ? WHERE id = ?",
+            (1 if starred else 0, update_id),
+        )
+        return (cur.rowcount or 0) > 0
+
+    def is_starred(self, update_id: str) -> bool:
+        row = self._conn.execute(
+            "SELECT starred FROM updates WHERE id = ?", (update_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        return bool(row["starred"] or 0)
+
+    def list_starred(self, *, limit: int = 200) -> builtins.list[AnalyzedUpdate]:
+        """Return only bookmarked rows, newest-first."""
+        rows = self._conn.execute(
+            "SELECT * FROM updates WHERE starred = 1 "
+            "ORDER BY detected_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [row_to_item(r) for r in rows]
+
     def get_user_note(self, update_id: str) -> str | None:
         row = self._conn.execute(
             "SELECT user_note FROM updates WHERE id = ?", (update_id,),

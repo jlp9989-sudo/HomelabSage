@@ -199,3 +199,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     # v0.6.0: per-update free-text annotation set by the user via UI/API.
     if "user_note" not in cols:
         conn.execute("ALTER TABLE updates ADD COLUMN user_note TEXT")
+
+    # v0.6.3: bookmark flag. 0/1 instead of bool so SQLite stays happy.
+    if "starred" not in cols:
+        conn.execute("ALTER TABLE updates ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")

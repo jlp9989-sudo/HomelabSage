@@ -131,6 +131,28 @@ def register_updates_routes(
             raise HTTPException(404, f"no update with id={update_id}")
         return {"update_id": update_id, "note": db.get_user_note(update_id) or ""}
 
+    @app.post("/api/updates/{update_id:path}/star")
+    async def api_set_star(update_id: str, payload: dict) -> dict:
+        """Toggle the bookmark flag. Body: {"starred": true|false}."""
+        starred = payload.get("starred")
+        if not isinstance(starred, bool):
+            raise HTTPException(400, "starred must be a boolean")
+        if not db.set_starred(update_id, starred):
+            raise HTTPException(404, f"no update with id={update_id}")
+        return {"ok": True, "update_id": update_id,
+                "starred": db.is_starred(update_id)}
+
+    @app.get("/api/updates/starred")
+    async def api_list_starred(limit: int = 200) -> dict:
+        """Return only the bookmarked updates, newest first."""
+        import asyncio
+        cap = max(1, min(limit, 500))
+        items = await asyncio.to_thread(db.list_starred, limit=cap)
+        return {
+            "count": len(items),
+            "items": [it.model_dump(mode="json") for it in items],
+        }
+
     @app.get("/api/updates/search")
     async def api_search(q: str = "", limit: int = 50) -> dict:
         """Substring search across subject + summary + breaking_changes
