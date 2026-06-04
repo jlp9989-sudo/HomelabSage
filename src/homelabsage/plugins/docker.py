@@ -434,6 +434,15 @@ class DockerPlugin(Plugin):
                 if pf:
                     ctx["exposed_ports"] = [p.to_context() for p in pf]
 
+            if self.cfg.detect_healthcheck_stale:
+                from .._time import utcnow
+                from ..healthcheck_stale import evaluate as eval_health
+                hs = eval_health(
+                    c.attrs.get("State") or {}, now=utcnow(),
+                )
+                if hs is not None:
+                    ctx["healthcheck_stale"] = hs.to_context()
+
             if self.cfg.image_size_growth_detect and image_tag:
                 # Local image's on-disk size (sum of writeable + layer cache).
                 # `c.image.attrs["Size"]` is set by `docker inspect`; falsy

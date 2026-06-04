@@ -401,6 +401,42 @@ def _log_anomaly_findings(rows: list[dict]) -> list[AuditFinding]:
     return findings
 
 
+def _compose_override_findings(presences: list) -> list[AuditFinding]:
+    """One finding per compose project with an override file."""
+    out: list[AuditFinding] = []
+    for p in presences:
+        out.append(AuditFinding(
+            severity="info", category="compose_override",
+            title=f"`{Path(p.project_dir).name}` has a compose override",
+            detail=(
+                f"`{p.override_path}` merges on top of `{p.base_path}` "
+                f"at compose-up; HomelabSage parses the base only, so "
+                f"cascade + linter results may not match the running graph."
+            ),
+            source_kind="compose_override", source_ref=p.project_dir,
+            cite=f"override={Path(p.override_path).name}",
+        ))
+    return out
+
+
+def _disk_pressure_findings(findings_in: list) -> list[AuditFinding]:
+    """One finding per filesystem under pressure."""
+    out: list[AuditFinding] = []
+    for f in findings_in:
+        free_gib = f.free_bytes / (1024 ** 3)
+        out.append(AuditFinding(
+            severity=f.severity, category="disk_pressure",
+            title=f"Low free space on `{f.path}`",
+            detail=(
+                f"{free_gib:.1f} GiB free ({f.percent_free:.1f}%). "
+                f"A high-severity image pull may not fit."
+            ),
+            source_kind="disk_pressure", source_ref=f.path,
+            cite=f"free={free_gib:.1f}GiB pct={f.percent_free:.1f}%",
+        ))
+    return out
+
+
 # ─── orchestrator ───────────────────────────────────────────────────────
 
 
@@ -478,6 +514,23 @@ def build_report(
         from .compose_lint import lint_paths
         lint_report = lint_paths(cfg.sources.docker.compose_scan_paths)
         findings.extend(_compose_lint_findings(lint_report))
+
+    # Disk-pressure probe — opt-in; the user lists the filesystems
+    # whose free-space matters.
+    if cfg.disk_pressure.enabled and cfg.disk_pressure.paths:
+        from .disk_pressure import evaluate as eval_disk
+        findings.extend(_disk_pressure_findings(
+            eval_disk(cfg.disk_pressure.paths),
+        ))
+
+    # Compose override-file detector — surfaces that the running
+    # merged graph differs from what the cascade parser sees.
+    if (cfg.sources.docker.detect_compose_override
+            and cfg.sources.docker.compose_scan_paths):
+        from .compose_override import scan as scan_overrides
+        findings.extend(_compose_override_findings(
+            scan_overrides(cfg.sources.docker.compose_scan_paths),
+        ))
 
     # Severity first (critical → info), then category alphabetical so the
     # same input always produces the same output.

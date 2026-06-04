@@ -97,6 +97,14 @@ class DockerSourceConfig(BaseModel):
     # Privileged-port + public-bind detector. Pure metadata read off
     # `NetworkSettings.Ports`; no extra HTTP calls.
     detect_exposed_ports: bool = True
+    # Healthcheck-staleness detector. Catches `restart: always`
+    # containers that are running but report `unhealthy` for hours
+    # — restart_freq misses these (no restarts).
+    detect_healthcheck_stale: bool = True
+    # Compose `docker-compose.override.yml` detector. Flags
+    # containers whose compose project has an override file so the
+    # user knows the merged graph differs from what we see.
+    detect_compose_override: bool = True
 
 
 class HAConfig(BaseModel):

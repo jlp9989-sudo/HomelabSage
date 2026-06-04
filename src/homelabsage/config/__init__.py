@@ -39,11 +39,13 @@ from .runtime import (
     BackupRepoConfig,
     ComposeLintConfig,
     DigestConfig,
+    DiskPressureConfig,
     HealthCheckConfig,
     I18nConfig,
     ImagePinsConfig,
     LogAnomalyConfig,
     ParityGateConfig,
+    ScanWindowConfig,
     SchedulerConfig,
     TagLagConfig,
     TLSCheckConfig,
@@ -100,6 +102,8 @@ class Config(BaseModel):
     image_pins: ImagePinsConfig = Field(default_factory=ImagePinsConfig)
     auto_apply: AutoApplyConfig = Field(default_factory=AutoApplyConfig)
     tls_check: TLSCheckConfig = Field(default_factory=TLSCheckConfig)
+    disk_pressure: DiskPressureConfig = Field(default_factory=DiskPressureConfig)
+    scan_window: ScanWindowConfig = Field(default_factory=ScanWindowConfig)
     i18n: I18nConfig = Field(default_factory=I18nConfig)
 
 
@@ -179,6 +183,8 @@ __all__ = [
     "ComposeLintConfig",
     "TagLagConfig",
     "TLSCheckConfig",
+    "DiskPressureConfig",
+    "ScanWindowConfig",
     "ImagePinsConfig",
     "AutoApplyConfig",
     "I18nConfig",

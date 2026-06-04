@@ -2,6 +2,48 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.6.5 — 2026-06-04
+
+Four orthogonal signals: a missing-from-restart_freq health gap, a
+disk-pressure auditor, a compose-override detector, and a scheduler
+quiet window distinct from the push-output one.
+
+### Added
+
+- **Healthcheck-staleness detector** (`healthcheck_stale.py`,
+  `sources.docker.detect_healthcheck_stale = true`). Reads
+  `State.Health` from `docker inspect`: catches `restart: always`
+  containers that are RUNNING but `unhealthy` for hours — a gap
+  `restart_freq` doesn't cover. Severity by duration: ≥72h critical,
+  ≥24h high, ≥4h medium. Stale-since timestamp derived from the
+  oldest failing log entry when every retained entry failed.
+- **Disk-pressure auditor** (`disk_pressure.py` +
+  `DiskPressureConfig`, default off). Pure `shutil.disk_usage` over
+  user-listed paths. Two-axis severity (% AND absolute) so a 4 TB
+  pool with 50 GB free flags even at 1.2% utilisation. Same-device
+  dedupe via `st_dev` so `/mnt/user` and `/mnt/cache` don't
+  double-report. Plugs into the auditor as a `disk_pressure` finding.
+- **Compose-override detector** (`compose_override.py`,
+  `sources.docker.detect_compose_override = true`). Scans
+  `compose_scan_paths` for `docker-compose.override.yml` (and modern
+  variants) siblings of the base file; surfaces as an `info`-severity
+  auditor finding so the user knows the merged runtime graph
+  differs from what cascade / linter analysed.
+- **Scan-window scheduler** (`scan_window.py` + `ScanWindowConfig`,
+  default off). Skips the entire scan during a `HH:MM-HH:MM` window
+  — distinct from `QuietHoursMixin` which queues push notifications.
+  Useful when the LLM backend is shared with a workstation that
+  sleeps, or to respect ISP off-peak hours. Reuses
+  `quiet_hours.parse_window` + `time_in_window` so wrap-around
+  semantics are identical.
+
+### Internal
+
+- 1284 → 1310 tests (+26), ruff clean, 0 mypy errors against 152 files.
+- 4 new modules, 4 new config blocks
+  (`DiskPressureConfig`, `ScanWindowConfig`, plus 2 toggles on
+  `DockerSourceConfig`), 2 new auditor finding categories.
+
 ## v0.6.4 — 2026-06-04
 
 Four detectors-and-outputs additions, all decoupled from existing flows.

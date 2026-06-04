@@ -116,6 +116,25 @@ class Engine:
 
     async def run_once(self) -> dict[str, int]:
         """Single full cycle. Returns counts (`scanned`, `new`, `analyzed`, `failed`)."""
+        # Scan-window gate: opt-in. When the local time falls inside the
+        # configured window we skip the entire scan — no plugin polling,
+        # no LLM call, no API hits on upstream registries. Counted as
+        # `skipped` so a monitoring dashboard can see we didn't sleep
+        # the process accidentally.
+        if self.cfg.scan_window.enabled:
+            from .scan_window import is_scan_blocked
+            blocked = is_scan_blocked(
+                enabled=True,
+                window_spec=self.cfg.scan_window.window,
+                timezone_name=self.cfg.scan_window.timezone,
+            )
+            if blocked:
+                log.info("Scan skipped: %s", blocked.reason)
+                return {
+                    "scanned": 0, "new": 0, "analyzed": 0, "failed": 0,
+                    "skipped": 1,
+                }
+
         log.info("Run start — plugins=%s outputs=%s",
                  [p.id for p in self.plugins], [o.id for o in self.outputs])
         stats = {"scanned": 0, "new": 0, "analyzed": 0, "failed": 0}

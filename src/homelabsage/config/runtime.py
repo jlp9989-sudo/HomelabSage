@@ -391,6 +391,51 @@ class TLSCheckConfig(BaseModel):
     )
 
 
+class DiskPressureConfig(BaseModel):
+    """Disk-pressure auditor — flag low free space on configured paths.
+
+    Default off because we don't want to invent paths for the user;
+    typical Unraid layout: `/mnt/cache`, `/mnt/user`,
+    `/var/lib/docker`. Add whichever filesystems actually back your
+    container data + image cache.
+    """
+
+    enabled: bool = False
+    paths: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Filesystem paths to probe. Each gets a `shutil.disk_usage` "
+            "call. Duplicate device IDs (same physical filesystem) "
+            "collapse to one finding. Paths that don't exist or can't "
+            "be stat'd are silently skipped."
+        ),
+    )
+
+
+class ScanWindowConfig(BaseModel):
+    """Skip scheduled scans during a quiet window.
+
+    Distinct from `QuietHoursMixin` on push outputs — that queues
+    pushes; this skips the scan itself (no LLM call, no API hits to
+    upstream registries). Useful when the LLM backend is shared with
+    other workloads (a daytime workstation) or to respect ISP off-peak.
+    """
+
+    enabled: bool = False
+    window: str = Field(
+        "",
+        description=(
+            "Quiet window in `HH:MM-HH:MM` form. Empty = always-on. "
+            "Crosses midnight when start > end (e.g. `23:00-07:00`)."
+        ),
+    )
+    timezone: str = Field(
+        "UTC",
+        description="IANA timezone the window is evaluated in.",
+        json_schema_extra={"ui_widget": "timezone"},
+    )
+
+
 class I18nConfig(BaseModel):
     """UI language selector. Minimal — only nav + dashboard headings are
     translated for now; per-page deep i18n stays a non-goal until usage
