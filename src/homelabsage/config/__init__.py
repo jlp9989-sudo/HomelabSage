@@ -23,6 +23,7 @@ from .outputs import (
     BatchingConfig,
     DiscordOutputConfig,
     GotifyOutputConfig,
+    MSTeamsOutputConfig,
     NotionOutputConfig,
     NtfyOutputConfig,
     OutputsConfig,
@@ -45,6 +46,7 @@ from .runtime import (
     ParityGateConfig,
     SchedulerConfig,
     TagLagConfig,
+    TLSCheckConfig,
 )
 from .sources import (
     DockerSourceConfig,
@@ -97,6 +99,7 @@ class Config(BaseModel):
     tag_lag: TagLagConfig = Field(default_factory=TagLagConfig)
     image_pins: ImagePinsConfig = Field(default_factory=ImagePinsConfig)
     auto_apply: AutoApplyConfig = Field(default_factory=AutoApplyConfig)
+    tls_check: TLSCheckConfig = Field(default_factory=TLSCheckConfig)
     i18n: I18nConfig = Field(default_factory=I18nConfig)
 
 
@@ -162,6 +165,7 @@ __all__ = [
     "SMTPOutputConfig",
     "SlackOutputConfig",
     "PushoverOutputConfig",
+    "MSTeamsOutputConfig",
     "WebhookOutputConfig",
     "OutputsConfig",
     "BatchingConfig",
@@ -174,6 +178,7 @@ __all__ = [
     "LogAnomalyConfig",
     "ComposeLintConfig",
     "TagLagConfig",
+    "TLSCheckConfig",
     "ImagePinsConfig",
     "AutoApplyConfig",
     "I18nConfig",

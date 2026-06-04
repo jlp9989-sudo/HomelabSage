@@ -33,6 +33,8 @@ from . import (  # noqa: F401  (imported for side-effect: command registration)
     scan_diff,
     scripts,
     serve,
+    stack,
+    tls_check,
     watched,
     watchtower,
 )

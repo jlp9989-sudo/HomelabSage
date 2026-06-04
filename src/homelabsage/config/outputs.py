@@ -237,6 +237,24 @@ class SMTPOutputConfig(QuietHoursMixin):
     )
 
 
+class MSTeamsOutputConfig(QuietHoursMixin):
+    """Microsoft Teams output via incoming webhook (Adaptive Card)."""
+
+    enabled: bool = False
+    webhook_url: str = Field(
+        "",
+        description=(
+            "Power Automate workflow URL or legacy "
+            "`outlook.office.com/webhook/...` URL. Anyone with the URL "
+            "can post — treat as a secret."
+        ),
+    )
+    min_severity: Literal["critical", "high", "medium", "info"] = Field(
+        "high",
+        description="Only push updates at or above this severity.",
+    )
+
+
 class PushoverOutputConfig(QuietHoursMixin):
     """Dedicated Pushover output. Apprise can also push to Pushover —
     use this when you want first-class Pushover semantics (per-severity
@@ -354,4 +372,5 @@ class OutputsConfig(BaseModel):
     webhook: WebhookOutputConfig = Field(default_factory=WebhookOutputConfig)
     slack: SlackOutputConfig = Field(default_factory=SlackOutputConfig)
     pushover: PushoverOutputConfig = Field(default_factory=PushoverOutputConfig)
+    msteams: MSTeamsOutputConfig = Field(default_factory=MSTeamsOutputConfig)
     batching: BatchingConfig = Field(default_factory=BatchingConfig)

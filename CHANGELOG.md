@@ -2,6 +2,43 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.6.4 — 2026-06-04
+
+Four detectors-and-outputs additions, all decoupled from existing flows.
+
+### Added
+
+- **TLS cert expiry probe** (`tls_check.py` + `homelabsage tls-check`
+  CLI). Stdlib `ssl`+`socket` — no `cryptography` dep. Reads peer
+  cert `notAfter`, buckets days-until-expiry into severity
+  (`critical` ≤0, `high` ≤warn/3, `medium` ≤warn, `info` otherwise).
+  Best-effort: connection refused / DNS / handshake failures all
+  return `ok=False` with a high-severity reason instead of raising.
+- **Microsoft Teams output** (`outputs/msteams.py`,
+  `MSTeamsOutputConfig`). Adaptive Card 1.5 wrapped in the
+  `attachments[]` envelope Power Automate workflow webhooks expect.
+  Severity → accent color (critical→attention, high→warning,
+  medium→accent, info→good). Release-notes URL becomes a card action.
+  The legacy MessageCard format is being deprecated through 2026 —
+  we skip it entirely.
+- **Docker volume orphan detector** (`volume_orphans.py`). Pure
+  function on `(volumes, containers)`: walks every container's
+  `Mounts[*]` filtering `Type=="volume"`, returns the volumes whose
+  `Name` no container references. Caller is expected to pass
+  `containers.list(all=True)` so stopped containers still count as
+  users. Carries the `com.docker.compose.project` label so the user
+  can see which stack a stranded volume belonged to.
+- **`homelabsage stack <container>` CLI**. Single-command export of a
+  container's compose graph + last N updates + rollback recipe,
+  with `Sanitiser` redaction for IPs / hostnames / credentials. Drop
+  into a forum post or bug report without manual scrubbing.
+
+### Internal
+
+- 1265 → 1284 tests (+19), ruff clean, 0 mypy errors against 148 files.
+- 4 new modules, 1 new output, 2 new CLI subcommands, 2 new config
+  blocks (`TLSCheckConfig`, `MSTeamsOutputConfig`).
+
 ## v0.6.3 — 2026-06-04
 
 Four cleanup-and-quality-of-life items.

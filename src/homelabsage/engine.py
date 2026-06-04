@@ -20,6 +20,7 @@ from .outputs.apprise import AppriseOutput
 from .outputs.batch import below_threshold, dispatch_batch
 from .outputs.discord import DiscordOutput
 from .outputs.gotify import GotifyOutput
+from .outputs.msteams import MSTeamsOutput
 from .outputs.notion import NotionOutput
 from .outputs.ntfy import NtfyOutput
 from .outputs.pushover import PushoverOutput
@@ -72,6 +73,8 @@ def build_outputs(cfg: Config, db: Database) -> list[Output]:
         outputs.append(SlackOutput(cfg.outputs.slack))
     if cfg.outputs.pushover.enabled:
         outputs.append(PushoverOutput(cfg.outputs.pushover))
+    if cfg.outputs.msteams.enabled:
+        outputs.append(MSTeamsOutput(cfg.outputs.msteams))
     return outputs
 
 

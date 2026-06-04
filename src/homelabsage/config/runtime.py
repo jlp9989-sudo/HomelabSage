@@ -367,6 +367,30 @@ class AutoApplyConfig(BaseModel):
         return v.lower()
 
 
+class TLSCheckConfig(BaseModel):
+    """TLS cert expiry probe.
+
+    Provide URLs to monitor; the CLI / detector reads the cert chain
+    and flags expiry within `warn_days`. Empty URL list = no-op.
+    """
+
+    enabled: bool = False
+    urls: list[str] = Field(
+        default_factory=list,
+        description=(
+            "URLs to probe. https://… or bare hostnames (defaults to "
+            "https). http://… returns ok=true (no TLS to check)."
+        ),
+    )
+    warn_days: int = Field(
+        30,
+        description=(
+            "Severity buckets: ≤ warn_days → medium, ≤ warn_days/3 → "
+            "high, ≤ 0 → critical."
+        ),
+    )
+
+
 class I18nConfig(BaseModel):
     """UI language selector. Minimal — only nav + dashboard headings are
     translated for now; per-page deep i18n stays a non-goal until usage
