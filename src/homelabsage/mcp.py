@@ -404,6 +404,36 @@ def _tool_doctor(cfg: Config, db: Database, params: dict) -> dict:
     return build_doctor_report(cfg, db, skip_llm=skip_llm)
 
 
+def _tool_audit_history(cfg: Config, _db: Database, params: dict) -> dict:
+    """Paginated list of past audit snapshots (newest first).
+
+    Returns compact summaries — never the full findings list, to
+    keep MCP frames small. For the full diff, use `audit_diff`.
+    """
+    from .audit_history import list_history
+    notes_dir = cfg.curator.output_dir or cfg.notes.notes_dir
+    if not notes_dir:
+        return {"count": 0, "items": [], "reason": "no notes_dir configured"}
+    limit = max(1, min(int(params.get("limit") or 50), 200))
+    offset = max(0, int(params.get("offset") or 0))
+    rows = list_history(notes_dir, limit=limit, offset=offset)
+    return {"count": len(rows), "items": rows}
+
+
+def _tool_audit_diff(cfg: Config, db: Database, _params: dict) -> dict:
+    """Compute new/resolved findings vs the latest persisted snapshot."""
+    from .audit import build_report
+    from .audit_history import diff_against_latest
+    notes_dir = cfg.curator.output_dir or cfg.notes.notes_dir
+    if not notes_dir:
+        return {
+            "previous_snapshot": None, "new": [], "resolved": [],
+            "reason": "no notes_dir configured",
+        }
+    report = build_report(cfg, db)
+    return diff_against_latest(notes_dir, report.to_json())
+
+
 def _tool_list_snoozed(_cfg: Config, db: Database, params: dict) -> dict:
     """List currently-snoozed updates (snooze_until > now)."""
     if not hasattr(db, "list_snoozed"):
@@ -815,6 +845,37 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_doctor,
+    },
+    "audit_history": {
+        "description": (
+            "Paginated list of past audit snapshots, newest first. "
+            "Returns compact per-snapshot summaries (severity/"
+            "category counts + finding_count), never the full "
+            "findings list."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                "offset": {"type": "integer", "minimum": 0},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_audit_history,
+    },
+    "audit_diff": {
+        "description": (
+            "Diff the current audit findings against the latest "
+            "persisted snapshot. Returns `{previous_snapshot, new, "
+            "resolved}` where new/resolved are keyed by "
+            "(category, source_kind, source_ref)."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        "impl": _tool_audit_diff,
     },
     "list_snoozed": {
         "description": (

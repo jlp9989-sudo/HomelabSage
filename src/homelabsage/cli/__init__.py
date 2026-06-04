@@ -19,6 +19,7 @@ from . import (  # noqa: F401  (imported for side-effect: command registration)
     backup,
     check,
     chronicle,
+    compose_graph,
     csi,
     curate,
     digest,

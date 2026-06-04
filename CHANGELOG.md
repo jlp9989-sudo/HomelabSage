@@ -2,6 +2,32 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.7.5 — 2026-06-04
+
+MCP exposure of audit history + diff, compose graph mermaid export,
+and audit severity filter.
+
+### Added
+
+- **MCP `audit_history` + `audit_diff` tools**. Agents can now read
+  the audit history pagination + current diff vs latest snapshot
+  without the HTTP route. `audit_history` returns the compact
+  summary shape (counts only, never the full findings list).
+- **`homelabsage compose-graph` CLI**. Renders the compose
+  dependency graph as a Mermaid `flowchart LR`. Services grouped by
+  project subgraphs, `A --> B` edges where A depends_on B. `--out`
+  writes a Markdown-fenced file ready for GitHub / Notion /
+  Homepage widgets.
+- **`homelabsage audit --severity {info|medium|high|critical}`**.
+  Hides findings below the floor in both Markdown and `--jsonl`
+  output. Filtering is presentation-only: `audit_history.jsonl` +
+  `audit.md` written by `run_audit` stay full-fidelity.
+
+### Internal
+
+- 1434 → 1449 tests (+15), ruff clean, 0 mypy errors against 167 files.
+- 2 new MCP tools, 1 new CLI subcommand, 1 audit CLI flag.
+
 ## v0.7.4 — 2026-06-04
 
 Audit-history surface extended: paginated history endpoint, webhook
