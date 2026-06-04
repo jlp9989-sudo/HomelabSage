@@ -135,6 +135,29 @@ class Engine:
                     "skipped": 1,
                 }
 
+        # LLM-backend health gate: opt-in pre-flight. Skip the scan
+        # entirely when the LLM endpoint is down to avoid wasting
+        # plugin/registry work that would die on the analyser call.
+        if self.cfg.llm_health_gate.enabled:
+            from .config import get_active_llm_config
+            from .llm_health import probe as probe_llm
+            llm_cfg = get_active_llm_config(self.cfg)
+            llm_status = await asyncio.to_thread(
+                probe_llm,
+                llm_cfg.endpoint,
+                api_key=llm_cfg.api_key,
+                timeout=self.cfg.llm_health_gate.timeout_seconds,
+            )
+            if not llm_status.ok:
+                log.warning(
+                    "Scan skipped: LLM backend unreachable (%s)",
+                    llm_status.reason,
+                )
+                return {
+                    "scanned": 0, "new": 0, "analyzed": 0, "failed": 0,
+                    "skipped": 1,
+                }
+
         log.info("Run start — plugins=%s outputs=%s",
                  [p.id for p in self.plugins], [o.id for o in self.outputs])
         stats = {"scanned": 0, "new": 0, "analyzed": 0, "failed": 0}

@@ -2,6 +2,41 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.6.6 — 2026-06-04
+
+Three new MCP tools exposing v0.6.4/v0.6.5 detectors, plus an env-diff
+detector, a pre-scan LLM health gate, and an audit SSE stream.
+
+### Added
+
+- **3 MCP tools** — `disk_pressure_check`, `compose_overrides`,
+  `tls_check_run`. Each accepts an optional `paths` / `urls`
+  param-override; defaults to the configured list. Agents can now
+  trigger the v0.6.4–v0.6.5 detectors directly without the
+  auditor pass.
+- **Container env-var diff** (`env_diff.py`). Pure function over
+  `(container_env, image_env)` returning NEW / REMOVED / CHANGED
+  rows. NEW with credential-like suffix (`_TOKEN`, `_KEY`,
+  `_PASSWORD`, etc.) escalates to `high`; plain NEW is `medium`;
+  REMOVED + CHANGED are `info`. Filters PATH/HOME/HOSTNAME noise.
+- **LLM-backend health gate** (`llm_health.py` +
+  `LLMHealthGateConfig`, default off). Pre-scan GET probe of the
+  active LLM endpoint (`/v1/models` then `/health` / `/healthz`).
+  401/403 are treated as alive (auth is the user's problem). On
+  failure the scan is skipped and counted as `skipped` so the
+  schedule still shows activity. 3s default timeout.
+- **`GET /api/audit/stream`** — Server-Sent Events stream of audit
+  findings. One `event: finding` per row plus a final
+  `event: done` carrying the summary. Disables nginx proxy
+  buffering. Lets a UI render findings incrementally without
+  waiting for the full JSON blob.
+
+### Internal
+
+- 1310 → 1330 tests (+20), ruff clean, 0 mypy errors against 154 files.
+- 3 new modules, 1 new config block (`LLMHealthGateConfig`), 3 new
+  MCP tools, 1 new web route.
+
 ## v0.6.5 — 2026-06-04
 
 Four orthogonal signals: a missing-from-restart_freq health gap, a

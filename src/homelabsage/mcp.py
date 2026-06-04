@@ -393,6 +393,66 @@ def _tool_list_starred(_cfg: Config, db: Database, _params: dict) -> dict:
             "items": [_summarise_update(it) for it in items]}
 
 
+def _tool_disk_pressure_check(cfg: Config, _db: Database, params: dict) -> dict:
+    """Run the disk-pressure probe on-demand.
+
+    Uses `params.paths` if provided; falls back to
+    `cfg.disk_pressure.paths`. Returns empty when neither has content
+    so the caller can tell "no findings" from "no paths configured".
+    """
+    from .disk_pressure import evaluate as eval_disk
+    paths = params.get("paths")
+    if not isinstance(paths, list) or not paths:
+        paths = cfg.disk_pressure.paths
+    if not paths:
+        return {"count": 0, "items": [], "reason": "no paths configured"}
+    findings = eval_disk([str(p) for p in paths])
+    return {
+        "count": len(findings),
+        "items": [f.to_context() for f in findings],
+    }
+
+
+def _tool_compose_overrides(cfg: Config, _db: Database, params: dict) -> dict:
+    """List `docker-compose.override.yml` files in the configured scan paths.
+
+    Read-only inventory — the runtime graph diverges from the analysed
+    base file wherever an override exists.
+    """
+    from .compose_override import scan as scan_overrides
+    paths = params.get("paths")
+    if not isinstance(paths, list) or not paths:
+        paths = cfg.sources.docker.compose_scan_paths
+    if not paths:
+        return {"count": 0, "items": [], "reason": "no paths configured"}
+    presences = scan_overrides([str(p) for p in paths])
+    return {
+        "count": len(presences),
+        "items": [p.to_context() for p in presences],
+    }
+
+
+def _tool_tls_check_run(cfg: Config, _db: Database, params: dict) -> dict:
+    """Run TLS probes on-demand.
+
+    Uses `params.urls` first, falls back to `cfg.tls_check.urls`.
+    Returns one entry per URL — failures included so the caller
+    sees the full picture.
+    """
+    from .tls_check import check_urls
+    urls = params.get("urls")
+    if not isinstance(urls, list) or not urls:
+        urls = cfg.tls_check.urls
+    if not urls:
+        return {"count": 0, "items": [], "reason": "no URLs configured"}
+    warn_days = int(params.get("warn_days") or cfg.tls_check.warn_days)
+    checks = check_urls([str(u) for u in urls], warn_days=max(1, warn_days))
+    return {
+        "count": len(checks),
+        "items": [c.to_context() for c in checks],
+    }
+
+
 def _tool_health_check_results(_cfg: Config, db: Database, params: dict) -> dict:
     """Recent post-update health-check rows.
 
@@ -619,6 +679,51 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_health_check_results,
+    },
+    "disk_pressure_check": {
+        "description": (
+            "Probe disk free-space on listed paths (defaults to "
+            "cfg.disk_pressure.paths). Returns one finding per "
+            "filesystem under pressure."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "paths": {"type": "array", "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_disk_pressure_check,
+    },
+    "compose_overrides": {
+        "description": (
+            "List docker-compose.override.yml files found in compose "
+            "scan paths (or supply `paths`). The runtime graph "
+            "diverges from the analysed base file wherever one exists."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "paths": {"type": "array", "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_compose_overrides,
+    },
+    "tls_check_run": {
+        "description": (
+            "Run TLS cert probes on-demand (defaults to "
+            "cfg.tls_check.urls). One result per URL."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "urls": {"type": "array", "items": {"type": "string"}},
+                "warn_days": {"type": "integer", "minimum": 1},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_tls_check_run,
     },
 }
 

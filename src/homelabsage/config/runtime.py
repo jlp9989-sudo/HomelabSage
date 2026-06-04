@@ -436,6 +436,25 @@ class ScanWindowConfig(BaseModel):
     )
 
 
+class LLMHealthGateConfig(BaseModel):
+    """Pre-scan probe of the LLM endpoint.
+
+    When enabled, a quick GET (`/v1/models` then `/health` /
+    `/healthz`) confirms the LLM backend is up BEFORE the engine
+    spends API budget on plugin scans + registry pulls. On failure
+    the scan is skipped and the result counted as `skipped`.
+    """
+
+    enabled: bool = False
+    timeout_seconds: float = Field(
+        3.0,
+        description=(
+            "Timeout for the probe. Keep tight — this runs before "
+            "every scan, slow probes add latency to every cycle."
+        ),
+    )
+
+
 class I18nConfig(BaseModel):
     """UI language selector. Minimal — only nav + dashboard headings are
     translated for now; per-page deep i18n stays a non-goal until usage

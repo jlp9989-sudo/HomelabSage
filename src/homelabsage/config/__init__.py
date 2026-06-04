@@ -43,6 +43,7 @@ from .runtime import (
     HealthCheckConfig,
     I18nConfig,
     ImagePinsConfig,
+    LLMHealthGateConfig,
     LogAnomalyConfig,
     ParityGateConfig,
     ScanWindowConfig,
@@ -104,6 +105,7 @@ class Config(BaseModel):
     tls_check: TLSCheckConfig = Field(default_factory=TLSCheckConfig)
     disk_pressure: DiskPressureConfig = Field(default_factory=DiskPressureConfig)
     scan_window: ScanWindowConfig = Field(default_factory=ScanWindowConfig)
+    llm_health_gate: LLMHealthGateConfig = Field(default_factory=LLMHealthGateConfig)
     i18n: I18nConfig = Field(default_factory=I18nConfig)
 
 
@@ -185,6 +187,7 @@ __all__ = [
     "TLSCheckConfig",
     "DiskPressureConfig",
     "ScanWindowConfig",
+    "LLMHealthGateConfig",
     "ImagePinsConfig",
     "AutoApplyConfig",
     "I18nConfig",
