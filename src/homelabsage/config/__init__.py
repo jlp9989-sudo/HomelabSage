@@ -34,6 +34,7 @@ from .outputs import (
     WebhookOutputConfig,
 )
 from .runtime import (
+    AuditAlertsConfig,
     AutoApplyConfig,
     BackupHealthConfig,
     BackupRepoConfig,
@@ -106,6 +107,7 @@ class Config(BaseModel):
     disk_pressure: DiskPressureConfig = Field(default_factory=DiskPressureConfig)
     scan_window: ScanWindowConfig = Field(default_factory=ScanWindowConfig)
     llm_health_gate: LLMHealthGateConfig = Field(default_factory=LLMHealthGateConfig)
+    audit_alerts: AuditAlertsConfig = Field(default_factory=AuditAlertsConfig)
     i18n: I18nConfig = Field(default_factory=I18nConfig)
 
 
@@ -188,6 +190,7 @@ __all__ = [
     "DiskPressureConfig",
     "ScanWindowConfig",
     "LLMHealthGateConfig",
+    "AuditAlertsConfig",
     "ImagePinsConfig",
     "AutoApplyConfig",
     "I18nConfig",

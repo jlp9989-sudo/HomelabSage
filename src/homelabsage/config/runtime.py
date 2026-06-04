@@ -436,6 +436,34 @@ class ScanWindowConfig(BaseModel):
     )
 
 
+class AuditAlertsConfig(BaseModel):
+    """POST a JSON payload to webhook(s) when run_audit detects new findings.
+
+    Distinct from the per-update push outputs: those notify on
+    individual analyser verdicts. This fires once per audit cycle
+    with a rollup of NEW findings only (diffed against the
+    previous persisted snapshot in `audit_history.jsonl`).
+    """
+
+    enabled: bool = False
+    webhook_urls: list[str] = Field(
+        default_factory=list,
+        description=(
+            "URLs to POST the rollup payload to. Each receives "
+            "`{generated_at, new: [...], resolved: [...]}`. Generic "
+            "shape; bring-your-own-receiver."
+        ),
+    )
+    min_severity: str = Field(
+        "medium",
+        description=(
+            "Only fire when at least one NEW finding meets this "
+            "severity floor. `info`/`medium`/`high`/`critical`."
+        ),
+    )
+    timeout_seconds: float = Field(10.0)
+
+
 class LLMHealthGateConfig(BaseModel):
     """Pre-scan probe of the LLM endpoint.
 

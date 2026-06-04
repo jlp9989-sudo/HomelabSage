@@ -33,6 +33,24 @@ def register_audit_routes(app: FastAPI, cfg: Config, db: Database, env: Environm
         report = build_report(cfg, db)
         return JSONResponse(report.to_json())
 
+    @app.get("/api/audit/history")
+    async def audit_history_api(limit: int = 50, offset: int = 0) -> JSONResponse:
+        """Paginated list of past audit snapshots, newest first.
+
+        Returns the compact per-snapshot summary (severity/category
+        counts + finding_count) — never the full findings list. Use
+        `/api/audit/diff` to see what changed since the most recent
+        snapshot.
+        """
+        from ..audit_history import list_history
+        cap_limit = max(1, min(limit, 200))
+        cap_offset = max(0, min(offset, 10_000))
+        notes_dir = cfg.curator.output_dir or cfg.notes.notes_dir
+        rows = await asyncio.to_thread(
+            list_history, notes_dir, limit=cap_limit, offset=cap_offset,
+        )
+        return JSONResponse({"count": len(rows), "items": rows})
+
     @app.get("/api/audit/diff")
     async def audit_diff_api() -> JSONResponse:
         """Diff the current findings against the last persisted snapshot.

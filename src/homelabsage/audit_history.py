@@ -144,9 +144,66 @@ def diff_against_latest(
     }
 
 
+def list_history(
+    notes_dir: str | Path,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Return up to `limit` snapshot summaries, newest first.
+
+    Each row is the compact `{generated_at, counts_by_severity,
+    counts_by_category, finding_count, healthy}` shape — never the
+    full findings list (a dashboard polling history of a busy
+    homelab would otherwise download megabytes per request). For
+    the full per-snapshot detail, the caller derives it from the
+    JSONL directly.
+
+    Pagination: `offset` skips that many rows from the newest end.
+    """
+    if not notes_dir:
+        return []
+    path = Path(notes_dir).expanduser() / FILE_NAME
+    if not path.is_file():
+        return []
+    try:
+        # Read every row, take the LAST `limit+offset` in file order
+        # (oldest→newest), then reverse to return newest first. The
+        # JSONL is small enough that streaming-from-end isn't worth
+        # the complexity for typical homelab scan cadences.
+        lines: list[str] = []
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    lines.append(line)
+    except OSError as e:
+        log.warning("audit_history: list failed: %s", e)
+        return []
+    # newest-first
+    lines.reverse()
+    window = lines[offset:offset + max(1, limit)]
+    out: list[dict[str, Any]] = []
+    for raw in window:
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        findings = data.get("findings") or []
+        out.append({
+            "generated_at": str(data.get("generated_at") or ""),
+            "healthy": bool(data.get("healthy")),
+            "counts_by_severity": data.get("counts_by_severity") or {},
+            "counts_by_category": data.get("counts_by_category") or {},
+            "finding_count": len(findings) if isinstance(findings, list) else 0,
+        })
+    return out
+
+
 __all__ = [
     "HistoryEntry",
     "append",
     "diff_against_latest",
+    "list_history",
     "load_latest",
 ]

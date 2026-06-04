@@ -67,21 +67,8 @@ def _print_section(name: str, section: dict) -> int:
     return bad
 
 
-@app.command(name="doctor")
-def doctor_cmd(
-    config: Path = CONFIG_OPT,
-    skip_llm: bool = typer.Option(
-        False, "--skip-llm",
-        help="Don't probe the LLM endpoint (useful when offline).",
-    ),
-    verbose: bool = VERBOSE_OPT,
-) -> None:
-    """One-shot diagnostic of every active probe."""
-    setup_logging(verbose)
-    cfg = load_config(config)
-    db = Database(cfg.storage.database_path)
-    report = build_report(cfg, db, skip_llm=skip_llm)
-
+def _render_report(report: dict) -> int:
+    """Render the doctor report. Return `bad` count for the exit code."""
     console.print("[bold]HomelabSage doctor[/bold]\n")
     bad = 0
     for name in ("llm", "tls", "dns", "disk", "compose", "audit"):
@@ -120,11 +107,68 @@ def doctor_cmd(
     console.print()
     if report["llm_unreachable"]:
         console.print("[bold red]Verdict: LLM unreachable.[/bold red]")
-        raise SystemExit(2)
+        return -2
     if report["healthy"]:
         console.print("[bold green]Verdict: healthy ✓[/bold green]")
-        raise SystemExit(0)
+        return 0
     console.print(
         f"[bold red]Verdict: {bad} actionable finding(s).[/bold red]"
     )
-    raise SystemExit(1)
+    return bad
+
+
+@app.command(name="doctor")
+def doctor_cmd(
+    config: Path = CONFIG_OPT,
+    skip_llm: bool = typer.Option(
+        False, "--skip-llm",
+        help="Don't probe the LLM endpoint (useful when offline).",
+    ),
+    watch: int = typer.Option(
+        0, "--watch",
+        help=(
+            "Continuous mode — re-run every N seconds. "
+            "0 = one-shot (default). Minimum 5 to avoid hammering."
+        ),
+    ),
+    verbose: bool = VERBOSE_OPT,
+) -> None:
+    """One-shot (default) or continuous diagnostic of every active probe."""
+    setup_logging(verbose)
+    cfg = load_config(config)
+    db = Database(cfg.storage.database_path)
+
+    if watch <= 0:
+        report = build_report(cfg, db, skip_llm=skip_llm)
+        outcome = _render_report(report)
+        if outcome == -2:
+            raise SystemExit(2)
+        raise SystemExit(0 if outcome == 0 else 1)
+
+    interval = max(5, watch)
+    import time
+    from datetime import datetime
+    console.print(
+        f"[dim]Watch mode — every {interval}s. Ctrl-C to stop.[/dim]\n"
+    )
+    last_outcome: int | None = None
+    while True:
+        report = build_report(cfg, db, skip_llm=skip_llm)
+        # Header per iteration so the user sees the timestamp + delta
+        # vs previous iteration's verdict.
+        now_s = datetime.now().strftime("%H:%M:%S")
+        outcome = _render_report(report)
+        if last_outcome is not None and outcome != last_outcome:
+            console.print(
+                f"[bold yellow]Δ verdict @ {now_s}: "
+                f"{last_outcome} → {outcome}[/bold yellow]"
+            )
+        last_outcome = outcome
+        console.print(
+            f"[dim]Sleeping {interval}s ({now_s})…[/dim]\n"
+        )
+        try:
+            time.sleep(interval)
+        except KeyboardInterrupt:
+            console.print("[dim]Stopped.[/dim]")
+            raise SystemExit(0)  # noqa: B904

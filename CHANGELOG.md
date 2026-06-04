@@ -2,6 +2,33 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.7.4 — 2026-06-04
+
+Audit-history surface extended: paginated history endpoint, webhook
+alerts on new findings, and continuous `doctor --watch` mode.
+
+### Added
+
+- **`GET /api/audit/history?limit=&offset=`** — paginated list of
+  past audit snapshots (newest first). Returns the COMPACT shape
+  (counts + finding_count, never the full findings list) so a
+  dashboard polling history of a busy homelab doesn't pull MBs.
+- **`audit_alerts` config** (`AuditAlertsConfig`, default off).
+  When enabled + `webhook_urls` populated, `run_audit()` POSTs a
+  rollup payload `{type, generated_at, new, resolved,
+  counts_by_severity}` once per scan when a NEW finding meets the
+  severity floor. Per-URL failures log + continue. Resolved-only
+  scans don't fire — resolution is not an alert.
+- **`homelabsage doctor --watch N`**. Continuous diagnostic mode
+  that re-runs every N seconds (minimum 5). Highlights verdict
+  changes between iterations. Ctrl-C exits cleanly.
+
+### Internal
+
+- 1420 → 1434 tests (+14), ruff clean, 0 mypy errors against 166 files.
+- 1 new module (`audit_alert.py`), 1 new config block, 1 new web
+  route, 1 new history helper (`list_history`).
+
 ## v0.7.3 — 2026-06-04
 
 Audit-history persistence + `/api/audit/diff` + `homelabsage init`.

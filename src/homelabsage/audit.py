@@ -669,12 +669,35 @@ def run_audit(cfg: Config, db: Database) -> tuple[AuditReport, Path | None]:
     the diff endpoint can show "what's new since last scan?". The
     append is best-effort and best-isolated from the markdown write —
     a JSONL failure doesn't block the audit.md write.
+
+    When `audit_alerts.enabled`, computes the diff vs the PREVIOUS
+    snapshot (before appending the new one) and fires a webhook
+    rollup if any new finding meets the severity floor. Diff
+    computation happens BEFORE the append so the previous row is
+    still the comparison baseline.
     """
     report = build_report(cfg, db)
     body = render_markdown(report)
     notes_dir = cfg.notes.notes_dir
     notes_path = write_to_notes(notes_dir, body) if notes_dir else None
     if notes_dir:
+        report_json = report.to_json()
+        # Diff against the previous snapshot BEFORE appending — once
+        # we append, "latest" becomes the report we just generated.
+        if cfg.audit_alerts.enabled and cfg.audit_alerts.webhook_urls:
+            from .audit_alert import fire_if_new
+            from .audit_history import diff_against_latest
+            diff = diff_against_latest(notes_dir, report_json)
+            fire_if_new(
+                webhook_urls=list(cfg.audit_alerts.webhook_urls),
+                min_severity=cfg.audit_alerts.min_severity,
+                timeout=cfg.audit_alerts.timeout_seconds,
+                diff=diff,
+                counts_by_severity=report_json.get(
+                    "counts_by_severity", {},
+                ),
+                generated_at=report_json.get("generated_at", ""),
+            )
         from .audit_history import append as append_history
-        append_history(notes_dir, report.to_json())
+        append_history(notes_dir, report_json)
     return report, notes_path
