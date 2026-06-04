@@ -293,7 +293,19 @@ class Engine:
                 )
                 if deferred_to_batch:
                     batched.append(analyzed)
+                # Snooze gate: suppress push outputs entirely until
+                # the snooze timestamp passes. Notion / persistent
+                # outputs still run so the DB stays consistent with
+                # the dashboard. Snooze is opt-in per-update so it's
+                # cheap to evaluate (no global config).
+                snoozed_until = self._snooze_active_for(analyzed.id)
                 for output in self.outputs:
+                    if snoozed_until and output.is_push:
+                        # Don't queue — when the snooze clears the
+                        # user has explicitly chosen to defer this
+                        # update; replaying on the next scan would
+                        # ambush them. Just skip.
+                        continue
                     if push_gated and output.is_push:
                         # Queue for later flush rather than relying on the
                         # item being re-detected — once analyzed, an Update
@@ -394,6 +406,33 @@ class Engine:
             return
         if path is not None:
             log.info("incremental: appended %s → %s", analyzed.id, path)
+
+    def _snooze_active_for(self, update_id: str) -> str | None:
+        """Return the snooze timestamp if still in the future, else None.
+
+        Best-effort: corrupt timestamp logs at WARN and returns None so
+        a malformed value never silences an update permanently.
+        """
+        if not hasattr(self.db, "get_snooze"):
+            return None
+        raw = self.db.get_snooze(update_id)
+        if not raw:
+            return None
+        from ._time import parse_iso, utcnow
+        try:
+            until = parse_iso(raw)
+        except ValueError:
+            log.warning("snooze: unparseable timestamp for %s: %r",
+                        update_id, raw)
+            return None
+        if until is None:
+            return None
+        if until.tzinfo is None:
+            from datetime import UTC
+            until = until.replace(tzinfo=UTC)
+        if until <= utcnow():
+            return None
+        return raw
 
     def _quiet_blocks(self, output, analyzed) -> bool:
         """True iff this push output's quiet hours apply right now.

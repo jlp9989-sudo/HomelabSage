@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -282,6 +283,99 @@ def register_updates_routes(
         analyzed = AnalyzedUpdate(update=upd)
         db.upsert(analyzed)
         return {"ok": True, "id": analyzed.id, "source": source}
+
+    @app.post("/api/webhook/github-release")
+    async def api_inbox_github_release(request: Request) -> dict:
+        """GitHub Release webhook receiver.
+
+        Configure in your repo: Settings → Webhooks → Add webhook,
+        URL = `https://<your-host>/api/webhook/github-release`, content
+        type `application/json`, events `Releases`.
+
+        Optional shared-secret verification: set
+        `GITHUB_RELEASE_WEBHOOK_SECRET` in env and configure the same
+        secret in the GitHub UI. When set, requests without a valid
+        `X-Hub-Signature-256` are rejected.
+
+        Only `action: released` (not draft / pre-release / edit) is
+        accepted to avoid duplicates from staging releases.
+        """
+        import hashlib
+        import hmac
+        import os
+        from urllib.parse import urlparse
+
+        from ..models import Update as _Update
+
+        # Hard size cap — GitHub bodies are typically <100 KB but
+        # release notes can balloon.
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > 1024 * 1024:
+                    raise HTTPException(413, "payload exceeds 1 MB cap")
+            except ValueError:
+                pass
+
+        raw_body = await request.body()
+        secret = os.environ.get("GITHUB_RELEASE_WEBHOOK_SECRET", "")
+        if secret:
+            sig_header = request.headers.get("X-Hub-Signature-256", "")
+            if not sig_header.startswith("sha256="):
+                raise HTTPException(401, "missing or malformed signature")
+            expected = "sha256=" + hmac.new(
+                secret.encode(), raw_body, hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(expected, sig_header):
+                raise HTTPException(401, "signature mismatch")
+
+        try:
+            payload = json.loads(raw_body or b"{}")
+        except json.JSONDecodeError:
+            raise HTTPException(400, "invalid JSON")  # noqa: B904
+        if not isinstance(payload, dict):
+            raise HTTPException(400, "payload must be a JSON object")
+
+        action = payload.get("action") or ""
+        if action != "released":
+            return {"ok": True, "skipped": True,
+                    "reason": f"action={action} (only 'released' accepted)"}
+
+        release = payload.get("release") or {}
+        repo = payload.get("repository") or {}
+        if not isinstance(release, dict) or not isinstance(repo, dict):
+            raise HTTPException(400, "missing release / repository envelope")
+
+        tag = release.get("tag_name") or ""
+        repo_full = repo.get("full_name") or ""
+        if not tag or not repo_full:
+            raise HTTPException(400, "release.tag_name + repository.full_name required")
+        if len(tag) > 100 or len(repo_full) > 200:
+            raise HTTPException(400, "tag or repo name too long")
+
+        release_url = release.get("html_url") or ""
+        if release_url:
+            scheme = urlparse(release_url).scheme.lower()
+            if scheme not in ("http", "https"):
+                release_url = ""
+            if len(release_url) > 2048:
+                release_url = ""
+        body_raw = release.get("body") or ""
+        body_md = body_raw[:65536] if isinstance(body_raw, str) else ""
+
+        upd = _Update(
+            source="github-release",
+            subject=repo_full,
+            current_version="(unknown)",
+            new_version=tag,
+            release_url=release_url or None,
+            release_notes=body_md,
+            context={"webhook": True, "event_action": action},
+        )
+        analyzed = AnalyzedUpdate(update=upd)
+        db.upsert(analyzed)
+        return {"ok": True, "id": analyzed.id,
+                "subject": repo_full, "tag": tag}
 
     @app.post("/api/updates/bulk")
     async def api_updates_bulk(payload: dict) -> dict:

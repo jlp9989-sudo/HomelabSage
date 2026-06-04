@@ -2,6 +2,38 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.6.9 — 2026-06-04
+
+Snooze enforced in the engine, GitHub release webhook receiver, and
+a restart-drift detector.
+
+### Added
+
+- **Snooze honoured by the engine**. `Engine._snooze_active_for()`
+  parses the `snooze_until` timestamp; push outputs (Telegram /
+  Discord / Slack / etc.) skip dispatch when the snooze is still in
+  the future. Persistent outputs (Notion) still write so the
+  dashboard stays consistent. Corrupt timestamps log + return
+  None — they never silence an update permanently.
+- **GitHub release webhook** — `POST /api/webhook/github-release`.
+  Accepts the standard GitHub release-event payload, validates with
+  optional `GITHUB_RELEASE_WEBHOOK_SECRET` via `X-Hub-Signature-256`
+  HMAC, only processes `action: released` (skips draft / pre-release
+  / edit). 1 MB body cap. Subject = `repository.full_name`,
+  version = `release.tag_name`, body = `release.body` truncated to
+  64 KB.
+- **Container last-started drift detector** (`restart_drift.py`).
+  Pure function; takes `started_at` + `now` + optional
+  `last_applied_at`. Flags `info`-level when the restart happened
+  within `[min_hours, max_hours]` AND no APPLIED update lines up
+  within `apply_window_hours`. Useful for noticing "mealie restarted
+  at 08:53 — what happened?" without the noise of older restarts.
+
+### Internal
+
+- 1370 → 1386 tests (+16), ruff clean, 0 mypy errors against 160 files.
+- 1 new module, 1 new web route, 1 new engine method.
+
 ## v0.6.8 — 2026-06-04
 
 Five new surfaces: snooze, container-disappearance tracking, DNS
