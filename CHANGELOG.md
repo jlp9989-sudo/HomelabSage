@@ -2,6 +2,42 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.6.7 — 2026-06-04
+
+Four orthogonal additions across container metadata, filesystem
+security, retry telemetry, and operator tooling.
+
+### Added
+
+- **Restart-policy auditor** (`restart_policy.py`,
+  `sources.docker.detect_restart_policy = true`). Reads
+  `HostConfig.RestartPolicy.Name`; flags `""` / `"no"` as `medium`
+  because a container with no restart policy disappears on next
+  reboot. Strict mode (`detect_restart_policy_strict`) also flags
+  bounded `on-failure` (off by default).
+- **`.env` permissions auditor** (`env_perms.py`). Walks the
+  compose scan paths one level deep, stats `.env` and `*.env`
+  files. World-readable → `medium`, group-writable → `high`,
+  world-writable → `critical`. Never reads file contents (that's
+  `secret_guard`'s job). Surfaces as `env_perms` auditor finding.
+- **Recurring-failure tracker**. New `failure_count` column on the
+  `updates` table, auto-incremented every time the user flips
+  `status` to FAILED. New `db.list_recurring_failures(min_count=2)`
+  + auditor finding (`recurring_failure` category, severity scales
+  with count). Lets the user notice "I keep retrying this and it
+  keeps breaking — time to pin or dismiss".
+- **`homelabsage env-diff <container>` CLI**. Wraps `env_diff.py`:
+  reads the container's effective env via docker SDK, fetches the
+  image's declared `Config.Env`, prints NEW/REMOVED/CHANGED with
+  severity colouring. Exits 1 when any finding is ≥ medium so it
+  can drive cron / CI alerts.
+
+### Internal
+
+- 1330 → 1348 tests (+18), ruff clean, 0 mypy errors against 157 files.
+- 3 new modules, 1 new CLI subcommand, 1 new DB column, 2 new
+  detectors wired into the docker plugin, 2 new auditor categories.
+
 ## v0.6.6 — 2026-06-04
 
 Three new MCP tools exposing v0.6.4/v0.6.5 detectors, plus an env-diff

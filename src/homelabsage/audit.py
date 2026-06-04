@@ -401,6 +401,51 @@ def _log_anomaly_findings(rows: list[dict]) -> list[AuditFinding]:
     return findings
 
 
+def _recurring_failure_findings(rows: list[dict]) -> list[AuditFinding]:
+    """One finding per update with ≥2 failures."""
+    out: list[AuditFinding] = []
+    for r in rows:
+        count = int(r.get("failure_count") or 0)
+        if count >= 5:
+            sev = "high"
+        elif count >= 3:
+            sev = "medium"
+        else:
+            sev = "info"
+        out.append(AuditFinding(
+            severity=sev, category="recurring_failure",
+            title=(
+                f"`{r.get('subject')}` has failed "
+                f"{count} times"
+            ),
+            detail=(
+                f"User marked the same update FAILED {count} times. "
+                f"Consider dismissing or pinning to the current "
+                f"version until the upstream bug is fixed."
+            ),
+            source_kind="recurring_failure", source_ref=r.get("id") or "?",
+            cite=f"failure_count={count}",
+        ))
+    return out
+
+
+def _env_perm_findings(findings_in: list) -> list[AuditFinding]:
+    """One finding per readable/writable `.env` file."""
+    out: list[AuditFinding] = []
+    for f in findings_in:
+        out.append(AuditFinding(
+            severity=f.severity, category="env_perms",
+            title=f"`{Path(f.path).name}` has permissive mode `{f.mode_octal}`",
+            detail=(
+                f"`{f.path}` is {f.reason}; an `.env` file usually "
+                f"holds tokens/passwords. `chmod 600 {f.path}` to fix."
+            ),
+            source_kind="env_perms", source_ref=f.path,
+            cite=f"mode={f.mode_octal} {f.reason}",
+        ))
+    return out
+
+
 def _compose_override_findings(presences: list) -> list[AuditFinding]:
     """One finding per compose project with an override file."""
     out: list[AuditFinding] = []
@@ -530,6 +575,21 @@ def build_report(
         from .compose_override import scan as scan_overrides
         findings.extend(_compose_override_findings(
             scan_overrides(cfg.sources.docker.compose_scan_paths),
+        ))
+
+    # `.env` permissions — uses the same compose-scan paths.
+    if cfg.sources.docker.compose_scan_paths:
+        from .env_perms import scan as scan_env_perms
+        findings.extend(_env_perm_findings(
+            scan_env_perms(cfg.sources.docker.compose_scan_paths),
+        ))
+
+    # Recurring failures — updates the user has retried + failed
+    # multiple times. Surfaces as a finding so they stop bashing the
+    # same wall.
+    if hasattr(db, "list_recurring_failures"):
+        findings.extend(_recurring_failure_findings(
+            db.list_recurring_failures(min_count=2),
         ))
 
     # Severity first (critical → info), then category alphabetical so the

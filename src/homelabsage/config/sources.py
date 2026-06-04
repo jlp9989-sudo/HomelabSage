@@ -105,6 +105,11 @@ class DockerSourceConfig(BaseModel):
     # containers whose compose project has an override file so the
     # user knows the merged graph differs from what we see.
     detect_compose_override: bool = True
+    # Restart-policy auditor. Default on — a container without an
+    # explicit `restart:` becomes a silent-disappear bug after the
+    # next reboot. Strict mode also flags bounded on-failure (off).
+    detect_restart_policy: bool = True
+    detect_restart_policy_strict: bool = False
 
 
 class HAConfig(BaseModel):

@@ -203,3 +203,12 @@ def migrate(conn: sqlite3.Connection) -> None:
     # v0.6.3: bookmark flag. 0/1 instead of bool so SQLite stays happy.
     if "starred" not in cols:
         conn.execute("ALTER TABLE updates ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")
+
+    # v0.6.7: recurring-failure counter. Incremented every time the
+    # user flips status → FAILED for this update. Useful for finding
+    # "I keep trying this and it keeps breaking" loops.
+    if "failure_count" not in cols:
+        conn.execute(
+            "ALTER TABLE updates ADD COLUMN failure_count "
+            "INTEGER NOT NULL DEFAULT 0",
+        )

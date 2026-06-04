@@ -443,6 +443,15 @@ class DockerPlugin(Plugin):
                 if hs is not None:
                     ctx["healthcheck_stale"] = hs.to_context()
 
+            if self.cfg.detect_restart_policy:
+                from ..restart_policy import evaluate as eval_rp
+                rp = eval_rp(
+                    c.attrs.get("HostConfig") or {},
+                    strict=self.cfg.detect_restart_policy_strict,
+                )
+                if rp is not None:
+                    ctx["restart_policy"] = rp.to_context()
+
             if self.cfg.image_size_growth_detect and image_tag:
                 # Local image's on-disk size (sum of writeable + layer cache).
                 # `c.image.attrs["Size"]` is set by `docker inspect`; falsy

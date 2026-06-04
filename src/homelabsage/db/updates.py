@@ -130,10 +130,48 @@ class UpdatesMixin:
         return [row_to_item(r) for r in self._conn.execute(sql, args).fetchall()]
 
     def set_status(self, update_id: str, status: UpdateStatus) -> None:
-        self._conn.execute(
-            "UPDATE updates SET status = ? WHERE id = ?",
-            (status.value, update_id),
-        )
+        # Increment failure_count on every flip → FAILED. Idempotent
+        # against repeated "set to FAILED" calls (each is a fresh
+        # failure event from the user's perspective: 3 attempts to
+        # apply a broken update == 3 failures).
+        if status == UpdateStatus.FAILED:
+            self._conn.execute(
+                "UPDATE updates SET status = ?, "
+                "failure_count = COALESCE(failure_count, 0) + 1 "
+                "WHERE id = ?",
+                (status.value, update_id),
+            )
+        else:
+            self._conn.execute(
+                "UPDATE updates SET status = ? WHERE id = ?",
+                (status.value, update_id),
+            )
+
+    def list_recurring_failures(
+        self, *, min_count: int = 2, limit: int = 100,
+    ) -> builtins.list[dict]:
+        """Updates that have failed at least `min_count` times.
+
+        Returns tiny dicts (id, subject, source, failure_count) sorted
+        most-failed-first — the auditor surfaces these as a finding so
+        the user can stop bashing the same wall.
+        """
+        rows = self._conn.execute(
+            "SELECT id, subject, source, failure_count "
+            "FROM updates "
+            "WHERE COALESCE(failure_count, 0) >= ? "
+            "ORDER BY failure_count DESC LIMIT ?",
+            (min_count, limit),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "subject": r["subject"],
+                "source": r["source"],
+                "failure_count": int(r["failure_count"] or 0),
+            }
+            for r in rows
+        ]
 
     def set_user_note(self, update_id: str, note: str) -> bool:
         """Attach a free-text user note. Empty string clears the note.
