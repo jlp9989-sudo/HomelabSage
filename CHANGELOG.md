@@ -2,6 +2,43 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.7.0 — 2026-06-04 — milestone
+
+Consolidates everything since v0.5.0. New `homelabsage doctor`
+one-shot diagnostic ties every v0.6.x probe (TLS, DNS, disk,
+LLM-health, audit, compose-override, env-perms) into a single
+exit-coded command suitable for cron / Kuma push.
+
+### Added
+
+- **`homelabsage doctor` CLI** (`cli/doctor.py`). Runs every active
+  probe and prints a coloured summary. Exit codes:
+  `0` healthy, `1` ≥1 actionable finding, `2` LLM unreachable.
+  `--skip-llm` for offline runs. The 30-second answer to "is my
+  homelab healthy right now?".
+
+### Summary of the v0.6.x line
+
+The v0.6 series added (in order of shipping):
+
+| Version | Highlight                                                    |
+| ------- | ------------------------------------------------------------ |
+| v0.6.1  | Search endpoint + webhook receiver `/api/inbox/<source>`     |
+| v0.6.2  | Restart-flapping + exposed-port + Slack + API-key auth       |
+| v0.6.3  | Star/bookmark + Pushover + MCP explain + Notion archive CLI  |
+| v0.6.4  | TLS probe + MS Teams + volume orphans + stack export CLI     |
+| v0.6.5  | Healthcheck-stale + disk-pressure + compose-override + scan-window |
+| v0.6.6  | MCP audit tools + env-diff + LLM health gate + audit SSE     |
+| v0.6.7  | Restart-policy + env-perms + recurring-failures + env-diff CLI |
+| v0.6.8  | Snooze + container-disappearance + DNS probe + 3 MCP         |
+| v0.6.9  | Snooze engine wiring + GitHub release webhook + restart-drift |
+| v0.7.0  | `homelabsage doctor` bundled diagnostic                      |
+
+### Internal
+
+- 1386 → 1389 tests (+3), ruff clean, 0 mypy errors against 161 files.
+- 1 new CLI subcommand.
+
 ## v0.6.9 — 2026-06-04
 
 Snooze enforced in the engine, GitHub release webhook receiver, and
