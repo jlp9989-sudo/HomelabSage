@@ -2,6 +2,34 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.7.2 — 2026-06-04
+
+Snooze surface tied off + audit JSONL for shell pipelines.
+
+### Added
+
+- **`GET /api/updates/snoozed`** + **`db.list_snoozed()`**. Returns
+  updates whose `snooze_until` is in the future, sorted soonest-to-
+  expire first. Lexicographic comparison on the ISO 8601 strings —
+  valid given the snooze setter normalises to UTC with `+00:00`/`Z`.
+- **`homelabsage snooze` CLI**. Operations:
+  - `snooze <id> --until <iso>` set absolute timestamp
+  - `snooze <id> --for <7d|12h|30m>` relative shorthand
+  - `snooze <id> --clear` clear
+  - `snooze --list` see currently-snoozed
+  Rejects passing both `--until` and `--for`.
+- **MCP `list_snoozed` tool**. Same payload shape as the HTTP endpoint.
+- **`homelabsage audit --jsonl`**. Streams one JSON object per
+  finding to stdout — pipeable into `jq` for filtering. Bypasses
+  the `notes/audit.md` write so the JSONL form stays side-effect-
+  free.
+
+### Internal
+
+- 1396 → 1407 tests (+11), ruff clean, 0 mypy errors against 163 files.
+- 1 new CLI subcommand, 1 new web route, 1 new MCP tool, 1 new
+  db helper.
+
 ## v0.7.1 — 2026-06-04
 
 Doctor surface (HTTP + MCP) + review-driven fixes from a background

@@ -35,6 +35,7 @@ from . import (  # noqa: F401  (imported for side-effect: command registration)
     scan_diff,
     scripts,
     serve,
+    snooze,
     stack,
     tls_check,
     watched,

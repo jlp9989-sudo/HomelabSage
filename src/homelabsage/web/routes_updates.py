@@ -143,6 +143,13 @@ def register_updates_routes(
         return {"ok": True, "update_id": update_id,
                 "starred": db.is_starred(update_id)}
 
+    @app.get("/api/updates/snoozed")
+    async def api_list_snoozed(limit: int = 200) -> dict:
+        """Return currently-snoozed updates (snooze_until in the future)."""
+        cap = max(1, min(limit, 500))
+        rows = await asyncio.to_thread(db.list_snoozed, limit=cap)
+        return {"count": len(rows), "items": rows}
+
     @app.post("/api/updates/{update_id:path}/snooze")
     async def api_set_snooze(update_id: str, payload: dict) -> dict:
         """Set or clear the snooze timestamp.

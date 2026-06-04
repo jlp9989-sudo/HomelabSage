@@ -173,6 +173,35 @@ class UpdatesMixin:
             return None
         return row["snooze_until"] or None
 
+    def list_snoozed(
+        self, *, now_iso: str | None = None, limit: int = 200,
+    ) -> builtins.list[dict]:
+        """List currently-snoozed updates (snooze_until > now).
+
+        `now_iso` is an optional ISO timestamp; defaults to current UTC.
+        Comparison is lexicographic on the ISO 8601 strings — valid as
+        long as the timestamps are normalised to UTC with a `+00:00`
+        or `Z` suffix (which the snooze setter validates).
+        """
+        from .._time import utcnow
+        now_s = now_iso or utcnow().isoformat()
+        rows = self._conn.execute(
+            "SELECT id, subject, source, snooze_until "
+            "FROM updates "
+            "WHERE snooze_until IS NOT NULL AND snooze_until > ? "
+            "ORDER BY snooze_until ASC LIMIT ?",
+            (now_s, limit),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "subject": r["subject"],
+                "source": r["source"],
+                "snooze_until": r["snooze_until"],
+            }
+            for r in rows
+        ]
+
     def list_recurring_failures(
         self, *, min_count: int = 2, limit: int = 100,
     ) -> builtins.list[dict]:

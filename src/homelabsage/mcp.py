@@ -404,6 +404,15 @@ def _tool_doctor(cfg: Config, db: Database, params: dict) -> dict:
     return build_doctor_report(cfg, db, skip_llm=skip_llm)
 
 
+def _tool_list_snoozed(_cfg: Config, db: Database, params: dict) -> dict:
+    """List currently-snoozed updates (snooze_until > now)."""
+    if not hasattr(db, "list_snoozed"):
+        return {"count": 0, "items": []}
+    limit = max(1, min(int(params.get("limit") or 200), 500))
+    rows = db.list_snoozed(limit=limit)
+    return {"count": len(rows), "items": rows}
+
+
 def _tool_snooze_update(_cfg: Config, db: Database, params: dict) -> dict:
     """Set or clear a snooze timestamp on an update.
 
@@ -806,6 +815,20 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_doctor,
+    },
+    "list_snoozed": {
+        "description": (
+            "List currently-snoozed updates (snooze_until > now). "
+            "Sorted soonest-to-expire first."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_list_snoozed,
     },
     "snooze_update": {
         "description": (
