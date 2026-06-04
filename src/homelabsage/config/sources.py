@@ -90,6 +90,13 @@ class DockerSourceConfig(BaseModel):
     # mention the cumulative drift (env vars, layer caches, drifted
     # permissions). Set to 0 to disable. Default 180 days.
     container_age_warn_after_days: int = 180
+    # Restart-flapping detector — flag containers crashing at >0.25
+    # restarts/hour. Useful pre-update signal: a flapping container
+    # should be fixed BEFORE you change anything else.
+    detect_restart_flapping: bool = True
+    # Privileged-port + public-bind detector. Pure metadata read off
+    # `NetworkSettings.Ports`; no extra HTTP calls.
+    detect_exposed_ports: bool = True
 
 
 class HAConfig(BaseModel):

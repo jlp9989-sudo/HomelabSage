@@ -224,6 +224,41 @@ def _tool_history_csv(_cfg: Config, db: Database, params: dict) -> dict:
     return {"csv": body, "rows": body.count("\n") - 1 if body else 0}
 
 
+def _run_coro(coro):
+    """Run a coroutine to completion from a sync context that may or
+    may not already be inside an event loop.
+
+    The MCP dispatcher is called from an async FastAPI handler, so
+    `asyncio.run()` raises `RuntimeError: cannot be called from a
+    running event loop`. We detect that case and execute the coroutine
+    on a dedicated thread with its own loop.
+    """
+    import asyncio
+    import threading
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    # Running loop present — schedule on a worker thread.
+    result_holder: dict = {}
+
+    def _worker():
+        loop = asyncio.new_event_loop()
+        try:
+            result_holder["v"] = loop.run_until_complete(coro)
+        except BaseException as e:  # propagate
+            result_holder["err"] = e
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join()
+    if "err" in result_holder:
+        raise result_holder["err"]
+    return result_holder.get("v")
+
+
 def _tool_analyze_url(cfg: Config, _db: Database, params: dict) -> dict:
     """Run the URL analyser on any supported URL shape.
 
@@ -232,12 +267,11 @@ def _tool_analyze_url(cfg: Config, _db: Database, params: dict) -> dict:
     card + VRAM fit; everything else → article analyser via
     trafilatura. Returns the analysed Update + analysis as JSON.
     """
-    import asyncio
     url = params.get("url")
     if not url:
         raise ValueError("url is required")
     from .analyse_url import analyse_url
-    result = asyncio.run(analyse_url(
+    result = _run_coro(analyse_url(
         cfg, str(url), current_version=str(params.get("current_version") or ""),
     ))
     if result is None:
@@ -252,14 +286,13 @@ def _tool_csi(cfg: Config, _db: Database, params: dict) -> dict:
     + last-detected update + notes excerpt, optionally runs the LLM.
     `--evidence-only` is exposed as `llm: false` for air-gapped agents.
     """
-    import asyncio
     container_name = params.get("container_name")
     if not container_name:
         raise ValueError("container_name is required")
     use_llm = bool(params.get("llm", True))
     from .csi import build_prompt, gather_evidence, run_csi
     if use_llm:
-        report, evidence = asyncio.run(run_csi(cfg, str(container_name)))
+        report, evidence = _run_coro(run_csi(cfg, str(container_name)))
         return {
             "container_name": evidence.container_name,
             "log_lines": evidence.log_lines,

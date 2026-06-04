@@ -395,6 +395,45 @@ class DockerPlugin(Plugin):
                 if age is not None:
                     ctx["container_age"] = age.to_context()
 
+            if self.cfg.detect_restart_flapping:
+                from datetime import datetime as _dt
+
+                from .._time import parse_iso, utcnow
+                from ..restart_freq import evaluate as eval_restart
+                state = c.attrs.get("State") or {}
+                started_at_raw = state.get("StartedAt") or ""
+                started_at: _dt | None = None
+                if started_at_raw:
+                    try:
+                        # Docker may emit 9-digit nanos that Python
+                        # rejects; trim before parsing.
+                        s = started_at_raw
+                        if "." in s:
+                            head, _, tail = s.partition(".")
+                            tz = ""
+                            for m in ("Z", "+", "-"):
+                                i = tail.find(m)
+                                if i != -1:
+                                    tz = tail[i:]
+                                    tail = tail[:i]
+                                    break
+                            s = f"{head}.{tail[:6]}{tz}"
+                        started_at = parse_iso(s)
+                    except ValueError:
+                        started_at = None
+                rc = int(c.attrs.get("RestartCount") or 0)
+                rf = eval_restart(
+                    restart_count=rc, started_at=started_at, now=utcnow(),
+                )
+                if rf is not None:
+                    ctx["restart_freq"] = rf.to_context()
+
+            if self.cfg.detect_exposed_ports:
+                from ..exposed_ports import evaluate as eval_ports
+                pf = eval_ports(c.attrs.get("NetworkSettings") or {})
+                if pf:
+                    ctx["exposed_ports"] = [p.to_context() for p in pf]
+
             if self.cfg.image_size_growth_detect and image_tag:
                 # Local image's on-disk size (sum of writeable + layer cache).
                 # `c.image.attrs["Size"]` is set by `docker inspect`; falsy

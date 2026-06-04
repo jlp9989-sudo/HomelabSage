@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import FastAPI, Form, HTTPException
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment
 
@@ -135,9 +135,15 @@ def register_updates_routes(
     async def api_search(q: str = "", limit: int = 50) -> dict:
         """Substring search across subject + summary + breaking_changes
         + user_note. Empty `q` returns `{count: 0, items: []}`.
+
+        FastAPI validates `limit` as int (bad input → 422); we clamp
+        to [1, 200] after validation. Search runs in a worker thread
+        because SQLite LIKE on `analysis_json` is a full-table scan
+        and we don't want to block the event loop.
         """
-        cap = max(1, min(int(limit) or 50, 200))
-        items = db.search(q, limit=cap)
+        import asyncio
+        cap = max(1, min(limit, 200))
+        items = await asyncio.to_thread(db.search, q, limit=cap)
         return {
             "query": q,
             "count": len(items),
@@ -145,25 +151,38 @@ def register_updates_routes(
         }
 
     @app.post("/api/inbox/{source}")
-    async def api_inbox(source: str, payload: dict) -> dict:
+    async def api_inbox(source: str, request: Request) -> dict:
         """Webhook receiver — external systems POST update events here.
 
         Accepts a flexible payload. Required: `subject`, `new_version`.
         Optional: `current_version` (defaults to "(unknown)"),
-        `release_url`, `release_notes`, `context`. The receiver simply
-        upserts the event as an `Update` — the engine's analyzer will
-        pick it up on the next scan cycle (or you can trigger a scan
-        with `POST /run`).
+        `release_url` (must be http(s):// and ≤2048 chars),
+        `release_notes` (≤64 KB), `context` (dict).
 
-        Source string is used verbatim as the `Update.source` so the
-        analyzer's note matcher and the UI dashboard can group by it.
-        Restricted to `[a-z0-9_-]{1,32}` to avoid pollution.
+        Source string becomes `Update.source`. Restricted to
+        `[a-z0-9_-]{1,32}` so a malicious caller can't pollute the
+        dashboard with display-control characters.
+
+        Body size: capped at 1 MB. `release_notes` capped at 64 KB
+        before persistence so a single big POST can't bloat the DB.
         """
         import re as _re
+        from urllib.parse import urlparse
+
         if not _re.fullmatch(r"[a-z0-9_-]{1,32}", source):
             raise HTTPException(
                 400, "source must match [a-z0-9_-]{1,32}",
             )
+        # Hard request-body cap. Reject before parsing so a 100 MB POST
+        # can't fill memory just to be rejected as "payload too large".
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > 1024 * 1024:
+                    raise HTTPException(413, "payload exceeds 1 MB cap")
+            except ValueError:
+                pass
+        payload = await request.json()
         if not isinstance(payload, dict):
             raise HTTPException(400, "payload must be a JSON object")
         subject = payload.get("subject")
@@ -172,20 +191,45 @@ def register_updates_routes(
             raise HTTPException(400, "subject is required")
         if not isinstance(new_version, str) or not new_version.strip():
             raise HTTPException(400, "new_version is required")
+        # subject + version: cap to prevent unbounded growth + control
+        # chars that would break UI/Notion rendering.
+        if len(subject) > 200:
+            raise HTTPException(400, "subject too long (max 200)")
+        if len(new_version) > 100:
+            raise HTTPException(400, "new_version too long (max 100)")
         current_version = payload.get("current_version") or "(unknown)"
         if not isinstance(current_version, str):
             raise HTTPException(400, "current_version must be a string")
-        from ..models import Update as _Update
+        if len(current_version) > 100:
+            raise HTTPException(400, "current_version too long (max 100)")
+        # release_url: only http(s); reject javascript: / data: shells.
+        release_url = payload.get("release_url") or None
+        if release_url is not None:
+            if not isinstance(release_url, str):
+                raise HTTPException(400, "release_url must be a string")
+            if len(release_url) > 2048:
+                raise HTTPException(400, "release_url too long (max 2048)")
+            scheme = urlparse(release_url).scheme.lower()
+            if scheme not in ("http", "https"):
+                raise HTTPException(
+                    400, "release_url scheme must be http or https",
+                )
+        release_notes = payload.get("release_notes")
+        if release_notes is not None and not isinstance(release_notes, str):
+            raise HTTPException(400, "release_notes must be a string")
+        if isinstance(release_notes, str):
+            release_notes = release_notes[:65536]  # 64 KB hard cap
         ctx = payload.get("context") or {}
         if not isinstance(ctx, dict):
             raise HTTPException(400, "context must be an object")
+        from ..models import Update as _Update
         upd = _Update(
             source=source,
             subject=subject.strip(),
             current_version=current_version,
             new_version=new_version.strip(),
-            release_url=(payload.get("release_url") or None),
-            release_notes=(payload.get("release_notes") or None),
+            release_url=release_url,
+            release_notes=release_notes,
             context=ctx,
         )
         analyzed = AnalyzedUpdate(update=upd)
@@ -225,28 +269,38 @@ def register_updates_routes(
             new_status = UpdateStatus(status_raw)
         except ValueError as e:
             raise HTTPException(400, f"unknown status: {status_raw}") from e
-        applied = 0
-        not_found: list[str] = []
-        for uid in ids:
-            if not isinstance(uid, str):
-                continue
-            item = db.get(uid)
-            if item is None:
-                not_found.append(uid)
-                continue
-            db.set_status(uid, new_status)
-            applied += 1
-            if (
-                new_status == UpdateStatus.APPLIED
-                and engine.cfg.health_check.enabled
-                and item.update.source == "docker"
-            ):
-                from ..health_check import queue_for_update
-                queue_for_update(
-                    db, update_id=uid,
-                    container_name=item.update.subject,
-                    cfg=engine.cfg.health_check,
-                )
+
+        # Run the SQLite writes off the event loop — 500 sync
+        # `set_status` + optional `queue_for_update` calls would
+        # otherwise stall every other request for the duration.
+        import asyncio
+
+        def _bulk_apply() -> tuple[int, list[str]]:
+            applied = 0
+            not_found: list[str] = []
+            for uid in ids:
+                if not isinstance(uid, str):
+                    continue
+                item = db.get(uid)
+                if item is None:
+                    not_found.append(uid)
+                    continue
+                db.set_status(uid, new_status)
+                applied += 1
+                if (
+                    new_status == UpdateStatus.APPLIED
+                    and engine.cfg.health_check.enabled
+                    and item.update.source == "docker"
+                ):
+                    from ..health_check import queue_for_update
+                    queue_for_update(
+                        db, update_id=uid,
+                        container_name=item.update.subject,
+                        cfg=engine.cfg.health_check,
+                    )
+            return applied, not_found
+
+        applied, not_found = await asyncio.to_thread(_bulk_apply)
         return {
             "status": new_status.value,
             "applied": applied,

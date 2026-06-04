@@ -2,6 +2,66 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.6.2 — 2026-06-03
+
+Four new surfaces + a review-driven security pass. The review surfaced
+3 critical bugs from v0.6.1 (stored-XSS, DoS, MCP-loop deadlock); all
+fixed here with regression tests.
+
+### Added
+
+- **Restart-frequency detector** (`restart_freq.py`,
+  `sources.docker.detect_restart_flapping` default on). Reads
+  `c.attrs.RestartCount` + `State.StartedAt` and emits a finding
+  when restart rate crosses 0.25/hr (medium) / 1/hr (high) / 60/hr
+  (critical). Catches the "this container is crashlooping but I
+  haven't noticed" case before the user pushes an update.
+- **Exposed-port detector** (`exposed_ports.py`,
+  `sources.docker.detect_exposed_ports` default on). Flags two
+  patterns: (a) **privileged port** (<1024) bound to `0.0.0.0` /
+  `::`; (b) any TCP/UDP port bound to a public (non-RFC1918,
+  non-loopback) IPv4. `0.0.0.0:8080` (the homelab norm) does NOT
+  flag. Attached as `Update.context.exposed_ports`.
+- **Slack output** (`outputs/slack.py`, `outputs.slack`). Dedicated
+  Slack incoming-webhook with Block Kit message — separate from
+  apprise so the user gets the real Slack UI: header block + section
+  blocks + context block + severity-coloured attachment stripe.
+- **API-key auth** (`web.auth.api_keys`). Bearer-token alternative to
+  Basic Auth — additive list of shared secrets the user enables for
+  headless agents. Mixes with the existing `username/password` Basic
+  Auth; either form grants access.
+
+### Fixed (review-driven CRITICAL bugs from v0.6.0/v0.6.1)
+
+- **MCP `analyze_url` + `csi` crashed inside the event loop**: they
+  called `asyncio.run()` from inside the FastAPI async dispatcher,
+  which raises `cannot be called from a running event loop`. New
+  `_run_coro()` helper detects a running loop and schedules the
+  coroutine on a worker thread with its own loop.
+- **`/api/inbox` stored-XSS via `release_url`**: the receiver accepted
+  `javascript:alert(1)` URLs which rendered in the dashboard. Now
+  rejects anything not http(s)://, caps URL at 2048 chars.
+- **`/api/inbox` DoS via huge body**: previously no cap, so a 100 MB
+  POST hit the database. Now: 1 MB body cap (Content-Length pre-
+  check), 64 KB release_notes truncation, 200/100-char caps on
+  subject and version fields.
+- **`/api/updates/search` and `POST /api/updates/bulk` blocked the
+  event loop**: SQLite LIKE on 2000 rows + N synchronous writes
+  inside async handlers. Now offloaded via `asyncio.to_thread`.
+- **Webhook output header-injection**: user-config headers with
+  `\r` / `\n` in keys/values now logged + dropped (no Auth header
+  override) rather than passed through to httpx.
+- **Auth-bypass typo risk**: paths now live in `AUTH_BYPASS_EXACT`
+  (frozenset) + `AUTH_BYPASS_PREFIX` (tuple) — single source of
+  truth, regression test asserts the exact set.
+
+### Internal
+
+- 1220 → 1248 tests (+28), ruff clean, 0 mypy errors against 141 files.
+- 2 new detectors + 1 new output + 1 new auth scheme.
+- 6 critical/important review findings fixed with regression tests in
+  `tests/test_v062.py`.
+
 ## v0.6.1 — 2026-06-03
 
 Three connection-layer features. The dashboard becomes searchable,

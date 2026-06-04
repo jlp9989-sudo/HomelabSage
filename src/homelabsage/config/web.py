@@ -16,6 +16,15 @@ class WebAuthConfig(BaseModel):
     enabled: bool = False
     username: str = "admin"
     password: str = ""
+    api_keys: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Bearer-token alternative to Basic Auth. Each entry is a "
+            "shared secret; the client sends `Authorization: Bearer "
+            "<key>` and bypasses the Basic Auth challenge. Treat each "
+            "entry like a password — rotation = edit + restart."
+        ),
+    )
 
 
 class WebConfig(BaseModel):

@@ -75,9 +75,28 @@ class WebhookOutput(Output):
     async def send(self, item: AnalyzedUpdate) -> None:
         if not self._should_send(item):
             return
-        headers: dict[str, str] = dict(self.cfg.headers or {})
+        # Validate user-supplied header k/v pairs: HTTP headers must not
+        # contain CR/LF (header injection / response splitting). Drop
+        # offenders silently — the user typoed a template variable into
+        # a header, the right behaviour is "headers without the bad
+        # entry, log it" rather than blowing up the dispatch.
+        headers: dict[str, str] = {}
+        for k, v in (self.cfg.headers or {}).items():
+            if not isinstance(k, str) or not isinstance(v, str):
+                continue
+            if "\r" in k or "\n" in k or "\r" in v or "\n" in v:
+                log.warning(
+                    "webhook: dropping header %r — CR/LF in name or value",
+                    k,
+                )
+                continue
+            headers[k] = v
         if self.cfg.bearer_token:
-            headers["Authorization"] = f"Bearer {self.cfg.bearer_token}"
+            # Token is set from config; we still validate it for CRLF
+            # because the source might be a templated env var.
+            tok = str(self.cfg.bearer_token)
+            if "\r" not in tok and "\n" not in tok:
+                headers["Authorization"] = f"Bearer {tok}"
         headers.setdefault("Content-Type", "application/json")
         try:
             async with httpx.AsyncClient(timeout=15) as client:

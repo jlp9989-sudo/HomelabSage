@@ -22,6 +22,7 @@ from .outputs.discord import DiscordOutput
 from .outputs.gotify import GotifyOutput
 from .outputs.notion import NotionOutput
 from .outputs.ntfy import NtfyOutput
+from .outputs.slack import SlackOutput
 from .outputs.smtp import SMTPOutput
 from .outputs.telegram import TelegramOutput
 from .outputs.webhook import WebhookOutput
@@ -66,6 +67,8 @@ def build_outputs(cfg: Config, db: Database) -> list[Output]:
         outputs.append(SMTPOutput(cfg.outputs.smtp))
     if cfg.outputs.webhook.enabled:
         outputs.append(WebhookOutput(cfg.outputs.webhook))
+    if cfg.outputs.slack.enabled:
+        outputs.append(SlackOutput(cfg.outputs.slack))
     return outputs
 
 

@@ -237,6 +237,28 @@ class SMTPOutputConfig(QuietHoursMixin):
     )
 
 
+class SlackOutputConfig(QuietHoursMixin):
+    """Slack incoming-webhook output (Block Kit message)."""
+
+    enabled: bool = False
+    webhook_url: str = Field(
+        "",
+        description=(
+            "Slack incoming webhook URL "
+            "(https://hooks.slack.com/services/T.../B.../...). "
+            "Anyone with this URL can post — treat as a secret."
+        ),
+    )
+    username: str = Field(
+        "HomelabSage",
+        description="Overrides the webhook's default username on each message.",
+    )
+    min_severity: Literal["critical", "high", "medium", "info"] = Field(
+        "high",
+        description="Only push updates at or above this severity.",
+    )
+
+
 class WebhookOutputConfig(QuietHoursMixin):
     """Generic JSON-webhook output. Bring-your-own-receiver."""
 
@@ -290,4 +312,5 @@ class OutputsConfig(BaseModel):
     apprise: AppriseOutputConfig = Field(default_factory=AppriseOutputConfig)
     smtp: SMTPOutputConfig = Field(default_factory=SMTPOutputConfig)
     webhook: WebhookOutputConfig = Field(default_factory=WebhookOutputConfig)
+    slack: SlackOutputConfig = Field(default_factory=SlackOutputConfig)
     batching: BatchingConfig = Field(default_factory=BatchingConfig)

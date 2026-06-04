@@ -160,7 +160,7 @@ class UpdatesMixin:
         query: str,
         *,
         limit: int = 50,
-    ) -> "builtins.list[AnalyzedUpdate]":
+    ) -> builtins.list[AnalyzedUpdate]:
         """Substring search across subject + summary + breaking-changes JSON.
 
         SQLite LIKE with `%query%` on each searchable column. Case-
