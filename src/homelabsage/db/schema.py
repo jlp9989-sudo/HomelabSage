@@ -212,3 +212,11 @@ def migrate(conn: sqlite3.Connection) -> None:
             "ALTER TABLE updates ADD COLUMN failure_count "
             "INTEGER NOT NULL DEFAULT 0",
         )
+
+    # v0.6.8: snooze timestamp (ISO 8601 UTC). When set + in future,
+    # outputs/auditor suppress this update. Cleared by setting to NULL
+    # or by user flipping status to APPLIED/DISMISSED.
+    if "snooze_until" not in cols:
+        conn.execute(
+            "ALTER TABLE updates ADD COLUMN snooze_until TEXT",
+        )

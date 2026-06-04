@@ -393,6 +393,76 @@ def _tool_list_starred(_cfg: Config, db: Database, _params: dict) -> dict:
             "items": [_summarise_update(it) for it in items]}
 
 
+def _tool_snooze_update(_cfg: Config, db: Database, params: dict) -> dict:
+    """Set or clear a snooze timestamp on an update.
+
+    Pass `snooze_until` as ISO 8601 (UTC). Pass empty string / null
+    to clear. Returns the resulting snooze value.
+    """
+    update_id = params.get("update_id")
+    raw = params.get("snooze_until")
+    if not update_id or not isinstance(update_id, str):
+        return {"ok": False, "error": "update_id is required"}
+    snooze: str | None = None
+    if raw:
+        if not isinstance(raw, str):
+            return {"ok": False, "error": "snooze_until must be a string"}
+        # Validate parseable.
+        from ._time import parse_iso
+        try:
+            parse_iso(raw)
+        except ValueError:
+            return {
+                "ok": False,
+                "error": f"snooze_until not ISO 8601: {raw!r}",
+            }
+        snooze = raw
+    if not db.set_snooze(update_id, snooze):
+        return {"ok": False, "error": f"no update with id={update_id}"}
+    return {
+        "ok": True, "update_id": update_id,
+        "snooze_until": db.get_snooze(update_id),
+    }
+
+
+def _tool_recurring_failures(_cfg: Config, db: Database, params: dict) -> dict:
+    """List updates that have failed N+ times."""
+    if not hasattr(db, "list_recurring_failures"):
+        return {"count": 0, "items": []}
+    min_count = max(1, int(params.get("min_count") or 2))
+    limit = max(1, min(int(params.get("limit") or 50), 500))
+    rows = db.list_recurring_failures(min_count=min_count, limit=limit)
+    return {"count": len(rows), "items": rows}
+
+
+def _tool_dns_check(cfg: Config, _db: Database, params: dict) -> dict:
+    """Resolve hostnames; return failures only.
+
+    `hostnames` param overrides; defaults to TLS check URLs' hosts.
+    """
+    hostnames = params.get("hostnames")
+    if not isinstance(hostnames, list) or not hostnames:
+        # Derive from tls_check.urls — same hosts the user already
+        # cares about for cert validity.
+        from urllib.parse import urlparse
+        hostnames = []
+        for raw in cfg.tls_check.urls or []:
+            p = urlparse(raw if "://" in raw else "https://" + raw)
+            if p.hostname:
+                hostnames.append(p.hostname)
+    if not hostnames:
+        return {
+            "count": 0, "items": [],
+            "reason": "no hostnames configured",
+        }
+    from .dns_check import check_hostnames
+    findings = check_hostnames([str(h) for h in hostnames])
+    return {
+        "count": len(findings),
+        "items": [f.to_context() for f in findings],
+    }
+
+
 def _tool_disk_pressure_check(cfg: Config, _db: Database, params: dict) -> dict:
     """Run the disk-pressure probe on-demand.
 
@@ -709,6 +779,58 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_compose_overrides,
+    },
+    "snooze_update": {
+        "description": (
+            "Set or clear a snooze timestamp on an update. Empty / "
+            "null `snooze_until` clears the snooze."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "update_id": {"type": "string"},
+                "snooze_until": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "null"},
+                    ],
+                    "description": "ISO 8601 UTC timestamp or null to clear.",
+                },
+            },
+            "required": ["update_id"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_snooze_update,
+    },
+    "recurring_failures": {
+        "description": (
+            "List updates that have failed `min_count`+ times (default 2)."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "min_count": {"type": "integer", "minimum": 1},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_recurring_failures,
+    },
+    "dns_check": {
+        "description": (
+            "Resolve hostnames (defaults to TLS check URLs' hosts). "
+            "Returns failures only."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "hostnames": {
+                    "type": "array", "items": {"type": "string"},
+                },
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_dns_check,
     },
     "tls_check_run": {
         "description": (

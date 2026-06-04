@@ -2,6 +2,40 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.6.8 — 2026-06-04
+
+Five new surfaces: snooze, container-disappearance tracking, DNS
+probe, plus three MCP tools that expose snooze + recurring failures
++ DNS.
+
+### Added
+
+- **Per-update snooze**. New `snooze_until` column on `updates`
+  (ISO 8601 UTC). New `POST /api/updates/<id>/snooze` accepts
+  `{"snooze_until": ...}`. Body validation parses the timestamp.
+  Future scope: have outputs honour the snooze automatically (the
+  DB column is in place; engine wiring deferred).
+- **Container-disappearance tracker** (`disappearance.py`). Pure
+  `diff_snapshots(prev, current_names)` + atomic
+  `save_snapshot` / `load_snapshot` JSON helpers. Lets the auditor
+  flag "container X was here last scan, isn't now" without a new
+  DB table — snapshot is single-row state.
+- **DNS resolution probe** (`dns_check.py`). Stdlib
+  `socket.getaddrinfo` with bounded timeout (saved/restored via
+  context manager). Returns one `DNSFinding` per NXDOMAIN /
+  resolution failure. Companion to `tls_check`: catches drift in
+  the underlying DNS record even when the cert is fresh.
+- **3 MCP tools** — `snooze_update`, `recurring_failures`,
+  `dns_check`. The DNS tool defaults its hostname list to the hosts
+  derived from `cfg.tls_check.urls` so the user doesn't have to
+  configure two lists.
+
+### Internal
+
+- 1348 → 1370 tests (+22), ruff clean, 0 mypy errors against 159 files.
+- 3 new modules, 1 new DB column, 1 new web route, 3 new MCP tools,
+  2 new db helpers (`set_snooze`, `get_snooze`).
+
 ## v0.6.7 — 2026-06-04
 
 Four orthogonal additions across container metadata, filesystem

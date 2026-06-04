@@ -147,6 +147,27 @@ class UpdatesMixin:
                 (status.value, update_id),
             )
 
+    def set_snooze(self, update_id: str, snooze_until: str | None) -> bool:
+        """Set or clear the snooze timestamp.
+
+        `snooze_until` is an ISO 8601 string in UTC; pass None to
+        clear. Returns True iff the row exists. The engine + outputs
+        suppress updates whose snooze is still in the future.
+        """
+        cur = self._conn.execute(
+            "UPDATE updates SET snooze_until = ? WHERE id = ?",
+            (snooze_until or None, update_id),
+        )
+        return (cur.rowcount or 0) > 0
+
+    def get_snooze(self, update_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT snooze_until FROM updates WHERE id = ?", (update_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return row["snooze_until"] or None
+
     def list_recurring_failures(
         self, *, min_count: int = 2, limit: int = 100,
     ) -> builtins.list[dict]:

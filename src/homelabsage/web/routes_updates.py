@@ -142,6 +142,31 @@ def register_updates_routes(
         return {"ok": True, "update_id": update_id,
                 "starred": db.is_starred(update_id)}
 
+    @app.post("/api/updates/{update_id:path}/snooze")
+    async def api_set_snooze(update_id: str, payload: dict) -> dict:
+        """Set or clear the snooze timestamp.
+
+        Body: `{"snooze_until": "2026-06-10T12:00:00Z"}` to snooze, or
+        `{"snooze_until": null}` to clear. ISO 8601 strings only.
+        """
+        raw = payload.get("snooze_until")
+        if raw is not None and not isinstance(raw, str):
+            raise HTTPException(400, "snooze_until must be a string or null")
+        snooze = raw or None
+        if snooze:
+            # Sanity-check the timestamp by parsing it.
+            from .._time import parse_iso
+            try:
+                parse_iso(snooze)
+            except ValueError:
+                raise HTTPException(  # noqa: B904
+                    400, "snooze_until must be ISO 8601 (e.g. 2026-06-10T12:00:00Z)",
+                )
+        if not db.set_snooze(update_id, snooze):
+            raise HTTPException(404, f"no update with id={update_id}")
+        return {"ok": True, "update_id": update_id,
+                "snooze_until": db.get_snooze(update_id)}
+
     @app.get("/api/updates/starred")
     async def api_list_starred(limit: int = 200) -> dict:
         """Return only the bookmarked updates, newest first."""
