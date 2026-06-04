@@ -21,6 +21,33 @@ from ..db import Database
 from ..doctor import build_report
 from ._common import CONFIG_OPT, VERBOSE_OPT, app, console, setup_logging
 
+_SEVERITY_ORDER = {"info": 0, "medium": 1, "high": 2, "critical": 3}
+
+
+def _validate_floor(value: str) -> str:
+    if value not in _SEVERITY_ORDER:
+        raise typer.BadParameter(
+            f"--severity-floor must be one of {sorted(_SEVERITY_ORDER)} (got {value!r})"
+        )
+    return value
+
+
+def _audit_has_findings_at_or_above(report: dict, floor: str) -> bool:
+    """True iff the audit section reports any count at or above `floor`."""
+    counts = (
+        report.get("sections", {})
+        .get("audit", {})
+        .get("counts_by_severity", {})
+        or {}
+    )
+    threshold = _SEVERITY_ORDER[floor]
+    for sev, n in counts.items():
+        if int(n or 0) <= 0:
+            continue
+        if _SEVERITY_ORDER.get(sev, 0) >= threshold:
+            return True
+    return False
+
 
 def _print_section(name: str, section: dict) -> int:
     """Print one section; return count of `bad` findings to add."""
@@ -131,6 +158,15 @@ def doctor_cmd(
             "0 = one-shot (default). Minimum 5 to avoid hammering."
         ),
     ),
+    severity_floor: str = typer.Option(
+        "medium", "--severity-floor",
+        help=(
+            "Audit findings below this severity don't flip the exit "
+            "code (default `medium`). Probe failures (TLS/DNS/disk/"
+            "compose) still flip it regardless."
+        ),
+        callback=_validate_floor,
+    ),
     verbose: bool = VERBOSE_OPT,
 ) -> None:
     """One-shot (default) or continuous diagnostic of every active probe."""
@@ -143,7 +179,34 @@ def doctor_cmd(
         outcome = _render_report(report)
         if outcome == -2:
             raise SystemExit(2)
-        raise SystemExit(0 if outcome == 0 else 1)
+        # Apply severity floor: if `bad` was entirely audit-driven and
+        # none of the audit counts meet the floor, treat as healthy.
+        if outcome == 0:
+            raise SystemExit(0)
+        # Outcome > 0: check whether the floor downgrades it to healthy.
+        # `bad` may include direct probe failures (TLS/DNS/disk/etc.)
+        # which aren't surfaced as audit counts. Be conservative: only
+        # downgrade when the audit section is the SOLE contributor.
+        audit_section = report.get("sections", {}).get("audit", {})
+        if (
+            not audit_section.get("ok")
+            and audit_section.get("counts_by_severity")
+            and not _audit_has_findings_at_or_above(report, severity_floor)
+        ):
+            # Did any OTHER section fail? Check probe-level ok flags.
+            other_failed = False
+            for name in ("llm", "tls", "dns", "disk", "compose"):
+                sec = report.get("sections", {}).get(name, {})
+                if not sec.get("ok") and not sec.get("skipped"):
+                    other_failed = True
+                    break
+            if not other_failed:
+                console.print(
+                    f"[dim]Audit findings present but below "
+                    f"--severity-floor={severity_floor} → exit 0.[/dim]"
+                )
+                raise SystemExit(0)
+        raise SystemExit(1)
 
     interval = max(5, watch)
     import time

@@ -200,10 +200,47 @@ def list_history(
     return out
 
 
+def prune(notes_dir: str | Path, *, keep_last: int) -> int:
+    """Truncate `audit_history.jsonl` to its `keep_last` newest rows.
+
+    Returns the number of rows DROPPED (0 when file missing or
+    already at or below the cap). Atomic write — we materialise the
+    surviving rows into a sibling tmp file and rename, so a kill
+    mid-write can never leave a half-truncated history.
+    """
+    if not notes_dir or keep_last < 0:
+        return 0
+    path = Path(notes_dir).expanduser() / FILE_NAME
+    if not path.is_file():
+        return 0
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            lines = [ln for ln in (line.strip() for line in fh) if ln]
+    except OSError as e:
+        log.warning("audit_history: prune read failed: %s", e)
+        return 0
+    if len(lines) <= keep_last:
+        return 0
+    survivors = lines[-keep_last:] if keep_last > 0 else []
+    dropped = len(lines) - len(survivors)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(
+            ("\n".join(survivors) + "\n") if survivors else "",
+            encoding="utf-8",
+        )
+        tmp.replace(path)
+    except OSError as e:
+        log.warning("audit_history: prune write failed: %s", e)
+        return 0
+    return dropped
+
+
 __all__ = [
     "HistoryEntry",
     "append",
     "diff_against_latest",
     "list_history",
     "load_latest",
+    "prune",
 ]

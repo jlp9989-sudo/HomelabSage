@@ -16,6 +16,7 @@ from __future__ import annotations
 from . import (  # noqa: F401  (imported for side-effect: command registration)
     analyse,
     audit,
+    audit_prune,
     backup,
     check,
     chronicle,

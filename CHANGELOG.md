@@ -2,6 +2,37 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.7.6 — 2026-06-04
+
+5-item batch: audit-history pruning, MCP compose-graph + bulk snooze
+clear, HTTP recurring-failures, doctor severity floor.
+
+### Added
+
+- **`audit_history.prune(keep_last)`** + **`homelabsage audit-prune
+  --keep N`**. Atomic truncate (tmp file + rename) so a kill
+  mid-write never leaves a half-truncated history. Default keeps
+  100 newest rows.
+- **MCP `compose_graph_mermaid` tool**. Returns `{mermaid,
+  service_count, edge_count}`. `paths` param overrides config.
+  Agents can read the graph without invoking the CLI.
+- **`db.clear_all_snoozes()`** + **`DELETE /api/updates/snoozed`** +
+  **MCP `clear_all_snoozes`**. Bulk-clear every snooze in one call;
+  returns the count.
+- **`GET /api/updates/recurring-failures?min_count=&limit=`**. HTTP
+  mirror of the existing MCP `recurring_failures` tool so Homepage
+  / Homarr widgets can display a "stop bashing this wall" list.
+- **`homelabsage doctor --severity-floor {info|medium|high|critical}`**.
+  Audit findings below the floor don't flip the exit code. Probe
+  failures (TLS/DNS/disk/compose) still flip it regardless — the
+  flag is intentionally conservative.
+
+### Internal
+
+- 1449 → 1464 tests (+15), ruff clean, 0 mypy errors against 168 files.
+- 1 new module (`cli/audit_prune.py`), 2 new MCP tools, 2 new web
+  routes (DELETE snoozed + GET recurring-failures), 1 new db helper.
+
 ## v0.7.5 — 2026-06-04
 
 MCP exposure of audit history + diff, compose graph mermaid export,

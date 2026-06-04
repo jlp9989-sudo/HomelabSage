@@ -404,6 +404,33 @@ def _tool_doctor(cfg: Config, db: Database, params: dict) -> dict:
     return build_doctor_report(cfg, db, skip_llm=skip_llm)
 
 
+def _tool_compose_graph_mermaid(cfg: Config, _db: Database, params: dict) -> dict:
+    """Render the compose dependency graph as Mermaid.
+
+    `paths` param overrides the configured scan paths. Returns
+    `{mermaid: "...", service_count: N, edge_count: M}`.
+    """
+    from .cli.compose_graph import render_mermaid
+    from .compose import build_graph
+    paths = params.get("paths")
+    if not isinstance(paths, list) or not paths:
+        paths = list(cfg.sources.docker.compose_scan_paths or [])
+    if not paths:
+        return {
+            "mermaid": "", "service_count": 0, "edge_count": 0,
+            "reason": "no compose scan paths configured",
+        }
+    graph = build_graph([str(p) for p in paths])
+    dependents = getattr(graph, "_dependents", {})
+    body = render_mermaid(graph.services, dependents)
+    edge_count = sum(len(s.depends_on) for s in graph.services.values())
+    return {
+        "mermaid": body,
+        "service_count": len(graph.services),
+        "edge_count": edge_count,
+    }
+
+
 def _tool_audit_history(cfg: Config, _db: Database, params: dict) -> dict:
     """Paginated list of past audit snapshots (newest first).
 
@@ -441,6 +468,14 @@ def _tool_list_snoozed(_cfg: Config, db: Database, params: dict) -> dict:
     limit = max(1, min(int(params.get("limit") or 200), 500))
     rows = db.list_snoozed(limit=limit)
     return {"count": len(rows), "items": rows}
+
+
+def _tool_clear_all_snoozes(_cfg: Config, db: Database, _params: dict) -> dict:
+    """Clear `snooze_until` on every snoozed update."""
+    if not hasattr(db, "clear_all_snoozes"):
+        return {"ok": False, "cleared": 0, "error": "db missing helper"}
+    cleared = db.clear_all_snoozes()
+    return {"ok": True, "cleared": cleared}
 
 
 def _tool_snooze_update(_cfg: Config, db: Database, params: dict) -> dict:
@@ -845,6 +880,31 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_doctor,
+    },
+    "compose_graph_mermaid": {
+        "description": (
+            "Render the compose dependency graph as Mermaid. `paths` "
+            "param overrides cfg.sources.docker.compose_scan_paths."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "paths": {"type": "array", "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_compose_graph_mermaid,
+    },
+    "clear_all_snoozes": {
+        "description": (
+            "Clear snooze_until on every snoozed update. Returns the "
+            "count of rows cleared."
+        ),
+        "params_schema": {
+            "type": "object", "properties": {},
+            "additionalProperties": False,
+        },
+        "impl": _tool_clear_all_snoozes,
     },
     "audit_history": {
         "description": (

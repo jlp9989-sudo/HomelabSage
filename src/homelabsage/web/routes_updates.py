@@ -150,6 +150,26 @@ def register_updates_routes(
         rows = await asyncio.to_thread(db.list_snoozed, limit=cap)
         return {"count": len(rows), "items": rows}
 
+    @app.delete("/api/updates/snoozed")
+    async def api_clear_all_snoozes() -> dict:
+        """Clear `snooze_until` on every snoozed update. Returns count."""
+        cleared = await asyncio.to_thread(db.clear_all_snoozes)
+        return {"ok": True, "cleared": cleared}
+
+    @app.get("/api/updates/recurring-failures")
+    async def api_recurring_failures(
+        min_count: int = 2, limit: int = 100,
+    ) -> dict:
+        """Updates that have flipped to FAILED at least `min_count` times."""
+        if not hasattr(db, "list_recurring_failures"):
+            return {"count": 0, "items": []}
+        m = max(1, min_count)
+        cap = max(1, min(limit, 500))
+        rows = await asyncio.to_thread(
+            db.list_recurring_failures, min_count=m, limit=cap,
+        )
+        return {"count": len(rows), "items": rows}
+
     @app.post("/api/updates/{update_id:path}/snooze")
     async def api_set_snooze(update_id: str, payload: dict) -> dict:
         """Set or clear the snooze timestamp.

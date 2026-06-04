@@ -173,6 +173,14 @@ class UpdatesMixin:
             return None
         return row["snooze_until"] or None
 
+    def clear_all_snoozes(self) -> int:
+        """Clear `snooze_until` on every row that has one. Returns count."""
+        cur = self._conn.execute(
+            "UPDATE updates SET snooze_until = NULL "
+            "WHERE snooze_until IS NOT NULL",
+        )
+        return int(cur.rowcount or 0)
+
     def list_snoozed(
         self, *, now_iso: str | None = None, limit: int = 200,
     ) -> builtins.list[dict]:
