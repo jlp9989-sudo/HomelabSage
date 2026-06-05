@@ -120,12 +120,21 @@ def scan_container(
     fetch_fn=None,
 ) -> LogScanSample:
     """Fetch + count for one container. `fetch_fn` injection lets tests
-    pass in synthetic log lines without spinning up docker."""
+    pass in synthetic log lines without spinning up docker.
+
+    I12: log_anomaly only counts regex hits — it doesn't need the full
+    4000-line CSI tail. Cap to `lookback_minutes * 200` (200 lines/min
+    is already a very chatty container) with a safety floor so brief
+    lookback windows still get a useful sample.
+    """
     since = utcnow().replace(microsecond=0) - timedelta(minutes=lookback_minutes)
     if fetch_fn is not None:
         lines = fetch_fn(container_name, since=since)
     else:
-        lines = fetch_docker_logs(container_name, since=since, socket=socket)
+        cap = max(500, lookback_minutes * 200)
+        lines = fetch_docker_logs(
+            container_name, since=since, socket=socket, max_lines=cap,
+        )
     err, warn = count_errors_warns(lines)
     return LogScanSample(
         container_name=container_name,

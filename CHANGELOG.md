@@ -2,6 +2,41 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.10.5 — 2026-06-05
+
+Last critical from the v1.0 punch list (C4) plus log allocation bound
+(I12). After this release every Critical from the audit is closed.
+
+### Fixed (Critical)
+
+- **C4 — `restart_freq` no longer flags stable containers as critical
+  after a manual restart.** Before: a container with 47 lifetime
+  crashes spread across 90 days, restarted 5 min ago, computed
+  `rate = 47 / 0.083 = 564/h` → critical. The detector now requires
+  **at least 1 hour of uptime** before emitting any rate-based
+  finding (`min_uptime_hours=1.0`, operator-tunable). Short-window
+  flapping that's real will resurface the next scan once uptime
+  passes the floor. A precise fix using the container event log is
+  deferred to v1.x.
+
+### Fixed (Important)
+
+- **I12 — `fetch_docker_logs` now caps both line count and per-line
+  bytes.** Added `max_lines=4000` (existing CSI cap, parameterised)
+  and `max_line_bytes=4096` (new). `log_anomaly.scan_container` now
+  passes `max_lines = max(500, lookback_minutes * 200)` instead of
+  inheriting the 4000 default — it only counts regex hits and
+  doesn't need the LLM-sized tail. A 30 KB JSON log line per entry
+  no longer materialises into a 30 KB string in memory.
+
+### Internal
+
+- 1692 → 1702 tests (+10). Ruff clean, 0 mypy errors against 180
+  source files.
+- All 5 Critical findings from the v1.0 punch list are now closed
+  (C1, C2, C3, C4, C5). Remaining for v1.0 promotion: I8, I11 (plus
+  the 5 Nits, opt-in).
+
 ## v0.10.4 — 2026-06-05
 
 Detector false-positive cleanup — closes I6 + I7 from the v1.0

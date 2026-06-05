@@ -128,6 +128,8 @@ def fetch_docker_logs(
     *,
     since: datetime | None,
     socket: str = "/var/run/docker.sock",
+    max_lines: int = 4000,
+    max_line_bytes: int = 4096,
 ) -> list[str]:
     """Pull recent logs for a container via the docker SDK.
 
@@ -135,6 +137,14 @@ def fetch_docker_logs(
     lazily and split on newlines so the caller gets a flat list to filter.
     On any failure (container gone, daemon unreachable) we return [] —
     CSI is best-effort and must degrade gracefully.
+
+    I12 (v1.0 punch list): defence in depth against multi-GB log spills.
+    - `max_lines` caps the docker `tail=` parameter (default 4000 keeps
+      CSI's existing behaviour).
+    - `max_line_bytes` truncates individual lines AFTER decode so a single
+      30 KB JSON entry doesn't blow our memory either. log_anomaly
+      callers can lower `max_lines` further since they only count regex
+      hits and don't ship lines to the LLM.
     """
     import docker as docker_sdk
 
@@ -153,14 +163,19 @@ def fetch_docker_logs(
         # line timestamp prefix which makes the LLM's quotes self-locating.
         # Bound the total bytes to avoid feeding multi-MB logs into the LLM.
         raw = c.logs(
-            since=since, timestamps=True, stdout=True, stderr=True, tail=4000
+            since=since, timestamps=True, stdout=True, stderr=True,
+            tail=max(1, max_lines),
         )
     except Exception as e:
         log.warning("logs() failed for %s: %s", container_name, e)
         return []
     if isinstance(raw, bytes):
-        return raw.decode("utf-8", errors="replace").splitlines()
-    return [chunk.decode("utf-8", errors="replace") for chunk in raw]
+        lines = raw.decode("utf-8", errors="replace").splitlines()
+    else:
+        lines = [chunk.decode("utf-8", errors="replace") for chunk in raw]
+    if max_line_bytes > 0:
+        lines = [ln[:max_line_bytes] for ln in lines]
+    return lines
 
 
 def build_update_block(it: AnalyzedUpdate | None) -> str:

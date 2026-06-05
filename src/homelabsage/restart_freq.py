@@ -55,15 +55,23 @@ def evaluate(
     started_at: datetime | None,
     now: datetime,
     min_restart_count: int = 3,
+    min_uptime_hours: float = 1.0,
 ) -> RestartFinding | None:
     """Return a finding when restart rate is interesting.
 
-    `restart_count` is the docker lifetime counter. `started_at` is the
-    container's current uptime start. We approximate "recent" rate as
-    `restart_count / hours_since_started_at`. That's wrong for the
-    pathological case of a stable container restarted on purpose 6
-    months ago — but it's also not actually broken in that case, so a
-    low rate falls under `info` and we suppress it.
+    `restart_count` is the docker LIFETIME counter; `started_at` is the
+    container's *current* uptime start. We approximate "recent" rate as
+    `restart_count / hours_since_started_at`.
+
+    C4 (v1.0 punch list): the old version flagged stable containers as
+    "critical" after a routine manual restart — a 47-crash-across-90-days
+    container restarted 5 min ago computed `rate = 47 / 0.083 = 564/h`.
+    To suppress that false-positive we require **at least one hour of
+    uptime** before emitting any rate-based finding. Below that the
+    rate is too distorted by the short window to be trustworthy —
+    short-window flapping will resurface on the next scan once
+    `delta >= 1h`. (A full fix would compute the rate against the
+    container event log; tracked as future work.)
 
     `min_restart_count` skips the noise floor: a container that
     crashed once never flags.
@@ -79,9 +87,10 @@ def evaluate(
         from datetime import UTC
         now = now.replace(tzinfo=UTC)
     delta = now - started_at
-    if delta <= timedelta(minutes=1):
-        # Just started — can't compute rate meaningfully; treat as
-        # the noise floor.
+    if delta <= timedelta(hours=min_uptime_hours):
+        # Too soon after the most recent restart to trust the rate —
+        # `restart_count` is lifetime, `delta` is uptime, the ratio
+        # spikes pathologically when uptime is small.
         return None
     hours = delta.total_seconds() / 3600
     rate = restart_count / hours if hours > 0 else 0.0
