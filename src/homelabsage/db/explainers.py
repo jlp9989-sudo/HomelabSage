@@ -70,3 +70,14 @@ class ExplainersMixin:
             "model": row["model"],
             "created_at": parse_iso(row["created_at"]),
         }
+
+    def list_explained_ids(self) -> set[str]:
+        """Return the set of update_ids that have a stored explainer.
+
+        Used by the updates index to decide whether to show an
+        `explain` link per row — one query instead of one-per-row.
+        """
+        rows = self._conn.execute(
+            "SELECT update_id FROM analysis_explainers",
+        ).fetchall()
+        return {r["update_id"] for r in rows}

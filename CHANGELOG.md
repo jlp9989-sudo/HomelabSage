@@ -2,6 +2,43 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.9.9 — 2026-06-05
+
+UX + a11y polish on the updates table — last lap before the v1.0
+code-quality audit. No behavioural changes to the engine or
+detectors; all surface improvements on `/`.
+
+### Added
+
+- **Custom snooze datepicker.** Beside the 7/14/30/90 dropdown,
+  each unsnoozed row now has a `<input type="date">` for
+  "snooze until X". HTMX POSTs to `/updates/{id}/snooze/until`,
+  YYYY-MM-DD only, past/today silently clears (defensive). Invalid
+  date → 400, unknown id → 404.
+- **Inline `explain` link** per row when an analysis explainer
+  exists. Sends the user to `/updates/{id}/explain` to read the
+  exact LLM prompt + raw response that produced the verdict —
+  surfaces the audit trail without making the user remember the
+  URL. Cheap bulk query `db.list_explained_ids()` keeps the page
+  render to one extra SELECT instead of one per row.
+
+### Accessibility
+
+- **Star button now ships `aria-label` + `aria-pressed`** in both
+  the initial template render and the HTMX toggle response.
+  Screen-reader users hear `Star <subject>` / `Unstar <subject>`
+  instead of just "button".
+- **Snooze controls carry `aria-label`** identifying which row +
+  what dimension they act on (`Snooze duration for <subject>`,
+  `Snooze <subject> until`).
+
+### Internal
+
+- 1620 → 1631 tests (+11), ruff clean, 0 mypy errors against 179 files.
+- New `db.list_explained_ids() -> set[str]` mixin helper. New
+  `POST /updates/{id}/snooze/until` endpoint reuses the same
+  `_snooze_cell_html` swap target as `/snooze/quick`.
+
 ## v0.9.8 — 2026-06-05
 
 Last GUI surface gap closed before the v1.0 audit sprint: muting an

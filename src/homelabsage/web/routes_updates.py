@@ -46,13 +46,23 @@ def _snooze_cell_html(update_id: str, snooze_until: str | None) -> str:
         f'hx-post="/updates/{update_id}/snooze/quick" '
         f'hx-swap="outerHTML" '
         f'hx-target="closest .snooze-cell" style="display:inline">'
-        f'<select name="days" onchange="this.form.requestSubmit()">'
+        f'<select name="days" onchange="this.form.requestSubmit()" '
+        f'aria-label="Snooze duration">'
         f'<option value="">snooze…</option>'
         f'<option value="7">7d</option>'
         f'<option value="14">14d</option>'
         f'<option value="30">30d</option>'
         f'<option value="90">90d</option>'
-        f'</select></form>'
+        f'</select></form> '
+        f'<form method="post" action="/updates/{update_id}/snooze/until" '
+        f'hx-post="/updates/{update_id}/snooze/until" '
+        f'hx-swap="outerHTML" '
+        f'hx-target="closest .snooze-cell" style="display:inline">'
+        f'<input type="date" name="until" '
+        f'aria-label="Snooze until date" '
+        f'onchange="this.form.requestSubmit()" '
+        f'style="font-size:.75rem; padding:.15rem .3rem; max-width:9rem;">'
+        f'</form>'
     )
 
 
@@ -78,6 +88,9 @@ def register_updates_routes(
         if hasattr(db, "list_snoozed"):
             for row in db.list_snoozed(limit=500):
                 snoozed_until[row["id"]] = row["snooze_until"]
+        explained_ids: set[str] = (
+            db.list_explained_ids() if hasattr(db, "list_explained_ids") else set()
+        )
         # Pill counts query COUNT(*) directly so they stay accurate beyond
         # the 500-row list cap. Fall back to set size for stub DBs lacking
         # the count helpers.
@@ -118,6 +131,7 @@ def register_updates_routes(
             tmpl.render(
                 items=items, counts=counts,
                 starred_ids=starred_ids, snoozed_until=snoozed_until,
+                explained_ids=explained_ids,
                 starred_count=starred_count, snoozed_count=snoozed_count,
                 active_filter=filter or "all",
                 llm_enabled=engine.llm.is_enabled(),
@@ -151,11 +165,46 @@ def register_updates_routes(
             raise HTTPException(404, f"no update with id={update_id}")
         icon = "★" if new else "☆"
         cls = "btn" if new else "btn ghost"
+        label = "Unstar" if new else "Star"
         return HTMLResponse(
             f'<button class="{cls}" '
             f'hx-post="/updates/{update_id}/star/toggle" '
-            f'hx-swap="outerHTML" title="Toggle star">{icon}</button>'
+            f'hx-swap="outerHTML" '
+            f'title="Toggle star" aria-label="{label}" '
+            f'aria-pressed="{"true" if new else "false"}">{icon}</button>'
         )
+
+    @app.post("/updates/{update_id:path}/snooze/until", response_class=HTMLResponse)
+    async def custom_snooze_html(
+        update_id: str, until: str = Form(""),
+    ) -> HTMLResponse:
+        """HTMX target — snooze until a custom date (YYYY-MM-DD).
+
+        Empty `until` clears. Past dates clear (defensive, mirrors quick).
+        Invalid dates → 400. Returns the rendered cell.
+        """
+        from datetime import UTC as _UTC
+        from datetime import date as _date
+        from datetime import datetime as _dt
+
+        from .._time import utcnow
+        if db.get(update_id) is None:
+            raise HTTPException(404, f"no update with id={update_id}")
+        until_str = until.strip()
+        if not until_str:
+            db.set_snooze(update_id, None)
+            return HTMLResponse(_snooze_cell_html(update_id, None))
+        try:
+            target = _date.fromisoformat(until_str)
+        except ValueError as e:
+            raise HTTPException(400, f"until must be YYYY-MM-DD: {e}") from e
+        now = utcnow()
+        if target <= now.date():
+            db.set_snooze(update_id, None)
+            return HTMLResponse(_snooze_cell_html(update_id, None))
+        iso = _dt.combine(target, _dt.min.time(), tzinfo=_UTC).isoformat()
+        db.set_snooze(update_id, iso)
+        return HTMLResponse(_snooze_cell_html(update_id, iso))
 
     @app.post("/updates/{update_id:path}/snooze/quick", response_class=HTMLResponse)
     async def quick_snooze_html(

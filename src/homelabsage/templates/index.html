@@ -76,7 +76,9 @@
         <button class="{{ 'btn' if is_starred else 'btn ghost' }}"
                 hx-post="/updates/{{ it.id }}/star/toggle"
                 hx-swap="outerHTML"
-                title="Toggle star">
+                title="Toggle star"
+                aria-label="{{ 'Unstar' if is_starred else 'Star' }} {{ it.update.subject }}"
+                aria-pressed="{{ 'true' if is_starred else 'false' }}">
           {{ '★' if is_starred else '☆' }}
         </button>
       </td>
@@ -92,6 +94,7 @@
       <td style="max-width:38ch">
         {% if it.analysis %}{{ it.analysis.summary }}{% else %}<span class="muted">pending</span>{% endif %}
         {% if it.update.release_url %} <a href="{{ it.update.release_url }}" target="_blank" rel="noopener">notes</a>{% endif %}
+        {% if it.id in explained_ids %} <a href="/updates/{{ it.id }}/explain" class="muted" title="See the LLM prompt + response that produced this verdict">explain</a>{% endif %}
       </td>
       <td>{{ it.status.value }}</td>
       <td class="snooze-cell">
@@ -110,13 +113,23 @@
                 hx-post="/updates/{{ it.id }}/snooze/quick"
                 hx-swap="outerHTML"
                 hx-target="closest .snooze-cell" style="display:inline">
-            <select name="days" onchange="this.form.requestSubmit()">
+            <select name="days" onchange="this.form.requestSubmit()"
+                    aria-label="Snooze duration for {{ it.update.subject }}">
               <option value="">snooze…</option>
               <option value="7">7d</option>
               <option value="14">14d</option>
               <option value="30">30d</option>
               <option value="90">90d</option>
             </select>
+          </form>
+          <form method="post" action="/updates/{{ it.id }}/snooze/until"
+                hx-post="/updates/{{ it.id }}/snooze/until"
+                hx-swap="outerHTML"
+                hx-target="closest .snooze-cell" style="display:inline">
+            <input type="date" name="until"
+                   aria-label="Snooze {{ it.update.subject }} until"
+                   onchange="this.form.requestSubmit()"
+                   style="font-size:.75rem; padding:.15rem .3rem; max-width:9rem;">
           </form>
         {% endif %}
       </td>
