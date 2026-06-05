@@ -38,8 +38,17 @@ log = logging.getLogger(__name__)
 # Separate from CSI's regex — here we *only* count ERROR/FATAL/PANIC, not
 # WARN, because warnings are routine on most containers and the baseline
 # absorbs them into noise. Anomaly detection cares about hard-failure rate.
+#
+# I6: previously this regex included `err` (3-char) and `crit` (4-char)
+# alternatives. Word-boundary `\b` doesn't help when the bare word is the
+# substring inside `application_error_handler` (no, that's safe), but it
+# DID match `derr`, `Werror=`, `nginx-stderr` (`-` is non-word so `stderr`
+# matches), and `criterion`, `critical_section` (`crit` followed by `_`).
+# Pinning to the full English forms removes the false-positives without
+# losing any real signal — every logger that emits truncated `err` also
+# emits `error` or `fatal` somewhere.
 _ERROR_RE = re.compile(
-    r"\b(error|err|fatal|panic|critical|crit|traceback|exception)\b",
+    r"\b(error|fatal|panic|critical|traceback|exception)\b",
     re.IGNORECASE,
 )
 _WARN_RE = re.compile(r"\b(warn(ing)?)\b", re.IGNORECASE)

@@ -180,9 +180,19 @@ def _lint_service(
             ),
         ))
 
-    # 7. LSIO PUID/PGID gotcha — binds to /data or /config without user:
+    # 7. LSIO PUID/PGID gotcha — only fires when the image actually IS an
+    # LSIO image. The old heuristic ("any non-LSIO bind to /data or /config
+    # without user:") fired on >90% of homelab containers including
+    # postgres/redis/etc that don't read PUID/PGID at all — overwhelming
+    # noise. Pin to images the LSIO project actually publishes
+    # (`lscr.io/linuxserver/...` and the legacy DockerHub `linuxserver/...`
+    # mirror) so the finding stays accurate without going off on every
+    # non-root-writing container in the file.
+    image_raw = body.get("image")
+    image_str = image_raw if isinstance(image_raw, str) else ""
+    is_lsio = image_str.startswith(("lscr.io/linuxserver/", "linuxserver/"))
     volumes = body.get("volumes") or []
-    if isinstance(volumes, list) and "user" not in body:
+    if is_lsio and isinstance(volumes, list) and "user" not in body:
         for v in volumes:
             if not isinstance(v, str):
                 continue
@@ -196,9 +206,10 @@ def _lint_service(
                     severity="info", rule="bind_no_user",
                     file=file, service=service_name,
                     detail=(
-                        f"Bind to `{ctr_path}` without `user:` — LSIO-style "
-                        "images expect PUID/PGID env vars; non-LSIO images "
-                        "may write as root and break the host mount."
+                        f"LSIO image `{image_str}` binds to `{ctr_path}` "
+                        "without `user:` — LSIO containers read PUID/PGID "
+                        "env vars; set them or the mount may end up "
+                        "owned by abc:abc inside the container."
                     ),
                 ))
                 break

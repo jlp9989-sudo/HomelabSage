@@ -2,6 +2,36 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.10.4 — 2026-06-05
+
+Detector false-positive cleanup — closes I6 + I7 from the v1.0
+punch list.
+
+### Fixed (Important)
+
+- **I6 — `log_anomaly` regex no longer counts bare `err`/`crit`
+  words.** The old pattern included the 3-char `err` and 4-char
+  `crit` alternatives. In real logs these match noisy non-errors:
+  Go's `err = nil`, `if err != nil`, syslog severity tokens like
+  `priority=crit`. Real errors always emit the full English form
+  somewhere; the tighten drops noise without losing signal. Verified
+  by 4 new tests (bare-err lines now count 0, real ERROR/FATAL/
+  PANIC/CRITICAL still count 6/6).
+- **I7 — `compose_lint bind_no_user` rule pinned to actual LSIO
+  images.** The old heuristic fired on *any* compose service that
+  bound `/data` or `/config` and had no `user:` — that's >90% of
+  homelab containers, including `redis:7-alpine`, `postgres:16`,
+  and every random tag — overwhelming noise. Now scoped to
+  `lscr.io/linuxserver/...` and legacy `linuxserver/...` images
+  only, where PUID/PGID actually applies. Detail message updated to
+  cite the matched image. Existing `bind_no_user` test moved to use
+  an LSIO image.
+
+### Internal
+
+- 1683 → 1692 tests (+9). Ruff clean, 0 mypy errors against 180
+  source files.
+
 ## v0.10.3 — 2026-06-05
 
 Notion output hardening — closes I4 + I5 from the v1.0 punch list.

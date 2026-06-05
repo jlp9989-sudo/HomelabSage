@@ -144,10 +144,12 @@ services:
 
 
 def test_bind_no_user_flagged(tmp_path: Path):
+    # v0.10.4 (I7): the bind_no_user rule is now scoped to actual LSIO
+    # images. Use lscr.io/linuxserver/... so it fires.
     body = """\
 services:
   app:
-    image: foo:1.0
+    image: lscr.io/linuxserver/sonarr:latest
     restart: always
     healthcheck:
       test: ["CMD", "true"]
