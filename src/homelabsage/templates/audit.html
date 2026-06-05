@@ -7,7 +7,13 @@
   details summary { cursor:pointer; padding:.3rem 0; font-weight:600; }
   .finding { background:#161c24; border:1px solid #2a3340; border-radius:6px; padding:.7rem 1rem; margin-bottom:.5rem; }
   .finding .cite { color:#8fa3b8; font-size:.78rem; font-family:ui-monospace, monospace; margin-top:.3rem; }
+  .finding .mute-bar { margin-top:.4rem; display:flex; gap:.4rem; align-items:center; }
+  .finding .mute-bar input[type=text] { font-size:.75rem; padding:.25rem .4rem; max-width:14rem; }
+  .finding .mute-bar button { font-size:.75rem; padding:.2rem .55rem; }
   .group h3 { margin-top:1.5rem; font-size:1.05rem; }
+  .mute-row { display:flex; gap:.6rem; align-items:center; padding:.3rem .5rem; border-bottom:1px solid #2a3340; }
+  .mute-row:last-child { border-bottom:0; }
+  .mute-row code { font-size:.78rem; }
 </style>
 
 <h2>Homelab audit</h2>
@@ -16,6 +22,32 @@
   signal — nothing here is invented by the LLM, all rows trace back to
   a concrete row in the database or a live probe.
 </p>
+
+{% if active_mutes %}
+<details style="margin:1rem 0;">
+  <summary>Active mutes ({{ active_mutes|length }})</summary>
+  <div style="background:#161c24; border:1px solid #2a3340; border-radius:6px; margin-top:.4rem;">
+    {% for m in active_mutes %}
+    <div class="mute-row" id="mute-{{ loop.index }}">
+      <span class="pill">{{ m.category }}</span>
+      <code>{{ m.source_kind }}:{{ m.source_ref }}</code>
+      {% if m.reason %}<span class="muted">— {{ m.reason }}</span>{% endif %}
+      {% if m.expires_at %}<span class="muted">(until {{ m.expires_at[:16] }})</span>{% endif %}
+      <span style="margin-left:auto"></span>
+      <form hx-post="/audit/mute/remove"
+            hx-target="#mute-{{ loop.index }}"
+            hx-swap="outerHTML"
+            style="display:inline">
+        <input type="hidden" name="category" value="{{ m.category }}">
+        <input type="hidden" name="source_kind" value="{{ m.source_kind }}">
+        <input type="hidden" name="source_ref" value="{{ m.source_ref }}">
+        <button class="ghost" type="submit" title="Unmute">unmute</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
 
 {% if report.healthy %}
 <p class="flash success">All clear. No actionable findings.</p>
@@ -36,13 +68,23 @@
     {% set current_sev.value = f.severity %}
     <div class="group"><h3><span class="sev sev-{{ f.severity }}">{{ f.severity|upper }}</span></h3></div>
   {% endif %}
-  <div class="finding">
+  <div class="finding" id="finding-{{ loop.index }}">
     <strong>{{ f.title }}</strong>
     <div>{{ f.detail }}</div>
     <div class="cite">
       source: <code>{{ f.source_kind }}</code> on
       <code>{{ f.source_ref }}</code> — <code>{{ f.cite }}</code>
     </div>
+    <form class="mute-bar"
+          hx-post="/audit/mute"
+          hx-target="this"
+          hx-swap="outerHTML">
+      <input type="hidden" name="category" value="{{ f.category }}">
+      <input type="hidden" name="source_kind" value="{{ f.source_kind }}">
+      <input type="hidden" name="source_ref" value="{{ f.source_ref }}">
+      <input type="text" name="reason" placeholder="reason (optional)" autocomplete="off">
+      <button class="ghost" type="submit" title="Hide this finding from future audits">mute</button>
+    </form>
   </div>
 {% endfor %}
 

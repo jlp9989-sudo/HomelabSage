@@ -2,6 +2,35 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.9.8 — 2026-06-05
+
+Last GUI surface gap closed before the v1.0 audit sprint: muting an
+audit finding no longer requires the CLI or MCP — it's a one-click
+inline button on `/audit`.
+
+### Added
+
+- **Inline mute form per audit finding.** Each row in `/audit` now
+  carries a tiny `mute` button with an optional reason field. HTMX
+  POSTs to `/audit/mute` with the finding's fingerprint
+  (`category` + `source_kind` + `source_ref`), the form swaps in
+  place to a `muted ✓` badge, and the finding is gone from the next
+  report build.
+- **Active-mutes panel** at the top of `/audit` (collapsible
+  `<details>`). Lists every active mute with category pill, source
+  fingerprint, reason and expiry. Each row has an HTMX `unmute`
+  button that POSTs to `/audit/mute/remove` and vanishes the row in
+  place.
+- **`/usage` link in the global nav.** The LLM token-usage page
+  shipped in v0.4.0 was reachable only by URL — now it's one click
+  away from any page.
+
+### Internal
+
+- 1613 → 1620 tests (+7), ruff clean, 0 mypy errors against 179 files.
+- Both new endpoints reuse the existing `db.add_audit_mute` /
+  `db.remove_audit_mute` helpers; no new DB shape.
+
 ## v0.9.7 — 2026-06-05
 
 Security + correctness fixes from the v0.9.5 / v0.9.6 bug-hunt.

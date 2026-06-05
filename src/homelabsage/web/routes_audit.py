@@ -11,7 +11,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from jinja2 import Environment
 
@@ -25,8 +25,65 @@ def register_audit_routes(app: FastAPI, cfg: Config, db: Database, env: Environm
     async def audit_page() -> HTMLResponse:
         report = build_report(cfg, db)
         body_md = render_markdown(report)
+        active_mutes = (
+            db.list_audit_mutes(include_expired=False)
+            if hasattr(db, "list_audit_mutes") else []
+        )
         tmpl = env.get_template("audit.html")
-        return HTMLResponse(tmpl.render(report=report, body_md=body_md))
+        return HTMLResponse(
+            tmpl.render(report=report, body_md=body_md, active_mutes=active_mutes),
+        )
+
+    @app.post("/audit/mute", response_class=HTMLResponse)
+    async def audit_mute_inline(
+        request: Request,
+    ) -> HTMLResponse:
+        """HTMX target — mute a finding by fingerprint. Returns a tiny
+        "muted ✓" badge so the row visibly disappears on next refresh,
+        and the inline form swaps to that confirmation in place.
+        """
+        form = dict(await request.form())
+        category = str(form.get("category") or "").strip()
+        source_kind = str(form.get("source_kind") or "").strip()
+        source_ref = str(form.get("source_ref") or "").strip()
+        if not (category and source_kind and source_ref):
+            raise HTTPException(400, "category/source_kind/source_ref required")
+        reason = str(form.get("reason") or "").strip() or None
+        await asyncio.to_thread(
+            db.add_audit_mute,
+            category=category,
+            source_kind=source_kind,
+            source_ref=source_ref,
+            expires_at=None,
+            reason=reason,
+        )
+        return HTMLResponse(
+            '<span class="muted" title="Hidden from future audit reports">'
+            "muted ✓ — refresh page to remove</span>",
+        )
+
+    @app.post("/audit/mute/remove", response_class=HTMLResponse)
+    async def audit_mute_remove_inline(
+        request: Request,
+    ) -> HTMLResponse:
+        """HTMX target — remove a mute by fingerprint. Returns an empty
+        HTML fragment so the row in the active-mutes panel vanishes.
+        """
+        form = dict(await request.form())
+        category = str(form.get("category") or "").strip()
+        source_kind = str(form.get("source_kind") or "").strip()
+        source_ref = str(form.get("source_ref") or "").strip()
+        if not (category and source_kind and source_ref):
+            raise HTTPException(400, "category/source_kind/source_ref required")
+        ok = await asyncio.to_thread(
+            db.remove_audit_mute,
+            category=category,
+            source_kind=source_kind,
+            source_ref=source_ref,
+        )
+        if not ok:
+            raise HTTPException(404, "no mute matches that fingerprint")
+        return HTMLResponse("")
 
     @app.get("/api/audit")
     async def audit_api() -> JSONResponse:
