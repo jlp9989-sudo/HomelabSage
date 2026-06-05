@@ -24,6 +24,7 @@ import logging
 
 from ..models import AnalyzedUpdate, Severity
 from . import Output
+from ._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -121,4 +122,4 @@ class AppriseOutput(Output):
             if not ok:
                 log.warning("apprise notify reported partial failure for %s", item.id)
         except Exception as e:
-            log.error("apprise notify failed for %s: %s", item.id, e)
+            log.error("apprise notify failed for %s: %s", item.id, safe_error(e))

@@ -2,6 +2,50 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.10.0 — 2026-06-05
+
+Start of the v1.0 punch-list sprint — closing the two highest-severity
+findings from the pre-v1.0 audit: a process-wide socket-timeout
+race and bot-token leakage into output failure logs.
+
+### Fixed (Critical)
+
+- **C1 — DNS probe no longer poisons process-wide socket timeout.**
+  `dns_check._temp_timeout` used `socket.setdefaulttimeout()`, which
+  is global; a concurrent httpx / docker SDK / ssl / smtplib call
+  in another thread silently inherited the 3 s timeout while a
+  probe was in flight, and two interleaved probes could restore
+  the wrong baseline. Replaced with a module-level
+  `concurrent.futures.ThreadPoolExecutor` (4 workers, named
+  `hls-dns`) — `future.result(timeout=N)` bounds the caller's wait
+  without touching any global state. Hung lookups stay running in
+  the worker thread until the system resolver gives up; we just
+  detach our caller. New test
+  `test_dns_probe_concurrent_safe` runs two threads probing in
+  parallel and asserts the global timeout stays exactly at the
+  pre-call value.
+- **C3 — Output exception logs no longer leak bot tokens.**
+  `httpx.HTTPStatusError.__str__()` includes the full request URL.
+  Telegram puts the bot token in the URL path (`/bot{token}/…`),
+  Gotify in the query string (`?token=…`); Discord, Slack, MSTeams,
+  Pushover, Apprise webhooks have the secret IN the URL. A single
+  4xx with default logging routed → token in the log file, in
+  syslog-mcp, logspout, restic backups to Infomaniak. New shared
+  helper `outputs._errlog.safe_error(e)` returns
+  `ExceptionType (status N)` and never includes the URL / body.
+  Wired into all 11 outputs (`telegram, gotify, discord, ntfy,
+  slack, msteams, pushover, webhook, apprise, smtp, notion`) plus
+  the 4 batch dispatchers. Parametrized test asserts every output
+  module imports the helper so a future refactor can't regress
+  one channel silently.
+
+### Internal
+
+- 1646 → 1666 tests (+20), ruff clean, 0 mypy errors against 180
+  source files (new `outputs/_errlog.py`).
+- No behavioural changes outside the failure path — happy-path
+  push semantics are byte-identical.
+
 ## v0.9.10 — 2026-06-05
 
 Three pre-existing CLI/MCP surfaces now reachable from the GUI: full

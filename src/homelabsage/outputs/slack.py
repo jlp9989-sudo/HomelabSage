@@ -26,6 +26,7 @@ import httpx
 
 from ..models import AnalyzedUpdate, Severity
 from . import Output
+from ._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -115,4 +116,4 @@ class SlackOutput(Output):
                 )
                 r.raise_for_status()
         except httpx.HTTPError as e:
-            log.error("Slack push failed for %s: %s", item.id, e)
+            log.error("Slack push failed for %s: %s", item.id, safe_error(e))

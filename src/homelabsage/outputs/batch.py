@@ -23,6 +23,7 @@ import httpx
 from .._time import utcnow
 from ..config import Config
 from ..models import AnalyzedUpdate, Severity
+from ._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ async def _send_via_telegram(cfg, body: str) -> None:
             })
             r.raise_for_status()
     except httpx.HTTPError as e:
-        log.error("batch telegram failed: %s", e)
+        log.error("batch telegram failed: %s", safe_error(e))
 
 
 async def _send_via_discord(cfg, body: str) -> None:
@@ -119,7 +120,7 @@ async def _send_via_discord(cfg, body: str) -> None:
             r = await c.post(cfg.webhook_url, json=payload)
             r.raise_for_status()
     except httpx.HTTPError as e:
-        log.error("batch discord failed: %s", e)
+        log.error("batch discord failed: %s", safe_error(e))
 
 
 async def _send_via_ntfy(cfg, body: str) -> None:
@@ -138,7 +139,7 @@ async def _send_via_ntfy(cfg, body: str) -> None:
             r = await c.post(url, content=body.encode("utf-8"), headers=headers)
             r.raise_for_status()
     except httpx.HTTPError as e:
-        log.error("batch ntfy failed: %s", e)
+        log.error("batch ntfy failed: %s", safe_error(e))
 
 
 async def _send_via_gotify(cfg, body: str) -> None:
@@ -154,7 +155,7 @@ async def _send_via_gotify(cfg, body: str) -> None:
             })
             r.raise_for_status()
     except httpx.HTTPError as e:
-        log.error("batch gotify failed: %s", e)
+        log.error("batch gotify failed: %s", safe_error(e))
 
 
 _DISPATCH = {

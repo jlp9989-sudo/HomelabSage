@@ -31,6 +31,7 @@ import httpx
 from ..config import NtfyOutputConfig
 from ..models import AnalyzedUpdate, Severity
 from . import Output
+from ._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -113,4 +114,4 @@ class NtfyOutput(Output):
                 )
                 r.raise_for_status()
         except httpx.HTTPError as e:
-            log.error("Ntfy push failed for %s: %s", item.id, e)
+            log.error("Ntfy push failed for %s: %s", item.id, safe_error(e))

@@ -6,16 +6,19 @@ deleted, CNAME pointing at a removed VPS, NXDOMAIN from a registrar
 glitch). A user discovers it the hard way when they click their
 own bookmark and Chrome shows DNS_PROBE_FINISHED_NXDOMAIN.
 
-Pure stdlib (`socket.getaddrinfo`). Per-host timeout via the
-`socket.setdefaulttimeout` context (no API in `getaddrinfo` itself).
-Returns one finding per failed resolution; succeeds are silent.
+Pure stdlib (`socket.getaddrinfo`). Per-call timeout enforced via a
+small dedicated thread-pool — NOT via `socket.setdefaulttimeout`,
+which is process-wide and would silently bleed onto httpx, docker
+SDK, ssl, smtplib calls running in other threads while a probe is
+in flight. Returns one finding per failed resolution; successes
+are silent.
 """
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import socket
-from contextlib import contextmanager
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
@@ -39,20 +42,14 @@ class DNSFinding:
         }
 
 
-@contextmanager
-def _temp_timeout(seconds: float):
-    """Apply a process-wide socket timeout for the duration of the block.
-
-    `socket.getaddrinfo` ignores per-call timeouts; the only way to
-    bound it is via `socket.setdefaulttimeout`. We save+restore so
-    we don't poison the rest of the process.
-    """
-    prev = socket.getdefaulttimeout()
-    socket.setdefaulttimeout(seconds)
-    try:
-        yield
-    finally:
-        socket.setdefaulttimeout(prev)
+# Module-level pool: cheap to keep around (4 idle threads), avoids the
+# per-call shutdown-waits-for-running-futures issue of a per-call
+# `with ThreadPoolExecutor(...)`. The whole point of the timeout is to
+# detach our caller from a hung lookup; a per-call pool would defeat
+# that by blocking on shutdown.
+_RESOLVER = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="hls-dns",
+)
 
 
 def probe(hostname: str, *, timeout: float = 3.0) -> DNSFinding | None:
@@ -60,13 +57,25 @@ def probe(hostname: str, *, timeout: float = 3.0) -> DNSFinding | None:
 
     Empty hostname → None (caller's job to filter). IP literals also
     succeed (`getaddrinfo` accepts both).
+
+    Timeout bounds OUR wait, not the underlying lookup — a hung
+    resolver call keeps running in the worker thread until the system
+    resolver eventually fails. That's fine: we measured the bound
+    accurately from the caller's perspective without touching the
+    process-wide socket default.
     """
     if not hostname or not hostname.strip():
         return None
     h = hostname.strip()
+    fut = _RESOLVER.submit(socket.getaddrinfo, h, None)
     try:
-        with _temp_timeout(timeout):
-            socket.getaddrinfo(h, None)
+        fut.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        return DNSFinding(
+            hostname=h,
+            error=f"TimeoutError: resolution exceeded {timeout}s",
+            severity="medium",
+        )
     except (socket.gaierror, OSError) as e:
         return DNSFinding(
             hostname=h,
