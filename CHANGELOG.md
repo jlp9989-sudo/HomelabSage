@@ -2,6 +2,20 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.8.3 — 2026-06-04
+
+- **`GET /api/audit/categories`** — HTTP mirror of the MCP
+  `audit_categories` tool. Compact histogram shape for Homepage
+  stripe widgets.
+- **MCP `is_snoozed(update_id)`** — quick lookup `{snoozed: bool,
+  snooze_until: str|null}`. Past timestamps return `snoozed=False`
+  (matches engine/flush semantics). Corrupt timestamps land in
+  `error` rather than misreporting.
+
+### Internal
+
+- 1519 → 1525 tests (+6), ruff clean, 0 mypy errors against 173 files.
+
 ## v0.8.2 — 2026-06-04
 
 Mute-list ergonomics + compact audit roll-up.

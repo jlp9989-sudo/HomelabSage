@@ -33,6 +33,22 @@ def register_audit_routes(app: FastAPI, cfg: Config, db: Database, env: Environm
         report = build_report(cfg, db)
         return JSONResponse(report.to_json())
 
+    @app.get("/api/audit/categories")
+    async def audit_categories_api() -> JSONResponse:
+        """Compact category + severity histogram (no findings list).
+
+        Mirrors the MCP `audit_categories` tool — right shape for a
+        Homepage / Homarr stripe widget that polls every few minutes
+        and shouldn't pull megabytes of finding detail.
+        """
+        report = await asyncio.to_thread(build_report, cfg, db)
+        return JSONResponse({
+            "counts_by_category": report.counts_by_category,
+            "counts_by_severity": report.counts_by_severity,
+            "total": len(report.findings),
+            "healthy": report.healthy,
+        })
+
     @app.get("/api/audit/history")
     async def audit_history_api(limit: int = 50, offset: int = 0) -> JSONResponse:
         """Paginated list of past audit snapshots, newest first.

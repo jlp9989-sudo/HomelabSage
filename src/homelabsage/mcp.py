@@ -550,6 +550,39 @@ def _tool_audit_diff(cfg: Config, db: Database, _params: dict) -> dict:
     return diff_against_latest(notes_dir, report.to_json())
 
 
+def _tool_is_snoozed(_cfg: Config, db: Database, params: dict) -> dict:
+    """Quick lookup: is this update currently snoozed?
+
+    Returns `{snoozed: bool, snooze_until: str|null}`. `snoozed` is
+    True only when the timestamp is in the future — past timestamps
+    are treated as expired (matches engine + flush behaviour).
+    """
+    update_id = params.get("update_id")
+    if not isinstance(update_id, str) or not update_id:
+        return {"snoozed": False, "snooze_until": None,
+                "error": "update_id is required"}
+    if not hasattr(db, "get_snooze"):
+        return {"snoozed": False, "snooze_until": None}
+    raw = db.get_snooze(update_id)
+    if not raw:
+        return {"snoozed": False, "snooze_until": None}
+    from ._time import parse_iso, utcnow
+    try:
+        until = parse_iso(raw)
+    except ValueError:
+        return {"snoozed": False, "snooze_until": raw,
+                "error": "snooze_until unparseable"}
+    if until is None:
+        return {"snoozed": False, "snooze_until": raw}
+    if until.tzinfo is None:
+        from datetime import UTC
+        until = until.replace(tzinfo=UTC)
+    return {
+        "snoozed": until > utcnow(),
+        "snooze_until": raw,
+    }
+
+
 def _tool_list_snoozed(_cfg: Config, db: Database, params: dict) -> dict:
     """List currently-snoozed updates (snooze_until > now)."""
     if not hasattr(db, "list_snoozed"):
@@ -1238,6 +1271,20 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_audit_diff,
+    },
+    "is_snoozed": {
+        "description": (
+            "Quick lookup whether an update is currently snoozed "
+            "(snooze_until in the future). Returns `{snoozed: bool, "
+            "snooze_until: str|null}`."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {"update_id": {"type": "string"}},
+            "required": ["update_id"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_is_snoozed,
     },
     "list_snoozed": {
         "description": (
