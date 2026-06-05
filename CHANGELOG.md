@@ -2,6 +2,40 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.10.2 — 2026-06-05
+
+DB concurrency primitive + apprise unblocked. Closes I1 + I2 from
+the v1.0 punch list.
+
+### Fixed (Important)
+
+- **I1 — `db.transaction()` context manager** added for atomic
+  multi-statement writes. Holds a reentrant `threading.RLock` for
+  the duration of the block AND wraps the body in `BEGIN
+  IMMEDIATE`/`COMMIT` (autocommit is off inside the block).
+  Exceptions roll back; reentry on the same thread doesn't
+  deadlock. The existing per-statement writes still rely on WAL +
+  SQLite's per-statement locking — this primitive is for future
+  callers that need read-modify-write atomicity (and the
+  serialization test in `test_v0102.py` proves concurrent
+  transactions never observe half-applied state).
+- **I2 — `Apprise.notify` no longer blocks the engine loop.** The
+  library's public `notify()` is documented sync and waits for
+  every fan-out; 5 URLs × 5 s timeout = 25 s freeze of the engine
+  loop. Now wrapped in `asyncio.to_thread`. Test sets up a fake
+  apprise that sleeps 150 ms in `notify`, runs the output via
+  `asyncio.run`, asserts the call landed on a *different* thread
+  than the event loop.
+
+### Internal
+
+- 1671 → 1678 tests (+7). Ruff clean, 0 mypy errors against 180
+  source files.
+- `Database.__init__` gains a `_lock: threading.RLock` field and
+  `Database.transaction()` returns a `sqlite3.Connection` for the
+  duration of the block. No call site retrofitted in this release —
+  the existing single-statement writes were already safe.
+
 ## v0.10.1 — 2026-06-05
 
 MCP layer hardening — closes C2, C5 and I10 from the v1.0 punch list.

@@ -22,6 +22,9 @@ Public surface (kept stable for `from homelabsage.db import Database`):
 from __future__ import annotations
 
 import sqlite3
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from .audit_mutes import AuditMutesMixin
@@ -47,17 +50,22 @@ class Database(
     ExplainersMixin, UsageMixin, HealthCheckMixin, LogAnomalyMixin,
     HeartbeatsMixin, AuditMutesMixin,
 ):
-    """Single connection wrapper. Thread-safe for reads, writes serialised
-    at the engine level (one scan at a time)."""
+    """Single connection wrapper. WAL + autocommit make single-statement
+    reads and writes safe across threads. For multi-statement writes that
+    must be atomic, use `db.transaction()` — it acquires an `RLock` AND
+    opens a BEGIN/COMMIT, so two threads can't observe a half-applied
+    composite write.
+    """
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # `check_same_thread=False`: the connection is created on the main
         # thread (via `create_app`) but closed and read from APScheduler's
-        # worker threads and from FastAPI's shutdown event loop. WAL +
-        # autocommit (`isolation_level=None`) already make concurrent reads
-        # safe; we serialise writes at the engine level.
+        # worker threads and from FastAPI's `to_thread` workers. WAL +
+        # autocommit make single-statement ops safe; the lock below
+        # protects multi-statement transactions started via
+        # `Database.transaction()`.
         self._conn = sqlite3.connect(
             self.path, isolation_level=None, check_same_thread=False
         )
@@ -65,6 +73,39 @@ class Database(
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA)
         migrate(self._conn)
+        # Reentrant so a transaction body that calls another helper which
+        # also tries to acquire the lock doesn't deadlock. SQLite is the
+        # ultimate serializer; the lock just guarantees Python-level
+        # serialisation of multi-statement ops with mid-transaction reads.
+        self._lock = threading.RLock()
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """Atomic multi-statement write.
+
+        Usage:
+            with db.transaction() as conn:
+                conn.execute("UPDATE …")
+                conn.execute("INSERT …")
+
+        Holds the per-connection `RLock` for the duration so two threads
+        can't interleave statements, AND wraps the body in `BEGIN
+        IMMEDIATE` / `COMMIT` (autocommit is off inside the block).
+        Re-raising any exception causes a `ROLLBACK`.
+
+        Read-only paths don't need this — SQLite serialises individual
+        statements internally. Use only when you have two or more
+        write/read-modify-write statements that must commit together.
+        """
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield self._conn
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+            else:
+                self._conn.execute("COMMIT")
 
     def close(self) -> None:
         self._conn.close()

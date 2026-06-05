@@ -110,15 +110,17 @@ class AppriseOutput(Output):
             _SEVERITY_TO_TYPE.get(item.analysis.severity.value, "info")
             if self.cfg.tag_severity and item.analysis else None
         )
+        kwargs = {"title": title, "body": body}
+        if notify_type:
+            kwargs["notify_type"] = notify_type
         try:
-            # `Apprise.notify` is synchronous; the library spawns its own
-            # threads for fan-out. We don't run it in `asyncio.to_thread`
-            # because each per-channel send is already short and the
-            # caller (engine) is fine with sync calls in async output paths.
-            kwargs = {"title": title, "body": body}
-            if notify_type:
-                kwargs["notify_type"] = notify_type
-            ok = ap.notify(**kwargs)
+            # I2: `Apprise.notify` is documented as synchronous and waits for
+            # every fan-out before returning. 5 URLs × 5 s timeout = 25 s
+            # freeze of the engine loop. Always offload to a worker thread.
+            # (Previously the library's internal threading was assumed to
+            # be enough — it isn't, the public API still blocks.)
+            import asyncio
+            ok = await asyncio.to_thread(ap.notify, **kwargs)
             if not ok:
                 log.warning("apprise notify reported partial failure for %s", item.id)
         except Exception as e:
