@@ -2,6 +2,34 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.10.3 — 2026-06-05
+
+Notion output hardening — closes I4 + I5 from the v1.0 punch list.
+
+### Fixed (Important)
+
+- **I4 — `Analysis.summary` is now `redact_text`'d before reaching
+  Notion.** `secret_guard.redact_text` already ran pre-LLM; the gap
+  was that a Qwen-Abl run could *hallucinate* `GITHUB_TOKEN=ghp_…`
+  out of a release-note snippet and the value would land in Notion
+  in cleartext. The post-LLM scrub closes that loop. Clean
+  summaries (no marker, no value pattern) pass through untouched.
+- **I5 — Stale `notion_page_id` self-heals on 404.** When the
+  cached page_id 404s on PATCH (page was manually deleted in
+  Notion), we now: clear the id in memory + DB, fall through to a
+  fresh POST in the same call, persist the new id. Before, the
+  same 404 fired every scan forever. Non-404 PATCH failures still
+  log and leave the id intact for retry — we don't risk creating
+  duplicates on transient Notion outages.
+
+### Internal
+
+- 1678 → 1683 tests (+5). Ruff clean, 0 mypy errors against 180
+  source files.
+- `db.set_notion_page_id(id, None)` is now explicitly typed as
+  `str | None` — was `str` only, the new clear-on-404 path relies
+  on it.
+
 ## v0.10.2 — 2026-06-05
 
 DB concurrency primitive + apprise unblocked. Closes I1 + I2 from

@@ -26,6 +26,7 @@ import httpx
 from ..config import NotionOutputConfig
 from ..db import Database
 from ..models import AnalyzedUpdate
+from ..secret_guard import redact_text
 from . import Output
 from ._errlog import safe_error
 
@@ -76,7 +77,12 @@ class NotionOutput(Output):
         if a:
             props["Severity"] = {"select": {"name": a.severity.value}}
             props["Action required"] = {"checkbox": a.action_required}
-            props["Summary"] = {"rich_text": [{"text": {"content": a.summary[:2000]}}]}
+            # I4: scrub LLM-emitted text BEFORE it hits Notion. The
+            # analyzer can hallucinate `GITHUB_TOKEN=ghp_…` out of a
+            # release-note snippet; secret_guard.redact_text is what we
+            # already run pre-LLM, applying it post-LLM closes the loop.
+            redacted_summary, _ = redact_text(a.summary or "")
+            props["Summary"] = {"rich_text": [{"text": {"content": redacted_summary[:2000]}}]}
         return props
 
     async def send(self, item: AnalyzedUpdate) -> None:
@@ -90,7 +96,30 @@ class NotionOutput(Output):
                         headers=self._headers(),
                         json={"properties": self._properties(item)},
                     )
-                    r.raise_for_status()
+                    # I5: a 404 on PATCH means the page was deleted in
+                    # Notion. Clear our cached id + fall through to POST
+                    # so the next scan creates a fresh page instead of
+                    # logging the same 404 forever.
+                    if r.status_code == 404:
+                        item.notion_page_id = None
+                        if self.db is not None:
+                            self.db.set_notion_page_id(item.id, None)
+                        r = await client.post(
+                            f"{NOTION_API}/pages",
+                            headers=self._headers(),
+                            json={
+                                "parent": {"database_id": self.cfg.database_id},
+                                "properties": self._properties(item),
+                            },
+                        )
+                        r.raise_for_status()
+                        page_id = r.json().get("id")
+                        if page_id:
+                            item.notion_page_id = page_id
+                            if self.db is not None:
+                                self.db.set_notion_page_id(item.id, page_id)
+                    else:
+                        r.raise_for_status()
                 else:
                     r = await client.post(
                         f"{NOTION_API}/pages",

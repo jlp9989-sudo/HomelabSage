@@ -98,8 +98,13 @@ class UpdatesMixin:
             ),
         )
 
-    def set_notion_page_id(self, update_id: str, page_id: str) -> None:
-        """Record the Notion page id for an update (idempotent)."""
+    def set_notion_page_id(self, update_id: str, page_id: str | None) -> None:
+        """Record the Notion page id for an update (idempotent).
+
+        `page_id=None` clears it — used when the Notion side returned
+        404 (page deleted manually), so the next scan creates a fresh
+        page instead of looping on PATCHing a non-existent id.
+        """
         self._conn.execute(
             "UPDATE updates SET notion_page_id = ? WHERE id = ?",
             (page_id, update_id),
