@@ -2,6 +2,42 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.8.0 — 2026-06-04 — milestone
+
+Consolidates everything since v0.7.0. Single new CLI
+(`homelabsage features`) to round out the version surface — the
+rest is the milestone bump itself.
+
+### Added
+
+- **`homelabsage features` CLI**. Prints version + parsed
+  `version_parts` + the same feature flag map exposed by
+  `GET /api/version` and the MCP `version` tool. `--json` emits
+  one JSON object on stdout for cron / ops integration.
+
+### Summary of the v0.7.x line
+
+The v0.7 series shipped:
+
+| Version | Highlight                                                  |
+| ------- | ---------------------------------------------------------- |
+| v0.7.0  | `homelabsage doctor` bundled diagnostic                    |
+| v0.7.1  | `/api/doctor` + MCP `doctor` + review-driven safety fixes  |
+| v0.7.2  | `homelabsage snooze` CLI + list-snoozed + audit `--jsonl`  |
+| v0.7.3  | `audit_history.jsonl` persistence + `/api/audit/diff` + `homelabsage init` |
+| v0.7.4  | `/api/audit/history` + audit-alert webhook + `doctor --watch` |
+| v0.7.5  | MCP `audit_history`/`audit_diff` + `compose-graph` CLI + `audit --severity` |
+| v0.7.6  | `audit-prune` + bulk snooze clear + `doctor --severity-floor` |
+| v0.7.7  | `audit --diff-only` + MCP `audit_prune` + raw JSONL stream |
+| v0.7.8  | `homelabsage status` + `/api/version` + MCP `clear_pending_dispatches` |
+| v0.7.9  | `purge_old_updates` + `scan_window_check` + `version_parts`|
+| v0.8.0  | `homelabsage features` CLI                                 |
+
+### Internal
+
+- 1489 → 1493 tests (+4), ruff clean, 0 mypy errors against 171 files.
+- 1 new CLI subcommand.
+
 ## v0.7.9 — 2026-06-04
 
 DB retention, scan-window introspection, version_parts for agents.

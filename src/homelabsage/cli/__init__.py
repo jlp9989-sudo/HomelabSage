@@ -27,6 +27,7 @@ from . import (  # noqa: F401  (imported for side-effect: command registration)
     doctor,
     env_diff,
     export,
+    features,
     health,
     history,
     init,
