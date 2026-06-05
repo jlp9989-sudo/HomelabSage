@@ -57,6 +57,23 @@ class WebhookOutput(Output):
         u = item.update
         a = item.analysis
         assert a is not None
+        # I8 (v1.0 punch list): scrub the context dict before sending.
+        # `Update.context` carries `puid_pgid`, `env` from docker config,
+        # raw `release_notes` from upstream — anyone with the webhook
+        # URL would otherwise receive an inventory of homelab secrets.
+        # `redact_context` walks the tree, replaces secret-key values
+        # with the placeholder and runs the text passes on every string.
+        # Also scrub the post-LLM analyzer fields (summary,
+        # breaking_changes, recommended_action) — same logic as v0.10.3
+        # Notion fix, applied here for symmetry across push channels.
+        from ..secret_guard import redact_context, redact_text
+        safe_summary, _ = redact_text(a.summary or "")
+        safe_action, _ = redact_text(a.recommended_action or "") if a.recommended_action else ("", None)
+        safe_breaking = []
+        for bc in (a.breaking_changes or []):
+            cleaned, _ = redact_text(str(bc))
+            safe_breaking.append(cleaned)
+        safe_context, _ = redact_context(dict(u.context or {}))
         return {
             "version": __version__,
             "type": "homelabsage.update",
@@ -66,11 +83,11 @@ class WebhookOutput(Output):
             "subject": u.subject,
             "current_version": u.current_version,
             "new_version": u.new_version,
-            "summary": a.summary,
-            "breaking_changes": list(a.breaking_changes),
-            "recommended_action": a.recommended_action,
+            "summary": safe_summary,
+            "breaking_changes": safe_breaking,
+            "recommended_action": safe_action or None,
             "release_url": u.release_url,
-            "context": dict(u.context or {}),
+            "context": safe_context,
         }
 
     async def send(self, item: AnalyzedUpdate) -> None:

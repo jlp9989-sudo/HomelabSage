@@ -68,6 +68,21 @@ _KV_LINE_RE = re.compile(
     r"(?i)\b((?:[A-Z][A-Z0-9_]*?)?(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|AUTH|CREDENTIAL|PRIVATE|SESSION|SALT|SIGNING_KEY|CLIENT_SECRET))\s*[:=]\s*([^\s\n][^\n]*)"
 )
 
+# I11 (v1.0 punch list): config-flag values that aren't credentials,
+# even though they sit on a secret-marker key. `AUTH=public`,
+# `OBSERVABILITY_PRIVATE=true`, `SESSION=on` etc. used to be redacted
+# and degraded LLM analysis. Skip the rewrite when the trimmed value
+# (case-insensitive) is in this allowlist OR is a short pure-numeric
+# token like `8080` / `42`. Real secrets are practically always
+# longer than 5 chars and contain mixed character classes.
+_KV_SAFE_VALUES: frozenset[str] = frozenset({
+    "true", "false", "yes", "no", "on", "off",
+    "none", "null", "nil", "auto", "default",
+    "enabled", "disabled", "public", "private",
+    "0", "1",
+})
+_KV_NUMERIC_RE = re.compile(r"^-?\d{1,5}$")
+
 
 # Providers where the guard is on by default. The intuition: local
 # providers run on hardware the user owns; cloud providers are external
@@ -110,6 +125,10 @@ def should_guard(provider: str | None, *, override: bool | None = None) -> bool:
 
 def _redact_kv_line(text: str, report: GuardReport) -> str:
     def _sub(m: re.Match[str]) -> str:
+        value = m.group(2).strip().rstrip(",;)]}").strip("\"'")
+        # I11: don't redact known config flags / short numerics.
+        if value.lower() in _KV_SAFE_VALUES or _KV_NUMERIC_RE.match(value):
+            return m.group(0)  # leave the original substring untouched
         report.note("kv_line")
         return f"{m.group(1)}={PLACEHOLDER}"
 

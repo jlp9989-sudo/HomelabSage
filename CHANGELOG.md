@@ -2,6 +2,40 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.10.6 — 2026-06-05
+
+Webhook output secret-scrub + KV-redact tightening. Closes I8 + I11
+from the v1.0 punch list — every Important finding now closed.
+
+### Fixed (Important)
+
+- **I8 — Webhook output scrubs `Update.context` and analyzer text.**
+  Before: anyone with the webhook URL received the full inventory
+  of homelab secrets (`env` dict from docker, `puid_pgid`, raw
+  `release_notes`) plus any tokens the LLM hallucinated into
+  `summary`/`breaking_changes`/`recommended_action`. Now: the
+  envelope runs through `redact_context` (walks the tree, masks
+  secret-key values, scrubs every string) and `redact_text` is
+  applied to all three analyzer fields. Safe config flags survive
+  (`LOG_LEVEL=info`, `puid_pgid=1000:1000`).
+- **I11 — KV-redact regex skips obvious config flags.** Before:
+  `OBSERVABILITY_PRIVATE=true`, `AUTH=public`, `AUTH_PORT=8080`,
+  `SESSION=on` all got redacted, degrading LLM analysis with
+  `<redacted-by-homelabsage>` placeholders where the real value
+  was harmless. Now: values matching a small allowlist
+  (`true|false|yes|no|on|off|none|null|nil|auto|default|enabled|
+  disabled|public|private|0|1`) OR a short pure-numeric token
+  (1-5 digits) pass through untouched. Real secrets stay redacted.
+
+### Internal
+
+- 1702 → 1714 tests (+12). Ruff clean, 0 mypy errors against 180
+  source files.
+- v1.0 punch list status: **all 5 Critical + all 12 Important
+  findings closed**. Only the 5 Nits remain (all opt-in, marked
+  for future v1.x consideration). The branch is now eligible for
+  v1.0 milestone when the user is back from vacation.
+
 ## v0.10.5 — 2026-06-05
 
 Last critical from the v1.0 punch list (C4) plus log allocation bound
