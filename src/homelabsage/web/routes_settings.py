@@ -94,7 +94,7 @@ from ..config_overlay import (
     set_dotted,
     user_overlay_path,
 )
-from ..redact import _is_secret_key
+from ..redact import _field_is_secret
 
 log = logging.getLogger(__name__)
 
@@ -183,20 +183,41 @@ def _block_to_dotted_keys(block_data: dict[str, Any], *, prefix: str = "") -> li
     return overlay_keys(block_data, prefix=prefix)
 
 
-def _mask_secrets(values: dict[str, Any]) -> dict[str, Any]:
+def _mask_value(v: Any) -> Any:
+    """Mask a single value while preserving its outer shape so the UI knows
+    whether the field is set (non-empty masked) or empty (empty container)."""
+    if isinstance(v, str):
+        return "***" if v else ""
+    if isinstance(v, list):
+        return ["***"] * len(v)
+    if isinstance(v, dict):
+        return {k: "***" for k in v}
+    return v
+
+
+def _mask_secrets(
+    values: dict[str, Any], schema_props: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Replace values whose KEY name looks secret with a sentinel.
 
-    The masked value is `"***"` when the field is set and `""` when it's empty,
-    so the UI can render "configured" / "not set" without ever shipping the
-    real secret over the wire. Boolean / numeric / list fields are never
-    masked even if the key name matches (they can't be credentials).
+    Masking preserves shape: a non-empty string → `"***"`, a populated
+    list → `["***", "***", …]`, a populated dict → `{k: "***", …}`. Empty
+    containers stay empty. The UI uses that to render "configured" /
+    "not set" without ever shipping the real secret over the wire.
+
+    Pass `schema_props` (the Pydantic JSON Schema `properties` map for the
+    same block) so fields explicitly tagged `json_schema_extra={"ui_secret":
+    True}` are masked even when their name doesn't match `SECRET_KEY_MARKERS`
+    (`webhook_url`, `urls`, `headers`, `user_key`).
     """
     out: dict[str, Any] = {}
     for k, v in values.items():
-        if isinstance(v, dict):
-            out[k] = _mask_secrets(v)
-        elif _is_secret_key(k) and isinstance(v, str):
-            out[k] = "***" if v else ""
+        prop = schema_props.get(k) if isinstance(schema_props, dict) else None
+        if _field_is_secret(k, prop):
+            out[k] = _mask_value(v)
+        elif isinstance(v, dict):
+            sub_props = prop.get("properties") if isinstance(prop, dict) else None
+            out[k] = _mask_secrets(v, sub_props)
         else:
             out[k] = v
     return out
@@ -286,12 +307,13 @@ def register_settings_routes(app: FastAPI, cfg: Config, cfg_path: Path | None) -
         overlay = _current_overlay()
         block_overlay = _get_dotted(overlay, dotted)
         local_overrides = _block_to_dotted_keys(block_overlay)
+        schema = submodel.model_json_schema()
         return {
             "block": block,
             "dotted_path": dotted,
-            "current": _mask_secrets(current),
+            "current": _mask_secrets(current, schema.get("properties")),
             "overrides": local_overrides,
-            "schema": submodel.model_json_schema(),
+            "schema": schema,
         }
 
     # Hoisted Body sentinel — ruff B008 dislikes Body() in default-arg position,

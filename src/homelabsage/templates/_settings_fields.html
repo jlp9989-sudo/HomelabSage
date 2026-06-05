@@ -38,6 +38,14 @@
                {% if f.bool_value %}checked{% endif %}>
         <span class="muted">currently <code>{{ f.bool_value }}</code></span>
       </label>
+    {% elif f.is_secret and f.is_array %}
+      <textarea class="field-input" id="f-{{ f.name }}" name="{{ f.name }}"
+                placeholder="{{ f.placeholder or 'one entry per line' }}"
+                autocomplete="off"></textarea>
+    {% elif f.is_secret and f.is_object %}
+      <textarea class="field-input" id="f-{{ f.name }}" name="{{ f.name }}"
+                placeholder="{{ f.placeholder or 'YAML mapping' }}"
+                autocomplete="off"></textarea>
     {% elif f.is_array %}
       <textarea class="field-input" id="f-{{ f.name }}" name="{{ f.name }}"
                 placeholder="one entry per line">{{ f.value }}</textarea>

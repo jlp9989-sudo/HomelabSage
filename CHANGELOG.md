@@ -2,6 +2,67 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.9.7 — 2026-06-05
+
+Security + correctness fixes from the v0.9.5 / v0.9.6 bug-hunt.
+
+A code-review pass against the two preceding GUI releases caught
+**two credential-leakage paths** introduced when the v0.9.5
+release exposed 22 new settings blocks: list and dict fields
+holding secrets (`outputs/apprise.urls`, `web/auth.api_keys`,
+`outputs/webhook.headers`, plus several `webhook_url` strings
+whose name didn't match the secret-marker heuristic) round-tripped
+in cleartext through both the JSON API and the HTML form.
+
+### Security
+
+- **Secrets in list/dict shapes are now masked.** `_mask_secrets`
+  preserves outer shape: non-empty string → `"***"`, populated
+  list → `["***", …]`, populated dict → `{k: "***", …}`. The HTML
+  form renderer also runs through the same gate so the
+  `<textarea>` for `urls` / `headers` no longer carries
+  cleartext.
+- **Explicit `ui_secret` schema-extra annotation** on
+  `outputs/{apprise,discord,msteams,slack,webhook}` webhook URLs
+  + `apprise.urls` + `webhook.headers` + `pushover.user_key`.
+  These didn't match the substring marker heuristic
+  (`webhook_url` has no marker; `urls` is plural). New
+  `_field_is_secret(name, prop_schema)` helper consults both
+  signals.
+- **Blank submit preserves a configured list/dict secret.** The
+  existing string-secret protection now applies uniformly — an
+  empty `urls` textarea on save no longer wipes existing entries.
+
+### Fixed
+
+- **Atomic star toggle.** `db.toggle_starred()` does a single
+  `UPDATE … SET starred = 1 - COALESCE(starred, 0) … RETURNING
+  starred`, eliminating the read-then-write window where two
+  simultaneous clicks could both observe False and both write
+  True (one click lost).
+- **404 on unknown `update_id`.** `POST /updates/{id}/star/toggle`
+  and `POST /updates/{id}/snooze/quick` now return 404 instead of
+  silently rendering a happy button for a row that doesn't exist.
+- **Pill counts use `COUNT(*)`.** `db.count_starred()` and
+  `db.count_snoozed()` replace `len(list_starred(limit=500))`, so
+  the Starred/Snoozed pill labels stay accurate beyond 500 rows.
+
+### Added
+
+- New `test_v097.py` (14 tests): masking on `apprise.urls`,
+  `web/auth.api_keys`, `webhook.headers`, `msteams.webhook_url`
+  in both JSON and HTML form; blank-submit round-trip preserving
+  list AND dict secrets; 404 on bogus id for star + snooze; the
+  atomic-toggle invariant; `days=-5` clears defensively; pill
+  counts via COUNT(*).
+
+### Internal
+
+- 1599 → 1613 tests (+14), ruff clean, 0 mypy errors against 179 files.
+- No new dependencies. `redact._field_is_secret` is the single
+  source of truth shared by the JSON API, the HTML form renderer
+  and the form save path.
+
 ## v0.9.6 — 2026-06-05
 
 In-line star + snooze from the updates table (no page reload).

@@ -78,8 +78,15 @@ def register_updates_routes(
         if hasattr(db, "list_snoozed"):
             for row in db.list_snoozed(limit=500):
                 snoozed_until[row["id"]] = row["snooze_until"]
-        starred_count = len(starred_ids)
-        snoozed_count = len(snoozed_until)
+        # Pill counts query COUNT(*) directly so they stay accurate beyond
+        # the 500-row list cap. Fall back to set size for stub DBs lacking
+        # the count helpers.
+        starred_count = (
+            db.count_starred() if hasattr(db, "count_starred") else len(starred_ids)
+        )
+        snoozed_count = (
+            db.count_snoozed() if hasattr(db, "count_snoozed") else len(snoozed_until)
+        )
 
         # Filter views (header pill links). Default `""` = all updates.
         if filter == "starred":
@@ -127,9 +134,21 @@ def register_updates_routes(
         Separate from the JSON `POST /api/updates/<id>/star` so the form
         doesn't need a JS layer or a redirect. Returns the rendered
         button so HTMX can swap the cell in place.
+
+        Uses the atomic `toggle_starred` so two simultaneous clicks (double
+        click, two tabs) can't both read False and both write True. Returns
+        404 if the row is missing rather than rendering a happy button for
+        an id that doesn't exist.
         """
-        new = not db.is_starred(update_id)
-        db.set_starred(update_id, new)
+        new = db.toggle_starred(update_id) if hasattr(db, "toggle_starred") else None
+        if new is None and not hasattr(db, "toggle_starred"):
+            # Legacy DB stub path — preserve old read-then-write behaviour.
+            if db.get(update_id) is None:
+                raise HTTPException(404, f"no update with id={update_id}")
+            new = not db.is_starred(update_id)
+            db.set_starred(update_id, new)
+        if new is None:
+            raise HTTPException(404, f"no update with id={update_id}")
         icon = "★" if new else "☆"
         cls = "btn" if new else "btn ghost"
         return HTMLResponse(
@@ -142,18 +161,20 @@ def register_updates_routes(
     async def quick_snooze_html(
         update_id: str, days: int = Form(7),
     ) -> HTMLResponse:
-        """HTMX target — snooze for N days (default 7) or clear when days=0.
+        """HTMX target — snooze for N days (default 7) or clear when days≤0.
 
         Returns the new snooze cell HTML so HTMX can swap it in place.
+        404 when the update id is unknown — better than silently rendering
+        a snooze button for a row that doesn't exist.
         """
         from datetime import timedelta as _td
 
         from .._time import utcnow
+        if db.get(update_id) is None:
+            raise HTTPException(404, f"no update with id={update_id}")
         if days <= 0:
             db.set_snooze(update_id, None)
-            return HTMLResponse(
-                _snooze_cell_html(update_id, None)
-            )
+            return HTMLResponse(_snooze_cell_html(update_id, None))
         until = (utcnow() + _td(days=days)).isoformat()
         db.set_snooze(update_id, until)
         return HTMLResponse(_snooze_cell_html(update_id, until))

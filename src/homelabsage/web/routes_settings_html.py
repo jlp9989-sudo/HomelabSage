@@ -47,7 +47,7 @@ from ..config_overlay import (
     user_overlay_path,
 )
 from ..llm import PROVIDER_PRESETS
-from ..redact import _is_secret_key
+from ..redact import _field_is_secret
 from .routes_settings import (
     SETTING_BLOCKS,
     _block_to_dotted_keys,
@@ -140,8 +140,10 @@ def _form_to_block_patch(
                 out[name] = False
             continue
         raw = form[name]
-        if _is_secret_key(name) and raw == "":
-            # Don't clobber an existing secret with the empty string.
+        if _field_is_secret(name, prop_schema) and raw.strip() == "":
+            # Don't clobber an existing secret with the empty string. Applies
+            # equally to list[str] / dict secrets (urls, headers, api_keys):
+            # blank textarea means "leave as-is", not "clear".
             continue
         try:
             out[name] = _coerce_form_value(raw, prop_schema)
@@ -178,7 +180,7 @@ def _block_form_context(
                     prop_type = opt["type"]
                     break
         raw_value = current.get(name)
-        is_secret = _is_secret_key(name) and prop_type == "string"
+        is_secret = _field_is_secret(name, prop)
         is_array = prop_type == "array"
         is_object = prop_type == "object"
         is_bool = prop_type == "boolean"
@@ -189,17 +191,22 @@ def _block_form_context(
         enum_values = prop.get("enum") or []
         is_enum = bool(enum_values) and not is_bool
 
-        # The textbox value for arrays/objects is the YAML/lines representation.
-        if is_array and isinstance(raw_value, list):
+        # Secrets always render as an empty input + placeholder, regardless of
+        # the underlying type (string OR list[str] OR dict). Otherwise the
+        # textbox value for arrays/objects is the YAML/lines representation.
+        if is_secret:
+            display = ""
+        elif is_array and isinstance(raw_value, list):
             display = "\n".join(str(v) for v in raw_value)
         elif is_object and isinstance(raw_value, dict):
             display = yaml.safe_dump(raw_value, default_flow_style=False, sort_keys=True).strip()
-        elif is_secret:
-            # Already masked by the JSON API; for the form we show empty +
-            # placeholder so an unchanged submit doesn't write "***" back.
-            display = ""
         else:
             display = "" if raw_value is None else str(raw_value)
+
+        # `secret_is_set` lets the placeholder say "configured" vs "not set"
+        # without leaking the actual value. For str: truthy. For list/dict:
+        # non-empty.
+        secret_is_set = bool(raw_value) if is_secret else False
 
         # `ui_widget` lets a Pydantic Field opt into a custom renderer. The
         # template chooses `_widget_<name>.html` when this is set; otherwise
@@ -238,7 +245,7 @@ def _block_form_context(
             # Raw value useful for the bool checkbox state
             "bool_value": bool(raw_value) if is_bool else False,
             "default": prop.get("default"),
-            "placeholder": "(configured — leave blank to keep)" if (is_secret and raw_value)
+            "placeholder": "(configured — leave blank to keep)" if (is_secret and secret_is_set)
                            else ("(not set)" if is_secret else ""),
         })
 

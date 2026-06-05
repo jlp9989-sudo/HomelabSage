@@ -107,6 +107,21 @@ def _is_secret_key(key: str) -> bool:
     return any(marker in k for marker in SECRET_KEY_MARKERS)
 
 
+def _field_is_secret(name: str, prop_schema: dict[str, Any] | None = None) -> bool:
+    """Decide whether a settings field holds a secret.
+
+    Two signals: the field name matches `SECRET_KEY_MARKERS` (heuristic) OR
+    the schema explicitly carries `ui_secret: true` via Pydantic
+    `Field(json_schema_extra=...)`. The explicit flag exists for fields
+    whose name doesn't trip the marker check — `webhook_url`, `urls` (list
+    of apprise URIs with embedded creds), `headers` (dict that may carry
+    `Authorization`), `user_key` — but whose contents must be masked.
+    """
+    if _is_secret_key(name):
+        return True
+    return prop_schema is not None and prop_schema.get("ui_secret") is True
+
+
 def _looks_like_credential(value: str) -> bool:
     return any(p.match(value) for p in _VALUE_PATTERNS)
 

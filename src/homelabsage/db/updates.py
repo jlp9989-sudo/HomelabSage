@@ -298,6 +298,21 @@ class UpdatesMixin:
         )
         return (cur.rowcount or 0) > 0
 
+    def toggle_starred(self, update_id: str) -> bool | None:
+        """Flip the bookmark flag in a single UPDATE so concurrent toggles
+        from two browser tabs can't lose a click. Returns the NEW state, or
+        None if the row is missing (so the HTTP layer can 404)."""
+        with self._conn:
+            cur = self._conn.execute(
+                "UPDATE updates SET starred = 1 - COALESCE(starred, 0) "
+                "WHERE id = ? RETURNING starred",
+                (update_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return bool(row[0])
+
     def is_starred(self, update_id: str) -> bool:
         row = self._conn.execute(
             "SELECT starred FROM updates WHERE id = ?", (update_id,),
@@ -305,6 +320,23 @@ class UpdatesMixin:
         if row is None:
             return False
         return bool(row["starred"] or 0)
+
+    def count_starred(self) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM updates WHERE starred = 1",
+        ).fetchone()
+        return int(row[0] or 0)
+
+    def count_snoozed(self, *, now_iso: str | None = None) -> int:
+        """Count rows whose snooze window is still in the future."""
+        from .._time import utcnow
+        now_s = now_iso or utcnow().isoformat()
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM updates "
+            "WHERE snooze_until IS NOT NULL AND snooze_until > ?",
+            (now_s,),
+        ).fetchone()
+        return int(row[0] or 0)
 
     def list_starred(self, *, limit: int = 200) -> builtins.list[AnalyzedUpdate]:
         """Return only bookmarked rows, newest-first."""

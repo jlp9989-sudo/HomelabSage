@@ -94,6 +94,7 @@ class DiscordOutputConfig(QuietHoursMixin):
             "→ Webhooks → New Webhook → Copy URL. Anyone with this URL can "
             "post to the channel, so treat it as a secret."
         ),
+        json_schema_extra={"ui_secret": True},
     )
     username: str = Field(
         "HomelabSage",
@@ -183,6 +184,7 @@ class AppriseOutputConfig(QuietHoursMixin):
             "`mailtos://user:pass@gmail.com`. See "
             "https://github.com/caronc/apprise/wiki for the full catalogue."
         ),
+        json_schema_extra={"ui_secret": True},
     )
     min_severity: Literal["critical", "high", "medium", "info"] = Field(
         "high",
@@ -248,6 +250,7 @@ class MSTeamsOutputConfig(QuietHoursMixin):
             "`outlook.office.com/webhook/...` URL. Anyone with the URL "
             "can post — treat as a secret."
         ),
+        json_schema_extra={"ui_secret": True},
     )
     min_severity: Literal["critical", "high", "medium", "info"] = Field(
         "high",
@@ -274,6 +277,7 @@ class PushoverOutputConfig(QuietHoursMixin):
             "Pushover **user or group key** — the recipient. Find it "
             "on your Pushover dashboard top-right."
         ),
+        json_schema_extra={"ui_secret": True},
     )
     device: str = Field(
         "",
@@ -306,6 +310,7 @@ class SlackOutputConfig(QuietHoursMixin):
             "(https://hooks.slack.com/services/T.../B.../...). "
             "Anyone with this URL can post — treat as a secret."
         ),
+        json_schema_extra={"ui_secret": True},
     )
     username: str = Field(
         "HomelabSage",
@@ -321,7 +326,11 @@ class WebhookOutputConfig(QuietHoursMixin):
     """Generic JSON-webhook output. Bring-your-own-receiver."""
 
     enabled: bool = False
-    url: str = Field("", description="Endpoint URL. Receives a JSON POST.")
+    url: str = Field(
+        "",
+        description="Endpoint URL. Receives a JSON POST.",
+        json_schema_extra={"ui_secret": True},
+    )
     bearer_token: str = Field(
         "",
         description="Optional. Sent as `Authorization: Bearer <token>`.",
@@ -329,6 +338,7 @@ class WebhookOutputConfig(QuietHoursMixin):
     headers: dict[str, str] = Field(
         default_factory=dict,
         description="Extra headers merged into every request.",
+        json_schema_extra={"ui_secret": True},
     )
     min_severity: Literal["critical", "high", "medium", "info"] = Field(
         "high",
