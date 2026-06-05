@@ -2,6 +2,44 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.10.1 — 2026-06-05
+
+MCP layer hardening — closes C2, C5 and I10 from the v1.0 punch list.
+
+### Fixed (Critical)
+
+- **C2 — MCP dispatcher no longer blocks the event loop.** Many
+  tools do blocking I/O (docker SDK `images.list`, TLS probe loops,
+  compose-graph walks, sync SQLite reads). The sync `dispatch()`
+  was called directly from the async `mcp_post` route, freezing
+  the entire web UI + scheduler for the duration of a slow tool.
+  `mcp_post` now awaits `asyncio.to_thread(dispatch, …)` — a hung
+  tool ties up one worker thread instead of the loop. New regression
+  test fires 3 parallel 0.3 s tool calls and asserts the whole
+  batch finishes in < 0.75 s (vs 0.9 s if serial).
+- **C5 — Catch-all MCP error no longer echoes `str(e)`.** Exception
+  messages routinely carry secrets (SQLite paths, HTTP URLs with
+  tokens, SSH host strings, container env vars). The default
+  catch-all returned
+  `f"tool {name!r} failed: {e}"` to the client. Now it returns
+  `tool {name!r} failed ({type}) — see server logs`, reuses
+  `safe_error()` from v0.10.0, and writes the full trace to
+  server logs only.
+
+### Fixed (Important)
+
+- **I10 — `tls_check_run` MCP tool caps caller-supplied URL list at
+  50.** Each probe is ~10 s serial; a bored agent passing 1000
+  URLs would block the dispatcher for ~3 h. Hard cap, no error —
+  drop the excess silently with the same shape the caller expected.
+
+### Internal
+
+- 1666 → 1671 tests (+5). Ruff clean, 0 mypy errors against 180
+  source files.
+- `dispatch()` stays sync + pure — the threading shim lives only in
+  the HTTP route so the function remains trivially unit-testable.
+
 ## v0.10.0 — 2026-06-05
 
 Start of the v1.0 punch-list sprint — closing the two highest-severity

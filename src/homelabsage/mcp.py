@@ -26,6 +26,7 @@ without `web.auth.enabled` (the standard "trust your LAN" stance).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -38,6 +39,7 @@ from .config import Config
 from .db import Database
 from .diagnostics import diagnose_containers, summarise
 from .models import UpdateStatus
+from .outputs._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -996,6 +998,10 @@ def _tool_tls_check_run(cfg: Config, _db: Database, params: dict) -> dict:
         urls = cfg.tls_check.urls
     if not urls:
         return {"count": 0, "items": [], "reason": "no URLs configured"}
+    # I10: cap arbitrary caller-supplied lists. Each probe runs serial at
+    # ~10s — a 1000-URL request would block the dispatcher for ~3 hours.
+    MAX_URLS = 50
+    urls = urls[:MAX_URLS]
     warn_days = int(params.get("warn_days") or cfg.tls_check.warn_days)
     checks = check_urls([str(u) for u in urls], warn_days=max(1, warn_days))
     return {
@@ -1764,10 +1770,21 @@ def dispatch(cfg: Config, db: Database, body: dict) -> dict:
         try:
             result = impl(cfg, db, tool_args)
         except ValueError as e:
+            # ValueError is the conventional "bad argument" path — its
+            # message is part of the tool contract (e.g. "limit must be
+            # 1..500"), surface it. ValueError messages never carry
+            # secrets in our codebase by audit.
             return _jsonrpc_error(req_id, -32602, str(e))
         except Exception as e:
+            # C5: never echo `str(e)` to the client. Exception messages
+            # routinely carry secrets (sqlite paths, HTTP URLs with
+            # tokens, SSH host strings, container env vars). Log the
+            # full trace server-side, return only the type to the caller.
             log.exception("MCP tool %s crashed", tool_name)
-            return _jsonrpc_error(req_id, -32603, f"tool {tool_name!r} failed: {e}")
+            return _jsonrpc_error(
+                req_id, -32603,
+                f"tool {tool_name!r} failed ({safe_error(e)}) — see server logs",
+            )
         # MCP convention: wrap structured results in `content[]` with text/json
         # so generic clients can render them uniformly.
         return _jsonrpc_result(req_id, {
@@ -1802,4 +1819,10 @@ def register_mcp_routes(app: FastAPI, cfg: Config, db: Database) -> None:
     async def mcp_post(body: dict) -> JSONResponse:
         if not isinstance(body, dict):
             raise HTTPException(400, "MCP body must be a JSON object")
-        return JSONResponse(dispatch(cfg, db, body))
+        # C2: many tools do blocking I/O (docker SDK images.list, TLS
+        # probe loops, compose-graph walks, sync sqlite). Calling
+        # `dispatch` directly on the event loop froze the entire web
+        # UI + scheduler for the duration of a slow tool. Offload to
+        # a worker thread so a hung tool only ties up one thread.
+        result = await asyncio.to_thread(dispatch, cfg, db, body)
+        return JSONResponse(result)
