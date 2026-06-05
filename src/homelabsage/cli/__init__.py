@@ -40,6 +40,7 @@ from . import (  # noqa: F401  (imported for side-effect: command registration)
     serve,
     snooze,
     stack,
+    status,
     tls_check,
     watched,
     watchtower,

@@ -489,6 +489,32 @@ def _tool_clear_all_snoozes(_cfg: Config, db: Database, _params: dict) -> dict:
     return {"ok": True, "cleared": cleared}
 
 
+def _tool_clear_pending_dispatches(_cfg: Config, db: Database, _params: dict) -> dict:
+    """Drop every row from the pending push-dispatch queue."""
+    if not hasattr(db, "clear_pending_dispatches"):
+        return {"ok": False, "cleared": 0, "error": "db missing helper"}
+    cleared = db.clear_pending_dispatches()
+    return {"ok": True, "cleared": cleared}
+
+
+def _tool_version(_cfg: Config, _db: Database, _params: dict) -> dict:
+    """Return the HomelabSage version + a brief feature flag map.
+
+    Lets a downstream agent gate behaviour on minimum version
+    (e.g. "this tool only works against ≥ 0.7.0").
+    """
+    from . import __version__
+    return {
+        "version": __version__,
+        "features": {
+            "doctor": True,
+            "audit_history": True,
+            "snooze": True,
+            "audit_alerts": True,
+        },
+    }
+
+
 def _tool_snooze_update(_cfg: Config, db: Database, params: dict) -> dict:
     """Set or clear a snooze timestamp on an update.
 
@@ -905,6 +931,29 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_compose_graph_mermaid,
+    },
+    "clear_pending_dispatches": {
+        "description": (
+            "Drop every row from the pending push-dispatch queue. "
+            "Operator panic-button for misconfigured outputs that "
+            "queued thousands of items. Returns count cleared."
+        ),
+        "params_schema": {
+            "type": "object", "properties": {},
+            "additionalProperties": False,
+        },
+        "impl": _tool_clear_pending_dispatches,
+    },
+    "version": {
+        "description": (
+            "Return HomelabSage version + a feature flag map for "
+            "downstream agents to gate on min-version requirements."
+        ),
+        "params_schema": {
+            "type": "object", "properties": {},
+            "additionalProperties": False,
+        },
+        "impl": _tool_version,
     },
     "clear_all_snoozes": {
         "description": (

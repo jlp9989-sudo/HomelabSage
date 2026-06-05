@@ -23,6 +23,7 @@ from ..config import WebAuthConfig
 # `/api/stack-health` + `/metrics` for dashboard scrapers.
 AUTH_BYPASS_EXACT: frozenset[str] = frozenset({
     "/healthz",
+    "/api/version",
     "/api/stack-health",
     "/api/doctor",
     "/metrics",

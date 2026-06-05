@@ -47,3 +47,14 @@ class PendingMixin:
             "DELETE FROM pending_dispatches WHERE update_id = ? AND output_id = ?",
             (update_id, output_id),
         )
+
+    def clear_pending_dispatches(self) -> int:
+        """Drop every row from the queue. Returns the count cleared.
+
+        Useful for operator panic-button after a misconfigured output
+        queued thousands of items, or after a parity gate stuck on a
+        stale `mdstat` path. The flush loop normally drains rows one
+        per cycle; this is the "I changed my mind" override.
+        """
+        cur = self._conn.execute("DELETE FROM pending_dispatches")
+        return int(cur.rowcount or 0)

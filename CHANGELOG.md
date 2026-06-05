@@ -2,6 +2,29 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.7.8 — 2026-06-04
+
+Status command, pending-dispatch bulk clear, version surface.
+
+### Added
+
+- **`homelabsage status` CLI**. One-line-per-section summary
+  (Updates by status, Audit by severity, Parity gate, Pending
+  dispatches, Snoozed updates) for a terminal-bar / status-strip
+  glance. Always exits 0 — use `doctor` for the exit-code form.
+- **`db.clear_pending_dispatches()`** + **MCP
+  `clear_pending_dispatches`**. Operator panic-button to drop the
+  whole push-dispatch queue after a misconfigured output queued
+  thousands of items.
+- **`GET /api/version`** (auth-bypassed) + **MCP `version`**.
+  Returns `{version, features: {doctor, audit_history, snooze,
+  audit_alerts}}`. Lets a downstream agent / dashboard widget gate
+  behaviour on min-version requirements.
+
+### Internal
+
+- 1472 → 1479 tests (+7), ruff clean, 0 mypy errors against 169 files.
+
 ## v0.7.7 — 2026-06-04
 
 Three audit-surface extensions.
