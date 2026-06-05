@@ -665,6 +665,34 @@ def _tool_scan_window_check(cfg: Config, _db: Database, _params: dict) -> dict:
     }
 
 
+def _tool_get_chronicle(_cfg: Config, db: Database, params: dict) -> dict:
+    """Walk the last `days` of updates and return the narrative timeline.
+
+    Returns `{period_start, period_end, counts_by_kind, entries}`.
+    Same data as `homelabsage chronicle` CLI but JSON-shaped for
+    agents. Each entry has `{when, subject, kind, headline, detail}`.
+    Default 30 days; clamp 1..365.
+    """
+    from .chronicle import build_chronicle
+    days = max(1, min(int(params.get("days") or 30), 365))
+    chronicle = build_chronicle(db, days=days)
+    return {
+        "period_start": chronicle.period_start.isoformat(),
+        "period_end": chronicle.period_end.isoformat(),
+        "counts_by_kind": chronicle.counts_by_kind(),
+        "entries": [
+            {
+                "when": e.when.isoformat() if e.when else None,
+                "subject": e.subject,
+                "kind": e.kind,
+                "headline": e.headline,
+                "detail": e.detail,
+            }
+            for e in chronicle.entries
+        ],
+    }
+
+
 def _tool_where_is(cfg: Config, _db: Database, params: dict) -> dict:
     """Locate a compose service / container by name.
 
@@ -1268,6 +1296,22 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_scan_window_check,
+    },
+    "get_chronicle": {
+        "description": (
+            "Walk the last `days` of updates and return the "
+            "narrative timeline (applied / dismissed / breaking / "
+            "severity_jump). Returns `{period_start, period_end, "
+            "counts_by_kind, entries}`. Default 30 days; clamp 1..365."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "minimum": 1, "maximum": 365},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_get_chronicle,
     },
     "where_is": {
         "description": (

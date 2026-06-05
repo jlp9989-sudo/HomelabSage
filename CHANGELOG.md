@@ -2,6 +2,37 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.9.3 — 2026-06-04
+
+Research-driven: wire dormant detectors into auditor + MCP chronicle.
+A background research agent found the codebase had 14 detectors that
+ran inside the docker plugin (attaching context for the LLM) but
+never surfaced as first-class auditor findings. This release wires
+the three highest-impact ones; more in v0.9.4+.
+
+### Added
+
+- **`restart_freq` → audit finding** (`restart_flapping` category).
+  Surfaces containers crashing ≥0.25/h as a `medium`+ auditor row.
+  Previously only the LLM analyzer saw the context.
+- **`healthcheck_stale` → audit finding** (`healthcheck_stale`
+  category). Containers RUNNING but with a red healthcheck for
+  hours — restart-flapping detector misses these since the process
+  is alive. Inherits the severity (≥72h critical, ≥24h high,
+  ≥4h medium) from the detector.
+- **`exposed_ports` → audit finding**. Collapses the per-port
+  verdict list to one finding per container at the worst severity
+  present, so a container with 12 exposed ports doesn't drown the
+  audit. Top-5 ports cited.
+- **MCP `get_chronicle(days)`**. Wraps `chronicle.build_chronicle`
+  (CLI-only until now). Returns `{period_start, period_end,
+  counts_by_kind, entries: [{when, subject, kind, headline,
+  detail}]}`. Days clamped 1..365.
+
+### Internal
+
+- 1559 → 1567 tests (+8), ruff clean, 0 mypy errors against 177 files.
+
 ## v0.9.2 — 2026-06-04
 
 Lookup helpers.

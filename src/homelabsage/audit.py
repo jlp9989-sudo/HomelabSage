@@ -173,6 +173,114 @@ def _orphan_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
     )]
 
 
+def _restart_freq_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
+    """Surface restart-flapping context attached by the docker plugin.
+
+    `context.restart_freq` is the `RestartFinding.to_context()` shape
+    (`severity`, `restart_count`, `restarts_per_hour`). Only flags
+    when the per-container detector itself decided to attach — we
+    don't re-derive the severity bucket here.
+    """
+    ctx = item.update.context or {}
+    rf = ctx.get("restart_freq")
+    if not isinstance(rf, dict):
+        return []
+    sev = str(rf.get("severity") or "")
+    if sev not in ("medium", "high", "critical"):
+        return []
+    rph = float(rf.get("restarts_per_hour") or 0)
+    rc = int(rf.get("restart_count") or 0)
+    return [AuditFinding(
+        severity=sev, category="restart_flapping",
+        title=f"{item.update.subject} is restart-flapping",
+        detail=(
+            f"~{rph:.2f} restarts/hour over {rc} lifetime restarts. "
+            f"Fix this BEFORE upgrading — the new image will inherit "
+            f"the same crash loop."
+        ),
+        source_kind="restart_freq", source_ref=item.id,
+        cite=f"restarts_per_hour={rph:.2f}",
+    )]
+
+
+def _healthcheck_stale_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
+    """Surface healthcheck-stale context attached by the docker plugin.
+
+    `context.healthcheck_stale` is the `HealthStaleFinding.to_context()`
+    shape. Restart-flapping detector misses these because the
+    container is RUNNING — the healthcheck just fails. We flag
+    every non-info severity emitted by the upstream detector.
+    """
+    ctx = item.update.context or {}
+    hs = ctx.get("healthcheck_stale")
+    if not isinstance(hs, dict):
+        return []
+    sev = str(hs.get("severity") or "")
+    if sev not in ("medium", "high", "critical"):
+        return []
+    streak = int(hs.get("failing_streak") or 0)
+    hours = hs.get("hours_unhealthy")
+    hours_str = f"{hours:.1f}h" if isinstance(hours, (int, float)) else "?"
+    return [AuditFinding(
+        severity=sev, category="healthcheck_stale",
+        title=f"{item.update.subject} has been unhealthy for {hours_str}",
+        detail=(
+            f"Healthcheck failing-streak={streak}. The container is "
+            f"still RUNNING but its declared healthcheck has been red "
+            f"— upgrading on top of a broken health invariant rarely "
+            f"helps."
+        ),
+        source_kind="healthcheck_stale", source_ref=item.id,
+        cite=f"failing_streak={streak} hours_unhealthy={hours_str}",
+    )]
+
+
+def _exposed_ports_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
+    """Surface exposed-port findings attached by the docker plugin.
+
+    `context.exposed_ports` is a list of per-port verdict dicts
+    emitted by `exposed_ports.evaluate`. We collapse to one audit
+    finding per container at the highest severity present so a
+    container with 12 exposed ports doesn't drown the auditor.
+    """
+    ctx = item.update.context or {}
+    raw = ctx.get("exposed_ports")
+    if not isinstance(raw, list) or not raw:
+        return []
+    sev_order = {"info": 0, "medium": 1, "high": 2, "critical": 3}
+    worst_sev = "info"
+    worst_n = -1
+    citations: list[str] = []
+    for p in raw:
+        if not isinstance(p, dict):
+            continue
+        s = str(p.get("severity") or "info")
+        n = sev_order.get(s, 0)
+        if n > worst_n:
+            worst_n = n
+            worst_sev = s
+        cite = str(p.get("port") or p.get("addr") or "?")
+        if cite and len(citations) < 5:
+            citations.append(cite)
+    if worst_sev not in ("medium", "high", "critical"):
+        return []
+    return [AuditFinding(
+        severity=worst_sev, category="exposed_ports",
+        title=(
+            f"{item.update.subject} exposes "
+            f"{len(raw)} risky port(s) on the LAN"
+        ),
+        detail=(
+            f"Most-public sample: {', '.join(citations) or '(no IDs)'}. "
+            f"Review whether each binding is intentional — a privileged "
+            f"port on 0.0.0.0 is a misconfiguration most homelabs make "
+            f"by accident."
+        ),
+        source_kind="exposed_ports", source_ref=item.id,
+        cite=f"worst_severity={worst_sev} count={len(raw)}",
+    )]
+
+
 def _alternative_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
     """At most ONE alternative per row — matches the prompt rule."""
     ctx = item.update.context or {}
@@ -514,6 +622,12 @@ def build_report(
         findings.extend(_alternative_findings(it))
         findings.extend(_bloatware_findings(it))
         findings.extend(_container_age_findings(it))
+        # v0.9.3: surface detectors that previously only attached
+        # context for the LLM analyzer — now they're first-class
+        # audit findings too.
+        findings.extend(_restart_freq_findings(it))
+        findings.extend(_healthcheck_stale_findings(it))
+        findings.extend(_exposed_ports_findings(it))
         if cfg.tag_lag.enabled:
             findings.extend(_tag_lag_findings(
                 it,
