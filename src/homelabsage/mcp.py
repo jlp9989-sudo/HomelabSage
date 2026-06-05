@@ -497,15 +497,58 @@ def _tool_clear_pending_dispatches(_cfg: Config, db: Database, _params: dict) ->
     return {"ok": True, "cleared": cleared}
 
 
+def _tool_purge_old_updates(_cfg: Config, db: Database, params: dict) -> dict:
+    """Drop APPLIED+DISMISSED updates older than `older_than_days`."""
+    if not hasattr(db, "purge_old_updates"):
+        return {"ok": False, "purged": 0, "error": "db missing helper"}
+    days = max(1, int(params.get("older_than_days") or 90))
+    dry = bool(params.get("dry_run") or False)
+    n = db.purge_old_updates(older_than_days=days, dry_run=dry)
+    return {"ok": True, "purged": n, "older_than_days": days, "dry_run": dry}
+
+
+def _tool_scan_window_check(cfg: Config, _db: Database, _params: dict) -> dict:
+    """Would a scan start right now, or is the scan-window gate blocking?
+
+    Returns `{enabled, blocked, reason}`. Useful for agents that
+    want to decide "trigger /run now" vs "wait until the window
+    clears".
+    """
+    from .scan_window import is_scan_blocked
+    if not cfg.scan_window.enabled:
+        return {"enabled": False, "blocked": False, "reason": "disabled"}
+    verdict = is_scan_blocked(
+        enabled=True,
+        window_spec=cfg.scan_window.window,
+        timezone_name=cfg.scan_window.timezone,
+    )
+    return {
+        "enabled": True,
+        "blocked": bool(verdict),
+        "reason": verdict.reason,
+    }
+
+
 def _tool_version(_cfg: Config, _db: Database, _params: dict) -> dict:
     """Return the HomelabSage version + a brief feature flag map.
 
     Lets a downstream agent gate behaviour on minimum version
-    (e.g. "this tool only works against ≥ 0.7.0").
+    (e.g. "this tool only works against ≥ 0.7.0"). `version_parts`
+    is a `[major, minor, patch]` int list so the agent doesn't have
+    to parse the string itself.
     """
     from . import __version__
+    parts: list[int] = []
+    for p in __version__.split("."):
+        try:
+            parts.append(int(p.split("-", 1)[0]))   # strip RC/dev suffix
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
     return {
         "version": __version__,
+        "version_parts": parts[:3],
         "features": {
             "doctor": True,
             "audit_history": True,
@@ -943,6 +986,34 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_clear_pending_dispatches,
+    },
+    "purge_old_updates": {
+        "description": (
+            "Delete APPLIED + DISMISSED updates older than "
+            "`older_than_days` (default 90). `dry_run=true` counts "
+            "without deleting. Snoozed rows are never purged."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "older_than_days": {"type": "integer", "minimum": 1},
+                "dry_run": {"type": "boolean", "default": False},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_purge_old_updates,
+    },
+    "scan_window_check": {
+        "description": (
+            "Probe whether the scan-window gate is currently blocking "
+            "scans. Returns `{enabled, blocked, reason}`. Lets agents "
+            "decide between trigger-now and wait-for-window."
+        ),
+        "params_schema": {
+            "type": "object", "properties": {},
+            "additionalProperties": False,
+        },
+        "impl": _tool_scan_window_check,
     },
     "version": {
         "description": (

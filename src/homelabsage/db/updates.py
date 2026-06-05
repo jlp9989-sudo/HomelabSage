@@ -173,6 +173,48 @@ class UpdatesMixin:
             return None
         return row["snooze_until"] or None
 
+    def purge_old_updates(
+        self,
+        *,
+        older_than_days: int,
+        statuses: tuple[str, ...] = ("applied", "dismissed"),
+        dry_run: bool = False,
+    ) -> int:
+        """Delete rows whose status is in `statuses` AND detected_at < now-N days.
+
+        Defaults to APPLIED + DISMISSED — terminal states the user has
+        already decided on. Returns the count that WAS (or would be)
+        deleted. `dry_run=True` runs the SELECT-only count without
+        modifying the table.
+
+        Snoozed rows are excluded regardless of status — the snooze
+        is the user's "remind me later" signal; honouring it here too.
+        """
+        if older_than_days <= 0:
+            return 0
+        from datetime import timedelta
+
+        from .._time import utcnow
+        cutoff = (utcnow() - timedelta(days=older_than_days)).isoformat()
+        placeholders = ",".join("?" for _ in statuses)
+        sql_where = (
+            f"status IN ({placeholders}) "
+            "AND detected_at < ? "
+            "AND (snooze_until IS NULL OR snooze_until = '')"
+        )
+        count_sql = f"SELECT COUNT(*) FROM updates WHERE {sql_where}"
+        row = self._conn.execute(
+            count_sql, (*statuses, cutoff),
+        ).fetchone()
+        n = int(row[0] or 0)
+        if dry_run or n == 0:
+            return n
+        self._conn.execute(
+            f"DELETE FROM updates WHERE {sql_where}",
+            (*statuses, cutoff),
+        )
+        return n
+
     def clear_all_snoozes(self) -> int:
         """Clear `snooze_until` on every row that has one. Returns count."""
         cur = self._conn.execute(

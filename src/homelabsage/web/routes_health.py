@@ -23,10 +23,21 @@ def register_health_routes(app: FastAPI) -> None:
         Mirrors the MCP `version` tool. Auth-bypassed so Homepage /
         Kuma probes can read it directly. The feature flag map lets
         a dashboard widget conditionally render new fields based on
-        whether the server supports them.
+        whether the server supports them. `version_parts` is the
+        parsed `[major, minor, patch]` so the caller doesn't have
+        to split the string themselves.
         """
+        parts: list[int] = []
+        for p in __version__.split("."):
+            try:
+                parts.append(int(p.split("-", 1)[0]))
+            except ValueError:
+                parts.append(0)
+        while len(parts) < 3:
+            parts.append(0)
         return {
             "version": __version__,
+            "version_parts": parts[:3],
             "features": {
                 "doctor": True,
                 "audit_history": True,

@@ -35,6 +35,7 @@ from . import (  # noqa: F401  (imported for side-effect: command registration)
     log_anomaly,
     notify,
     notion_archive,
+    purge,
     scan_diff,
     scripts,
     serve,

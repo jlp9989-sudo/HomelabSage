@@ -2,6 +2,30 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.7.9 — 2026-06-04
+
+DB retention, scan-window introspection, version_parts for agents.
+
+### Added
+
+- **`db.purge_old_updates(older_than_days, statuses, dry_run)`** +
+  **`homelabsage purge --days N --dry-run`** + MCP
+  **`purge_old_updates`**. Drops APPLIED + DISMISSED rows older
+  than N days. Snoozed rows are never purged (the snooze is a
+  remind-me signal we honour here too). Single-statement SELECT +
+  DELETE so no race vs concurrent inserts.
+- **MCP `scan_window_check`**. Returns `{enabled, blocked, reason}`
+  so agents can decide between "trigger /run now" vs "wait until
+  the window clears" without parsing config themselves.
+- **`version_parts`** in the existing MCP `version` tool (and
+  HTTP equivalent kept symmetric). Returns `[major, minor, patch]`
+  ints so an agent can write `version_parts >= [0,7,0]` instead
+  of parsing strings.
+
+### Internal
+
+- 1479 → 1489 tests (+10), ruff clean, 0 mypy errors against 170 files.
+
 ## v0.7.8 — 2026-06-04
 
 Status command, pending-dispatch bulk clear, version surface.
