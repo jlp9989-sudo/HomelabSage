@@ -2,6 +2,16 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.8.5 — 2026-06-04
+
+- **`homelabsage activity` CLI**. Tail recent updates (most-recent
+  first) with status colour + severity. `--json` for one JSON
+  object per line — pipes into `jq`. `--limit` clamped to 200.
+
+### Internal
+
+- 1534 → 1538 tests (+4), ruff clean, 0 mypy errors against 175 files.
+
 ## v0.8.4 — 2026-06-04
 
 - **`dangling_images.py`** + **MCP `dangling_images` tool**. Pure

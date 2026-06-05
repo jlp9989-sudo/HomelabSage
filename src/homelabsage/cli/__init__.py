@@ -14,6 +14,7 @@ from __future__ import annotations
 # Order matters: each submodule decorates the shared `app` from `_common`.
 # Import them all so the registrations happen at package load.
 from . import (  # noqa: F401  (imported for side-effect: command registration)
+    activity,
     analyse,
     audit,
     audit_mute,
