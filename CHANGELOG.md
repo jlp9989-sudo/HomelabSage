@@ -2,6 +2,28 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.9.2 — 2026-06-04
+
+Lookup helpers.
+
+### Added
+
+- **`homelabsage where-is <name>` CLI** + **`where_is.py`** module +
+  **MCP `where_is` tool**. Finds where a service / container is
+  declared in compose files. Returns file + line + project + a
+  short YAML context excerpt. Match rules in priority: exact
+  service_name, exact container_name, case-insensitive substring.
+  Useful when a Dockge stack catalogue grows past memory.
+- **MCP `update_diff(a, b)`**. Side-by-side compare of two
+  analyzed updates. Returns `{ok, a, b, diff: {severity_changed,
+  breaking_changes_added, breaking_changes_removed, summary_a,
+  summary_b}}`. Use case: "did the rebase change the risk
+  profile?" / post-mortem queries.
+
+### Internal
+
+- 1544 → 1559 tests (+15), ruff clean, 0 mypy errors against 177 files.
+
 ## v0.9.1 — 2026-06-04
 
 - **`GET /api/audit/by-category?category=X&limit=N`**. Returns the

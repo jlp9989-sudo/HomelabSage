@@ -48,6 +48,7 @@ from . import (  # noqa: F401  (imported for side-effect: command registration)
     tls_check,
     watched,
     watchtower,
+    where_is,
 )
 from ._common import app
 

@@ -665,6 +665,90 @@ def _tool_scan_window_check(cfg: Config, _db: Database, _params: dict) -> dict:
     }
 
 
+def _tool_where_is(cfg: Config, _db: Database, params: dict) -> dict:
+    """Locate a compose service / container by name.
+
+    Returns hits with file + line + project + context excerpt. Empty
+    `name` returns count=0. No compose scan paths configured →
+    `reason` explains.
+    """
+    name = params.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return {"count": 0, "items": [], "reason": "name is required"}
+    roots = list(cfg.sources.docker.compose_scan_paths or [])
+    if not roots:
+        return {
+            "count": 0, "items": [],
+            "reason": "no compose scan paths configured",
+        }
+    from .compose import build_graph
+    from .where_is import find as find_where
+    graph = build_graph(roots)
+    hits = find_where(graph, name)
+    return {
+        "count": len(hits),
+        "items": [h.to_context() for h in hits],
+    }
+
+
+def _tool_update_diff(_cfg: Config, db: Database, params: dict) -> dict:
+    """Side-by-side comparison of two analyzed updates by id.
+
+    Returns `{a, b, diff: {severity_changed, breaking_changes_added,
+    breaking_changes_removed, summary_a, summary_b}}`. Either id
+    missing → `{ok: false, error}`. Useful for "did this rebase
+    change the risk profile?" or post-mortem queries.
+    """
+    a_id = params.get("a")
+    b_id = params.get("b")
+    if not isinstance(a_id, str) or not a_id:
+        return {"ok": False, "error": "a is required"}
+    if not isinstance(b_id, str) or not b_id:
+        return {"ok": False, "error": "b is required"}
+    a = db.get(a_id)
+    b = db.get(b_id)
+    if a is None:
+        return {"ok": False, "error": f"no update with id={a_id}"}
+    if b is None:
+        return {"ok": False, "error": f"no update with id={b_id}"}
+
+    def _shape(it):
+        return {
+            "id": it.id,
+            "subject": it.update.subject,
+            "source": it.update.source,
+            "version": f"{it.update.current_version} → {it.update.new_version}",
+            "status": it.status.value,
+            "severity": (
+                it.analysis.severity.value if it.analysis else None
+            ),
+            "breaking_changes": (
+                list(it.analysis.breaking_changes or [])
+                if it.analysis else []
+            ),
+            "summary": (
+                it.analysis.summary if it.analysis else None
+            ),
+        }
+
+    a_s = _shape(a)
+    b_s = _shape(b)
+    set_a = set(a_s["breaking_changes"])
+    set_b = set(b_s["breaking_changes"])
+    return {
+        "ok": True,
+        "a": a_s,
+        "b": b_s,
+        "diff": {
+            "severity_changed": a_s["severity"] != b_s["severity"],
+            "breaking_changes_added": sorted(set_b - set_a),
+            "breaking_changes_removed": sorted(set_a - set_b),
+            "summary_a": a_s["summary"],
+            "summary_b": b_s["summary"],
+        },
+    }
+
+
 def _tool_system_info(cfg: Config, db: Database, _params: dict) -> dict:
     """One-call rollup: version + update counts + audit/snooze/mute totals.
 
@@ -1184,6 +1268,38 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_scan_window_check,
+    },
+    "where_is": {
+        "description": (
+            "Locate a compose service / container by name. Returns "
+            "every match with `file`, `line`, `project`, plus a "
+            "context excerpt of the YAML around it. Substring + "
+            "case-insensitive fallback when no exact hit."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_where_is,
+    },
+    "update_diff": {
+        "description": (
+            "Compare two analyzed updates by id. Returns "
+            "`{ok, a, b, diff: {severity_changed, "
+            "breaking_changes_added/removed, summary_a/b}}`."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "a": {"type": "string"},
+                "b": {"type": "string"},
+            },
+            "required": ["a", "b"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_update_diff,
     },
     "system_info": {
         "description": (
