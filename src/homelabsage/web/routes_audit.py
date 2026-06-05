@@ -11,7 +11,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from jinja2 import Environment
 
@@ -86,6 +86,77 @@ def register_audit_routes(app: FastAPI, cfg: Config, db: Database, env: Environm
                 ),
             },
         )
+
+    @app.get("/api/audit/mutes")
+    async def audit_mutes_list(include_expired: bool = False) -> JSONResponse:
+        """List the active audit-finding mutes."""
+        rows = await asyncio.to_thread(
+            db.list_audit_mutes, include_expired=include_expired,
+        )
+        return JSONResponse({"count": len(rows), "items": rows})
+
+    @app.post("/api/audit/mutes")
+    async def audit_mutes_add(payload: dict) -> JSONResponse:
+        """Add or refresh a mute.
+
+        Body: `{"category", "source_kind", "source_ref",
+        "expires_at"?, "reason"?}`. `expires_at` is ISO 8601 UTC;
+        empty/null means permanent. Returns `{ok, fingerprint}`.
+        """
+        for field in ("category", "source_kind", "source_ref"):
+            val = payload.get(field)
+            if not isinstance(val, str) or not val.strip():
+                raise HTTPException(
+                    400, f"{field} is required (non-empty string)",
+                )
+        expires = payload.get("expires_at")
+        if expires is not None and not isinstance(expires, str):
+            raise HTTPException(400, "expires_at must be a string or null")
+        if expires:
+            from .._time import parse_iso
+            try:
+                parse_iso(expires)
+            except ValueError:
+                raise HTTPException(  # noqa: B904
+                    400, "expires_at must be ISO 8601",
+                )
+        reason = payload.get("reason")
+        if reason is not None and not isinstance(reason, str):
+            raise HTTPException(400, "reason must be a string or null")
+        await asyncio.to_thread(
+            db.add_audit_mute,
+            category=payload["category"],
+            source_kind=payload["source_kind"],
+            source_ref=payload["source_ref"],
+            expires_at=expires or None,
+            reason=reason or None,
+        )
+        return JSONResponse({
+            "ok": True,
+            "fingerprint": {
+                "category": payload["category"],
+                "source_kind": payload["source_kind"],
+                "source_ref": payload["source_ref"],
+            },
+            "expires_at": expires or None,
+        })
+
+    @app.delete("/api/audit/mutes")
+    async def audit_mutes_remove(payload: dict) -> JSONResponse:
+        """Drop a mute by fingerprint."""
+        for field in ("category", "source_kind", "source_ref"):
+            val = payload.get(field)
+            if not isinstance(val, str) or not val.strip():
+                raise HTTPException(400, f"{field} is required")
+        ok = await asyncio.to_thread(
+            db.remove_audit_mute,
+            category=payload["category"],
+            source_kind=payload["source_kind"],
+            source_ref=payload["source_ref"],
+        )
+        if not ok:
+            raise HTTPException(404, "no mute matches that fingerprint")
+        return JSONResponse({"ok": True})
 
     @app.get("/api/audit/diff")
     async def audit_diff_api() -> JSONResponse:

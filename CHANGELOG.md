@@ -2,6 +2,33 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.8.1 — 2026-06-04
+
+Audit-finding mute list — full surface (db, filter, CLI, HTTP, MCP).
+
+### Added
+
+- **`audit_mutes` SQL table** + **`AuditMutesMixin`** on `Database`.
+  Fingerprint = `(category, source_kind, source_ref)`. Optional
+  `expires_at` (NULL = permanent). `PRIMARY KEY` makes re-adds
+  idempotent.
+- **`audit.build_report` filters muted findings** in-memory before
+  severity sort, so `audit.md`, `audit_history.jsonl`, `/audit`,
+  `/api/audit`, MCP `audit_diff`, and the SSE stream all observe
+  the mute. No retro-active filtering of already-persisted history.
+- **`homelabsage audit-mute add/list/remove` CLI** (sub-Typer
+  group). `add` accepts `--for 7d|12h|30m` relative, `--until ISO`
+  absolute, or neither (permanent). `--include-expired` on list.
+- **`/api/audit/mutes`** (GET/POST/DELETE). POST validates ISO 8601
+  + required fields; DELETE returns 404 when no fingerprint matches.
+- **MCP `audit_mute_add` / `audit_mute_list` / `audit_mute_remove`**.
+
+### Internal
+
+- 1493 → 1509 tests (+16), ruff clean, 0 mypy errors against 173 files.
+- 1 new DB table + mixin, 1 new CLI sub-Typer (3 verbs), 3 new web
+  routes, 3 new MCP tools.
+
 ## v0.8.0 — 2026-06-04 — milestone
 
 Consolidates everything since v0.7.0. Single new CLI

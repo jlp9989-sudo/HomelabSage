@@ -592,6 +592,19 @@ def build_report(
             db.list_recurring_failures(min_count=2),
         ))
 
+    # Audit-mute filter (v0.8.1). The user can mute findings by their
+    # stable `(category, source_kind, source_ref)` fingerprint. Mutes
+    # apply AFTER every detector runs so they can't accidentally hide
+    # a finding that didn't exist when the mute was set (the user
+    # picks fingerprints they've actually seen).
+    if hasattr(db, "active_audit_mute_keys"):
+        muted = db.active_audit_mute_keys()
+        if muted:
+            findings = [
+                f for f in findings
+                if (f.category, f.source_kind, f.source_ref) not in muted
+            ]
+
     # Severity first (critical → info), then category alphabetical so the
     # same input always produces the same output.
     findings.sort(key=lambda f: (-_SEVERITY_ORDER[f.severity], f.category, f.title))

@@ -175,6 +175,23 @@ CREATE TABLE IF NOT EXISTS heartbeats (
 );
 CREATE INDEX IF NOT EXISTS idx_heartbeats_pinged ON heartbeats(pinged_at);
 CREATE INDEX IF NOT EXISTS idx_heartbeats_ok     ON heartbeats(ok);
+
+-- v0.8.1: audit-finding mute list. Drops findings whose fingerprint
+-- (category, source_kind, source_ref) matches an unexpired row at
+-- `build_report` time. `expires_at` empty/NULL = permanent mute;
+-- ISO timestamp = auto-expires after the time passes. PRIMARY KEY
+-- prevents dupes — adding the same fingerprint just refreshes the
+-- row (caller chooses INSERT OR REPLACE).
+CREATE TABLE IF NOT EXISTS audit_mutes (
+    category    TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    source_ref  TEXT NOT NULL,
+    expires_at  TEXT,
+    reason      TEXT,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (category, source_kind, source_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_mutes_expires ON audit_mutes(expires_at);
 """
 
 

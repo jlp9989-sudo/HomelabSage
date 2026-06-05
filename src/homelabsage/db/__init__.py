@@ -24,6 +24,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from .audit_mutes import AuditMutesMixin
 from .explainers import ExplainersMixin
 from .health import HealthCheckMixin
 from .heartbeats import HeartbeatsMixin
@@ -44,7 +45,7 @@ from .watched import WatchedMixin
 class Database(
     UpdatesMixin, InterviewMixin, WatchedMixin, PendingMixin,
     ExplainersMixin, UsageMixin, HealthCheckMixin, LogAnomalyMixin,
-    HeartbeatsMixin,
+    HeartbeatsMixin, AuditMutesMixin,
 ):
     """Single connection wrapper. Thread-safe for reads, writes serialised
     at the engine level (one scan at a time)."""

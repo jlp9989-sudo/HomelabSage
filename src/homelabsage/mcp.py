@@ -431,6 +431,59 @@ def _tool_compose_graph_mermaid(cfg: Config, _db: Database, params: dict) -> dic
     }
 
 
+def _tool_audit_mute_add(_cfg: Config, db: Database, params: dict) -> dict:
+    """Add or refresh an audit-finding mute by fingerprint."""
+    for field in ("category", "source_kind", "source_ref"):
+        v = params.get(field)
+        if not isinstance(v, str) or not v.strip():
+            return {"ok": False, "error": f"{field} is required"}
+    expires = params.get("expires_at")
+    if expires is not None and not isinstance(expires, str):
+        return {"ok": False, "error": "expires_at must be a string or null"}
+    if expires:
+        from ._time import parse_iso
+        try:
+            parse_iso(expires)
+        except ValueError:
+            return {"ok": False, "error": "expires_at must be ISO 8601"}
+    reason = params.get("reason")
+    if not hasattr(db, "add_audit_mute"):
+        return {"ok": False, "error": "db missing helper"}
+    db.add_audit_mute(
+        category=params["category"],
+        source_kind=params["source_kind"],
+        source_ref=params["source_ref"],
+        expires_at=expires or None,
+        reason=reason if isinstance(reason, str) else None,
+    )
+    return {"ok": True, "expires_at": expires or None}
+
+
+def _tool_audit_mute_list(_cfg: Config, db: Database, params: dict) -> dict:
+    """List audit-finding mutes (active by default)."""
+    if not hasattr(db, "list_audit_mutes"):
+        return {"count": 0, "items": []}
+    include_expired = bool(params.get("include_expired") or False)
+    rows = db.list_audit_mutes(include_expired=include_expired)
+    return {"count": len(rows), "items": rows}
+
+
+def _tool_audit_mute_remove(_cfg: Config, db: Database, params: dict) -> dict:
+    """Remove one mute by fingerprint."""
+    for field in ("category", "source_kind", "source_ref"):
+        v = params.get(field)
+        if not isinstance(v, str) or not v.strip():
+            return {"ok": False, "error": f"{field} is required"}
+    if not hasattr(db, "remove_audit_mute"):
+        return {"ok": False, "error": "db missing helper"}
+    ok = db.remove_audit_mute(
+        category=params["category"],
+        source_kind=params["source_kind"],
+        source_ref=params["source_ref"],
+    )
+    return {"ok": ok}
+
+
 def _tool_audit_prune(cfg: Config, _db: Database, params: dict) -> dict:
     """Truncate audit_history.jsonl to the `keep_last` newest rows."""
     from .audit_history import prune
@@ -1036,6 +1089,62 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_clear_all_snoozes,
+    },
+    "audit_mute_add": {
+        "description": (
+            "Mute an audit finding by `(category, source_kind, "
+            "source_ref)` fingerprint. Optional ISO 8601 "
+            "`expires_at` (empty/null = permanent). Idempotent: "
+            "re-adding refreshes the row."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string"},
+                "source_kind": {"type": "string"},
+                "source_ref": {"type": "string"},
+                "expires_at": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
+                },
+                "reason": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
+                },
+            },
+            "required": ["category", "source_kind", "source_ref"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_audit_mute_add,
+    },
+    "audit_mute_list": {
+        "description": (
+            "List audit-finding mutes (active by default; pass "
+            "include_expired=true for full history)."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "include_expired": {"type": "boolean", "default": False},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_audit_mute_list,
+    },
+    "audit_mute_remove": {
+        "description": (
+            "Remove one audit-finding mute by fingerprint. Returns "
+            "`{ok: bool}` — false when no row matched."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string"},
+                "source_kind": {"type": "string"},
+                "source_ref": {"type": "string"},
+            },
+            "required": ["category", "source_kind", "source_ref"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_audit_mute_remove,
     },
     "audit_prune": {
         "description": (
