@@ -484,6 +484,31 @@ def _tool_audit_mute_remove(_cfg: Config, db: Database, params: dict) -> dict:
     return {"ok": ok}
 
 
+def _tool_audit_mute_purge_expired(_cfg: Config, db: Database, _params: dict) -> dict:
+    """Drop every audit-mute row whose `expires_at` is in the past."""
+    if not hasattr(db, "purge_expired_audit_mutes"):
+        return {"ok": False, "purged": 0, "error": "db missing helper"}
+    n = db.purge_expired_audit_mutes()
+    return {"ok": True, "purged": n}
+
+
+def _tool_audit_categories(cfg: Config, db: Database, _params: dict) -> dict:
+    """Return just the category histogram from the current audit.
+
+    Lighter payload than `audit` for dashboards that only need
+    `{compose_lint: 3, cve: 1}` to colour a stripe — the full
+    findings list is megabytes on a busy homelab.
+    """
+    from .audit import build_report
+    report = build_report(cfg, db)
+    return {
+        "counts_by_category": report.counts_by_category,
+        "counts_by_severity": report.counts_by_severity,
+        "total": len(report.findings),
+        "healthy": report.healthy,
+    }
+
+
 def _tool_audit_prune(cfg: Config, _db: Database, params: dict) -> dict:
     """Truncate audit_history.jsonl to the `keep_last` newest rows."""
     from .audit_history import prune
@@ -1145,6 +1170,28 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_audit_mute_remove,
+    },
+    "audit_mute_purge_expired": {
+        "description": (
+            "Drop every audit-mute row whose `expires_at` is in the "
+            "past. Returns `{ok, purged}`."
+        ),
+        "params_schema": {
+            "type": "object", "properties": {},
+            "additionalProperties": False,
+        },
+        "impl": _tool_audit_mute_purge_expired,
+    },
+    "audit_categories": {
+        "description": (
+            "Compact audit roll-up: `{counts_by_category, "
+            "counts_by_severity, total, healthy}`. No findings list."
+        ),
+        "params_schema": {
+            "type": "object", "properties": {},
+            "additionalProperties": False,
+        },
+        "impl": _tool_audit_categories,
     },
     "audit_prune": {
         "description": (

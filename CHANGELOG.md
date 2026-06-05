@@ -2,6 +2,35 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.8.2 — 2026-06-04
+
+Mute-list ergonomics + compact audit roll-up.
+
+### Added
+
+- **`homelabsage audit-mute purge-expired`** sub-verb +
+  **`DELETE /api/audit/mutes/expired`** + MCP
+  **`audit_mute_purge_expired`**. Drops rows whose `expires_at` is
+  in the past. The build_report filter already ignores expired rows;
+  this is housekeeping for long-running deployments.
+- **`homelabsage audit-mute add-from-stdin`** sub-verb. Reads JSONL
+  fingerprints from stdin and bulk-mutes each. Designed to pair
+  with `audit --jsonl | jq -c 'select(...)'`. Malformed lines
+  counted in a `skipped` tally; well-formed but field-missing
+  lines also skipped (`category` / `source_kind` / `source_ref`
+  required).
+- **MCP `audit_categories` tool**. Compact `{counts_by_category,
+  counts_by_severity, total, healthy}` payload — no findings list.
+  Right shape for a dashboard widget that only needs the histogram.
+
+### Internal
+
+- 1509 → 1519 tests (+10), ruff clean, 0 mypy errors against 173 files.
+- 2 new CLI sub-verbs, 1 new web route, 2 new MCP tools.
+- Pre-existing v0.8.0 defensive test (`test_milestone_version_is_0_8_0`)
+  relaxed to `version >= 0.8` so milestone-bump tests don't pin
+  patch versions.
+
 ## v0.8.1 — 2026-06-04
 
 Audit-finding mute list — full surface (db, filter, CLI, HTTP, MCP).

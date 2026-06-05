@@ -141,6 +141,12 @@ def register_audit_routes(app: FastAPI, cfg: Config, db: Database, env: Environm
             "expires_at": expires or None,
         })
 
+    @app.delete("/api/audit/mutes/expired")
+    async def audit_mutes_purge_expired() -> JSONResponse:
+        """Drop every mute row whose `expires_at` is in the past."""
+        n = await asyncio.to_thread(db.purge_expired_audit_mutes)
+        return JSONResponse({"ok": True, "purged": n})
+
     @app.delete("/api/audit/mutes")
     async def audit_mutes_remove(payload: dict) -> JSONResponse:
         """Drop a mute by fingerprint."""

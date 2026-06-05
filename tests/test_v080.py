@@ -37,6 +37,9 @@ def test_features_version_parts_matches_string():
     assert payload["version_parts"] == expected
 
 
-def test_milestone_version_is_0_8_0():
-    """Defensive: confirm the milestone bump landed."""
-    assert __version__ == "0.8.0"
+def test_milestone_at_least_0_8():
+    """Defensive: confirm the v0.8 milestone has shipped (and not regressed)."""
+    parts = [int(p) for p in __version__.split(".")[:2]]
+    assert parts >= [0, 8], (
+        f"v0.8.0 milestone tag regressed: version is {__version__}"
+    )

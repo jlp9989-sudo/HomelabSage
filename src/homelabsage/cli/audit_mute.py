@@ -2,18 +2,23 @@
 
 Operations (sub-verbs):
   - `add CATEGORY SOURCE_KIND SOURCE_REF [--for 7d] [--reason "..."]`
+  - `add-from-stdin [--for 7d] [--reason "..."]` — pipes `audit --jsonl`
   - `list [--include-expired]`
   - `remove CATEGORY SOURCE_KIND SOURCE_REF`
+  - `purge-expired`
 
 The fingerprint triple is the same one `audit --jsonl` emits per
 finding (the `category`, `source_kind`, `source_ref` fields), so the
 typical workflow is `audit --jsonl | jq` to pick a row, then
-`audit-mute add` with those three values.
+`audit-mute add` with those three values. For bulk muting, pipe the
+filtered JSONL directly into `audit-mute add-from-stdin`.
 """
 
 from __future__ import annotations
 
+import json
 import re
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -137,6 +142,81 @@ def remove_cmd(
             f"[yellow]No mute found for[/yellow] "
             f"{category}/{source_kind}/{source_ref}"
         )
+
+
+@audit_mute_app.command(name="purge-expired")
+def purge_expired_cmd(
+    config: Path = CONFIG_OPT,
+    verbose: bool = VERBOSE_OPT,
+) -> None:
+    """Drop rows whose `expires_at` is in the past."""
+    setup_logging(verbose)
+    cfg = load_config(config)
+    db = Database(cfg.storage.database_path)
+    n = db.purge_expired_audit_mutes()
+    if n == 0:
+        console.print("[dim]Nothing to purge.[/dim]")
+    else:
+        console.print(f"[green]Purged {n} expired mute(s).[/green]")
+
+
+@audit_mute_app.command(name="add-from-stdin")
+def add_from_stdin_cmd(
+    config: Path = CONFIG_OPT,
+    for_: str = typer.Option("", "--for", help="Relative duration: 7d/12h/30m."),
+    until: str = typer.Option("", "--until", help="ISO 8601 UTC expiration."),
+    reason: str = typer.Option("", "--reason", help="Free-text reason."),
+    verbose: bool = VERBOSE_OPT,
+) -> None:
+    """Bulk-mute fingerprints from JSONL on stdin.
+
+    Each line must be a JSON object with `category`, `source_kind`,
+    `source_ref` keys. Lines missing any field are skipped (counted
+    in `skipped`). Designed to pair with `audit --jsonl`:
+
+        homelabsage audit --jsonl --severity info \\
+          | jq -c 'select(.category=="compose_override")' \\
+          | homelabsage audit-mute add-from-stdin --for 30d
+    """
+    setup_logging(verbose)
+    cfg = load_config(config)
+    db = Database(cfg.storage.database_path)
+    expires = _resolve_expires(for_ or None, until or None)
+
+    added = 0
+    skipped = 0
+    for raw in sys.stdin:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            skipped += 1
+            continue
+        if not isinstance(obj, dict):
+            skipped += 1
+            continue
+        cat = obj.get("category")
+        src_kind = obj.get("source_kind")
+        src_ref = obj.get("source_ref")
+        if not (
+            isinstance(cat, str) and cat
+            and isinstance(src_kind, str) and src_kind
+            and isinstance(src_ref, str) and src_ref
+        ):
+            skipped += 1
+            continue
+        db.add_audit_mute(
+            category=cat, source_kind=src_kind, source_ref=src_ref,
+            expires_at=expires, reason=reason or None,
+        )
+        added += 1
+    until_str = expires or "(permanent)"
+    console.print(
+        f"[green]Muted {added} fingerprint(s)[/green] until {until_str}. "
+        f"[dim]Skipped {skipped} malformed line(s).[/dim]"
+    )
 
 
 # Register the sub-Typer on the main `app` as a command group
