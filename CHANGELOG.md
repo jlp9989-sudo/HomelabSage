@@ -2,6 +2,38 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.9.10 — 2026-06-05
+
+Three pre-existing CLI/MCP surfaces now reachable from the GUI: full
+substring search, CSV download of the entire updates table, and
+in-line free-text user notes per row.
+
+### Added
+
+- **HTML search**: new `GET /search?q=…` route renders the same
+  layout as `/` filtered to substring matches across subject,
+  summary, breaking changes and user notes (driven by
+  `db.search`, capped at 200). The header on every page now
+  carries a search box that points there.
+- **CSV download**: `GET /api/updates/history.csv` streams the
+  same payload as `homelabsage history -o file.csv`. One-click
+  download from the header (`⬇ CSV`).
+- **Inline user notes**: new `Note` column per row. Empty cells
+  show `add note`; filled cells show the text + `edit`. Clicking
+  swaps to a textarea (HTMX `GET /updates/{id}/note/edit`);
+  `save` posts to `/updates/{id}/note` and swaps back; `cancel`
+  drops the form. Notes are HTML-escaped (`<script>` → `&lt;script&gt;`).
+
+### Internal
+
+- 1631 → 1646 tests (+15), ruff clean, 0 mypy errors against 179 files.
+- New `db.list_user_notes() -> dict[str, str]` mixin returns only
+  rows with non-empty notes — one query for the index instead of
+  one per row.
+- The `_note_cell_html` / `_note_edit_form_html` helpers are
+  module-level so the swap fragment matches the template's
+  initial render byte-for-byte.
+
 ## v0.9.9 — 2026-06-05
 
 UX + a11y polish on the updates table — last lap before the v1.0

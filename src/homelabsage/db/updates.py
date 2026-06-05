@@ -355,6 +355,18 @@ class UpdatesMixin:
             return None
         return row["user_note"]
 
+    def list_user_notes(self) -> dict[str, str]:
+        """Return `{update_id: note}` for every row with a non-empty note.
+
+        Bulk lookup used by the updates index so the per-row note cell
+        renders without one-query-per-row.
+        """
+        rows = self._conn.execute(
+            "SELECT id, user_note FROM updates "
+            "WHERE user_note IS NOT NULL AND user_note != ''",
+        ).fetchall()
+        return {r["id"]: r["user_note"] for r in rows}
+
     def search(
         self,
         query: str,

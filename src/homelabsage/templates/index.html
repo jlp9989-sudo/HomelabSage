@@ -2,6 +2,18 @@
 {% set nav = "updates" %}
 {% block title %}Updates · HomelabSage{% endblock %}
 {% block header_actions %}
+  <form method="get" action="/search" role="search"
+        style="display:flex; gap:.3rem; align-items:center;">
+    <input type="search" name="q" placeholder="search subject / summary / notes…"
+           value="{{ search_query|default('', true) }}"
+           aria-label="Search updates"
+           style="font-size:.8rem; padding:.25rem .5rem; min-width:18rem;">
+    <button class="ghost" type="submit"
+            style="font-size:.8rem; padding:.25rem .6rem;">search</button>
+  </form>
+  <a href="/api/updates/history.csv" class="ghost btn" download
+     title="Download every update as CSV"
+     style="font-size:.8rem; padding:.25rem .6rem;">⬇ CSV</a>
   <span class="muted">{{ items|length }} updates · LLM: {{ "on" if llm_enabled else "off" }}</span>
   <form method="post" action="/run">
     <button type="submit">Run now</button>
@@ -65,7 +77,7 @@
       <th></th>
       <th>Source</th><th>Subject</th><th>Current → New</th>
       <th>Severity</th><th>Summary</th><th>Status</th>
-      <th>Snooze</th><th></th>
+      <th>Note</th><th>Snooze</th><th></th>
     </tr>
   </thead>
   <tbody>
@@ -97,6 +109,20 @@
         {% if it.id in explained_ids %} <a href="/updates/{{ it.id }}/explain" class="muted" title="See the LLM prompt + response that produced this verdict">explain</a>{% endif %}
       </td>
       <td>{{ it.status.value }}</td>
+      <td class="note-cell" style="max-width:18ch; font-size:.78rem;">
+        {% set un = (notes_by_id or {}).get(it.id, '') %}
+        {% if un %}
+          <span class="note-text">{{ un }}</span>
+          <a href="#" class="muted"
+             hx-get="/updates/{{ it.id }}/note/edit"
+             hx-target="closest .note-cell" hx-swap="outerHTML"
+             title="Edit note">edit</a>
+        {% else %}
+          <a href="#" class="muted"
+             hx-get="/updates/{{ it.id }}/note/edit"
+             hx-target="closest .note-cell" hx-swap="outerHTML">add note</a>
+        {% endif %}
+      </td>
       <td class="snooze-cell">
         {% if it.id in snoozed_until %}
           {% set su = snoozed_until[it.id] %}

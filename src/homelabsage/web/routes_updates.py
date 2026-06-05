@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment
 
@@ -19,6 +19,61 @@ from ..db import Database
 from ..engine import Engine
 from ..models import AnalyzedUpdate, UpdateStatus
 from .routes_wizard import is_wizard_complete
+
+
+def _html_escape(s: str) -> str:
+    return (
+        s.replace("&", "&amp;")
+         .replace("<", "&lt;")
+         .replace(">", "&gt;")
+         .replace('"', "&quot;")
+    )
+
+
+def _note_cell_html(update_id: str, note: str) -> str:
+    """Render the note cell — the saved value + an `edit` link. Shared by
+    the index template's initial render and the HTMX save target so the
+    swapped fragment matches the static one byte-for-byte.
+    """
+    if note:
+        body = (
+            f'<span class="note-text">{_html_escape(note)}</span> '
+            f'<a href="#" class="muted" '
+            f'hx-get="/updates/{update_id}/note/edit" '
+            f'hx-target="closest .note-cell" hx-swap="outerHTML" '
+            f'title="Edit note">edit</a>'
+        )
+    else:
+        body = (
+            f'<a href="#" class="muted" '
+            f'hx-get="/updates/{update_id}/note/edit" '
+            f'hx-target="closest .note-cell" hx-swap="outerHTML">add note</a>'
+        )
+    return f'<td class="note-cell">{body}</td>'
+
+
+def _note_edit_form_html(update_id: str, current: str) -> str:
+    """Render the inline textarea + save/cancel buttons. Posted to
+    `/updates/{id}/note`; the response is `_note_cell_html` again so
+    save returns the user to the read view.
+    """
+    return (
+        f'<td class="note-cell">'
+        f'<form hx-post="/updates/{update_id}/note" '
+        f'hx-target="closest .note-cell" hx-swap="outerHTML" '
+        f'style="display:flex; gap:.3rem; flex-direction:column;">'
+        f'<textarea name="note" rows="2" '
+        f'style="min-height:3rem; font-size:.8rem;" '
+        f'autocomplete="off">{_html_escape(current)}</textarea>'
+        f'<div style="display:flex; gap:.3rem;">'
+        f'<button class="ghost" type="submit" '
+        f'style="font-size:.75rem; padding:.15rem .55rem;">save</button>'
+        f'<button class="ghost" type="button" '
+        f'hx-get="/updates/{update_id}/note/cancel" '
+        f'hx-target="closest .note-cell" hx-swap="outerHTML" '
+        f'style="font-size:.75rem; padding:.15rem .55rem;">cancel</button>'
+        f'</div></form></td>'
+    )
 
 
 def _snooze_cell_html(update_id: str, snooze_until: str | None) -> str:
@@ -91,6 +146,9 @@ def register_updates_routes(
         explained_ids: set[str] = (
             db.list_explained_ids() if hasattr(db, "list_explained_ids") else set()
         )
+        notes_by_id: dict[str, str] = (
+            db.list_user_notes() if hasattr(db, "list_user_notes") else {}
+        )
         # Pill counts query COUNT(*) directly so they stay accurate beyond
         # the 500-row list cap. Fall back to set size for stub DBs lacking
         # the count helpers.
@@ -131,7 +189,7 @@ def register_updates_routes(
             tmpl.render(
                 items=items, counts=counts,
                 starred_ids=starred_ids, snoozed_until=snoozed_until,
-                explained_ids=explained_ids,
+                explained_ids=explained_ids, notes_by_id=notes_by_id,
                 starred_count=starred_count, snoozed_count=snoozed_count,
                 active_filter=filter or "all",
                 llm_enabled=engine.llm.is_enabled(),
@@ -140,6 +198,111 @@ def register_updates_routes(
                 show_wizard_banner=show_wizard_banner,
             )
         )
+
+    @app.get("/search", response_class=HTMLResponse)
+    async def search_page(q: str = "") -> HTMLResponse:
+        """HTML wrapper around the JSON search API.
+
+        Renders the same `index.html` layout filtered to substring matches
+        on subject + summary + breaking_changes + user_note. Empty `q`
+        shows the search box with no results — bookmark `/search` to
+        always land on the search input.
+        """
+        q_clean = (q or "").strip()
+        items = (
+            await asyncio.to_thread(db.search, q_clean, limit=200)
+            if q_clean else []
+        )
+        starred_ids: set[str] = set()
+        snoozed_until: dict[str, str] = {}
+        if hasattr(db, "list_starred"):
+            starred_ids = {it.id for it in db.list_starred(limit=500)}
+        if hasattr(db, "list_snoozed"):
+            for row in db.list_snoozed(limit=500):
+                snoozed_until[row["id"]] = row["snooze_until"]
+        explained_ids: set[str] = (
+            db.list_explained_ids() if hasattr(db, "list_explained_ids") else set()
+        )
+        notes_by_id: dict[str, str] = (
+            db.list_user_notes() if hasattr(db, "list_user_notes") else {}
+        )
+        counts = {s.value: 0 for s in UpdateStatus}
+        for it in items:
+            counts[it.status.value] += 1
+        starred_count = (
+            db.count_starred() if hasattr(db, "count_starred") else len(starred_ids)
+        )
+        snoozed_count = (
+            db.count_snoozed() if hasattr(db, "count_snoozed") else len(snoozed_until)
+        )
+        tmpl = env.get_template("index.html")
+        return HTMLResponse(
+            tmpl.render(
+                items=items, counts=counts,
+                starred_ids=starred_ids, snoozed_until=snoozed_until,
+                explained_ids=explained_ids, notes_by_id=notes_by_id,
+                starred_count=starred_count, snoozed_count=snoozed_count,
+                active_filter="all",
+                llm_enabled=engine.llm.is_enabled(),
+                llm_profiles=list(engine.cfg.llm_profiles.keys()),
+                llm_active=engine.cfg.llm_active,
+                show_wizard_banner=False,
+                search_query=q_clean,
+            ),
+        )
+
+    @app.get("/api/updates/history.csv")
+    async def download_history_csv(limit: int = 10000) -> Response:
+        """Stream the full updates table as CSV — same shape as the
+        `homelabsage history -o file.csv` CLI command, just one click
+        away from the GUI.
+        """
+        from ..history import dump_to_string
+        cap = max(1, min(limit, 100_000))
+        body = await asyncio.to_thread(dump_to_string, db, limit=cap)
+        return Response(
+            body,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": (
+                    'attachment; filename="homelabsage-history.csv"'
+                ),
+                "Cache-Control": "no-cache",
+            },
+        )
+
+    @app.post("/updates/{update_id:path}/note", response_class=HTMLResponse)
+    async def set_note_html(
+        update_id: str, note: str = Form(""),
+    ) -> HTMLResponse:
+        """HTMX target — save a free-text note. Returns the rendered
+        note-cell so the form swaps in place from "(no note)" / textarea
+        to the saved value with an edit button.
+        """
+        if db.get(update_id) is None:
+            raise HTTPException(404, f"no update with id={update_id}")
+        clean = (note or "").strip()
+        db.set_user_note(update_id, clean)
+        return HTMLResponse(_note_cell_html(update_id, clean))
+
+    @app.get("/updates/{update_id:path}/note/edit", response_class=HTMLResponse)
+    async def edit_note_html(update_id: str) -> HTMLResponse:
+        """HTMX target — swap the note cell to an editable textarea +
+        save button. Pre-fills the current value so the user edits in
+        place rather than retyping.
+        """
+        if db.get(update_id) is None:
+            raise HTTPException(404, f"no update with id={update_id}")
+        current = db.get_user_note(update_id) or ""
+        return HTMLResponse(_note_edit_form_html(update_id, current))
+
+    @app.get("/updates/{update_id:path}/note/cancel", response_class=HTMLResponse)
+    async def cancel_note_html(update_id: str) -> HTMLResponse:
+        """HTMX target — drop the edit form, restore the read-view cell."""
+        if db.get(update_id) is None:
+            raise HTTPException(404, f"no update with id={update_id}")
+        current = db.get_user_note(update_id) or ""
+        return HTMLResponse(_note_cell_html(update_id, current))
 
     @app.post("/updates/{update_id:path}/star/toggle", response_class=HTMLResponse)
     async def toggle_star_html(update_id: str) -> HTMLResponse:
