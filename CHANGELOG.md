@@ -2,6 +2,29 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.9.0 — 2026-06-04 — milestone
+
+Consolidates everything since v0.8.0. No new features — the v0.8.x
+line shipped its own surface, this is the SemVer bump that marks
+the audit-mute + housekeeping work as the new baseline.
+
+### Summary of the v0.8.x line
+
+| Version | Highlight                                                  |
+| ------- | ---------------------------------------------------------- |
+| v0.8.0  | `homelabsage features` CLI + v0.7 roll-up                  |
+| v0.8.1  | Audit-finding mute list (db + filter + CLI + HTTP + MCP)   |
+| v0.8.2  | mute `purge-expired` + `add-from-stdin` + MCP `audit_categories` |
+| v0.8.3  | `/api/audit/categories` HTTP mirror + MCP `is_snoozed`     |
+| v0.8.4  | Dangling-images detector + MCP                             |
+| v0.8.5  | `homelabsage activity` CLI                                 |
+| v0.9.0  | Milestone bump (no new features)                           |
+
+### Internal
+
+- 1538 tests carry forward, ruff clean, 0 mypy errors against 175
+  source files.
+
 ## v0.8.5 — 2026-06-04
 
 - **`homelabsage activity` CLI**. Tail recent updates (most-recent
