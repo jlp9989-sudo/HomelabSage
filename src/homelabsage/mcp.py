@@ -550,6 +550,31 @@ def _tool_audit_diff(cfg: Config, db: Database, _params: dict) -> dict:
     return diff_against_latest(notes_dir, report.to_json())
 
 
+def _tool_dangling_images(_cfg: Config, _db: Database, _params: dict) -> dict:
+    """Walk the local image cache and report dangling `<none>:<none>` images.
+
+    Reaches the docker daemon directly — when the SDK or daemon
+    isn't available, returns `{ok: false, error: ...}` so a
+    homelab without docker doesn't crash the agent.
+    """
+    try:
+        import docker
+        client = docker.from_env()
+        images = client.images.list(all=True, filters={"dangling": True})
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "items": []}
+    from .dangling_images import find_dangling
+    findings = find_dangling(images)
+    total_bytes = sum(f.size_bytes for f in findings)
+    return {
+        "ok": True,
+        "count": len(findings),
+        "total_bytes": total_bytes,
+        "total_mib": round(total_bytes / (1024 ** 2), 1),
+        "items": [f.to_context() for f in findings],
+    }
+
+
 def _tool_is_snoozed(_cfg: Config, db: Database, params: dict) -> dict:
     """Quick lookup: is this update currently snoozed?
 
@@ -1271,6 +1296,20 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_audit_diff,
+    },
+    "dangling_images": {
+        "description": (
+            "Walk the local docker image cache and report dangling "
+            "`<none>:<none>` images (orphans from pulls). Returns "
+            "count + total_bytes/MiB + per-image details. Returns "
+            "`ok=false` when docker isn't reachable so a homelab "
+            "without docker doesn't crash the agent."
+        ),
+        "params_schema": {
+            "type": "object", "properties": {},
+            "additionalProperties": False,
+        },
+        "impl": _tool_dangling_images,
     },
     "is_snoozed": {
         "description": (

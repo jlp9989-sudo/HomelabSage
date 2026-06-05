@@ -2,6 +2,18 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.8.4 — 2026-06-04
+
+- **`dangling_images.py`** + **MCP `dangling_images` tool**. Pure
+  walk over docker SDK image list, finds `<none>:<none>` orphans
+  with total bytes/MiB. Graceful when docker isn't reachable
+  (`{ok: false, error: ...}`) — agents on docker-less hosts don't
+  crash.
+
+### Internal
+
+- 1525 → 1534 tests (+9), ruff clean, 0 mypy errors against 174 files.
+
 ## v0.8.3 — 2026-06-04
 
 - **`GET /api/audit/categories`** — HTTP mirror of the MCP
