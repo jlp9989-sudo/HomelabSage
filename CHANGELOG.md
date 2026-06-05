@@ -2,6 +2,27 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.7.7 — 2026-06-04
+
+Three audit-surface extensions.
+
+### Added
+
+- **`homelabsage audit --diff-only`**. Show only findings that are
+  NEW vs the latest persisted snapshot. Composes with `--jsonl`
+  and `--severity`. Pure read; never appends history, never writes
+  notes (no race with concurrent `audit` runs).
+- **MCP `audit_prune` tool**. `keep_last` int param (default 100).
+  Returns `{ok, dropped, keep_last}`.
+- **`GET /api/audit/history.jsonl`**. Raw NDJSON stream of
+  `audit_history.jsonl` for backup / offline analysis. 64 KB
+  chunked read, bounded RAM. `Content-Disposition: attachment` so
+  browsers prompt a save dialog.
+
+### Internal
+
+- 1464 → 1472 tests (+8), ruff clean, 0 mypy errors against 168 files.
+
 ## v0.7.6 — 2026-06-04
 
 5-item batch: audit-history pruning, MCP compose-graph + bulk snooze

@@ -83,6 +83,14 @@ def audit(
         ),
         callback=_validate_severity,
     ),
+    diff_only: bool = typer.Option(
+        False, "--diff-only",
+        help=(
+            "Show only findings that are NEW vs the latest persisted "
+            "snapshot in `<notes_dir>/audit_history.jsonl`. Pure read; "
+            "no append. No-op when no previous snapshot exists."
+        ),
+    ),
     verbose: bool = VERBOSE_OPT,
 ) -> None:
     """Print the proactive auditor's homelab health report."""
@@ -90,6 +98,52 @@ def audit(
     cfg = load_config(config)
     db = Database(cfg.storage.database_path)
     try:
+        if diff_only:
+            # Pure read — never appends to history, never writes notes.
+            from dataclasses import replace as _replace
+
+            from ..audit_history import _fingerprint, load_latest
+            report = build_report(cfg, db)
+            notes_dir = cfg.notes.notes_dir
+            prev = load_latest(notes_dir) if notes_dir else None
+            if prev is not None:
+                prev_keys = prev.finding_keys
+                kept = [
+                    f for f in report.findings
+                    if _fingerprint({
+                        "category": f.category,
+                        "source_kind": f.source_kind,
+                        "source_ref": f.source_ref,
+                    }) not in prev_keys
+                ]
+                by_sev: dict[str, int] = {}
+                by_cat: dict[str, int] = {}
+                for f in kept:
+                    by_sev[f.severity] = by_sev.get(f.severity, 0) + 1
+                    by_cat[f.category] = by_cat.get(f.category, 0) + 1
+                report = _replace(
+                    report, findings=kept,
+                    counts_by_severity=by_sev,
+                    counts_by_category=by_cat,
+                    healthy=(not kept),
+                )
+            report = _filter_findings(report, severity)
+            if jsonl:
+                for f in report.findings:
+                    sys.stdout.write(json.dumps({
+                        "severity": f.severity,
+                        "category": f.category,
+                        "title": f.title,
+                        "detail": f.detail,
+                        "source_kind": f.source_kind,
+                        "source_ref": f.source_ref,
+                        "cite": f.cite,
+                    }) + "\n")
+                sys.stdout.flush()
+                return
+            console.print(render_markdown(report))
+            return
+
         if jsonl:
             # No notes write; raw streaming form for piping into jq.
             report = build_report(cfg, db)

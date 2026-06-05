@@ -51,6 +51,42 @@ def register_audit_routes(app: FastAPI, cfg: Config, db: Database, env: Environm
         )
         return JSONResponse({"count": len(rows), "items": rows})
 
+    @app.get("/api/audit/history.jsonl")
+    async def audit_history_raw() -> StreamingResponse:
+        """Raw `audit_history.jsonl` download.
+
+        Streams the file unmodified — caller is responsible for
+        parsing one JSON object per line. Useful for backup / offline
+        analysis. Returns an empty body when the file is missing.
+        """
+        from pathlib import Path
+
+        from ..audit_history import FILE_NAME
+        notes_dir = cfg.curator.output_dir or cfg.notes.notes_dir
+        path = Path(notes_dir).expanduser() / FILE_NAME if notes_dir else None
+
+        async def _gen() -> AsyncIterator[bytes]:
+            if path is None or not path.is_file():
+                return
+            with path.open("rb") as fh:
+                # 64 KB chunks — bounded RAM regardless of file size.
+                while True:
+                    chunk = fh.read(64 * 1024)
+                    if not chunk:
+                        return
+                    yield chunk
+
+        return StreamingResponse(
+            _gen(),
+            media_type="application/x-ndjson",
+            headers={
+                "Cache-Control": "no-cache",
+                "Content-Disposition": (
+                    'attachment; filename="audit_history.jsonl"'
+                ),
+            },
+        )
+
     @app.get("/api/audit/diff")
     async def audit_diff_api() -> JSONResponse:
         """Diff the current findings against the last persisted snapshot.

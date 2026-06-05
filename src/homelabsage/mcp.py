@@ -431,6 +431,17 @@ def _tool_compose_graph_mermaid(cfg: Config, _db: Database, params: dict) -> dic
     }
 
 
+def _tool_audit_prune(cfg: Config, _db: Database, params: dict) -> dict:
+    """Truncate audit_history.jsonl to the `keep_last` newest rows."""
+    from .audit_history import prune
+    notes_dir = cfg.curator.output_dir or cfg.notes.notes_dir
+    if not notes_dir:
+        return {"ok": False, "dropped": 0, "reason": "no notes_dir configured"}
+    keep = max(0, int(params.get("keep_last") or 100))
+    dropped = prune(notes_dir, keep_last=keep)
+    return {"ok": True, "dropped": dropped, "keep_last": keep}
+
+
 def _tool_audit_history(cfg: Config, _db: Database, params: dict) -> dict:
     """Paginated list of past audit snapshots (newest first).
 
@@ -905,6 +916,21 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_clear_all_snoozes,
+    },
+    "audit_prune": {
+        "description": (
+            "Truncate audit_history.jsonl to the `keep_last` newest "
+            "rows (default 100). Atomic rewrite. Returns the number "
+            "of rows dropped."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "keep_last": {"type": "integer", "minimum": 0},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_audit_prune,
     },
     "audit_history": {
         "description": (
