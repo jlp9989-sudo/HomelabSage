@@ -665,6 +665,40 @@ def _tool_scan_window_check(cfg: Config, _db: Database, _params: dict) -> dict:
     }
 
 
+def _tool_system_info(cfg: Config, db: Database, _params: dict) -> dict:
+    """One-call rollup: version + update counts + audit/snooze/mute totals.
+
+    Designed for an agent's first probe — "give me the shape of this
+    install". Cheaper than `doctor` (no LLM/TLS/DNS probes) and richer
+    than `status_health` (counts the user-facing surface too).
+    """
+    from . import __version__
+    from .audit import build_report
+    from .models import UpdateStatus
+
+    counts = {s.value: 0 for s in UpdateStatus}
+    for it in db.list(limit=500):
+        counts[it.status.value] = counts.get(it.status.value, 0) + 1
+    report = build_report(cfg, db)
+    snoozed = (
+        len(db.list_snoozed(limit=500))
+        if hasattr(db, "list_snoozed") else 0
+    )
+    mutes = (
+        len(db.list_audit_mutes())
+        if hasattr(db, "list_audit_mutes") else 0
+    )
+    return {
+        "version": __version__,
+        "updates_by_status": counts,
+        "audit_total": len(report.findings),
+        "audit_counts_by_severity": report.counts_by_severity,
+        "snoozed_total": snoozed,
+        "audit_mutes_total": mutes,
+        "pending_dispatches": len(db.list_pending_dispatches()),
+    }
+
+
 def _tool_version(_cfg: Config, _db: Database, _params: dict) -> dict:
     """Return the HomelabSage version + a brief feature flag map.
 
@@ -1150,6 +1184,18 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_scan_window_check,
+    },
+    "system_info": {
+        "description": (
+            "One-call rollup: version + updates by status + audit "
+            "totals + snooze + mute + pending-dispatch counts. The "
+            "right shape for an agent's first probe of an install."
+        ),
+        "params_schema": {
+            "type": "object", "properties": {},
+            "additionalProperties": False,
+        },
+        "impl": _tool_system_info,
     },
     "version": {
         "description": (

@@ -33,6 +33,44 @@ def register_audit_routes(app: FastAPI, cfg: Config, db: Database, env: Environm
         report = build_report(cfg, db)
         return JSONResponse(report.to_json())
 
+    @app.get("/api/audit/by-category")
+    async def audit_by_category_api(
+        category: str = "",
+        limit: int = 100,
+    ) -> JSONResponse:
+        """Return only the audit findings in `category`.
+
+        Designed for a dashboard that drilled down from
+        `/api/audit/categories` into one tag (`cve`, `compose_lint`,
+        `disk_pressure`, etc.). Returns the full finding payload
+        so the dashboard can render details — capped by `limit`.
+        """
+        if not category.strip():
+            return JSONResponse({"count": 0, "items": [],
+                                 "category": ""})
+        cap = max(1, min(limit, 500))
+        report = await asyncio.to_thread(build_report, cfg, db)
+        matches = [
+            f for f in report.findings
+            if f.category == category
+        ][:cap]
+        return JSONResponse({
+            "category": category,
+            "count": len(matches),
+            "items": [
+                {
+                    "severity": f.severity,
+                    "category": f.category,
+                    "title": f.title,
+                    "detail": f.detail,
+                    "source_kind": f.source_kind,
+                    "source_ref": f.source_ref,
+                    "cite": f.cite,
+                }
+                for f in matches
+            ],
+        })
+
     @app.get("/api/audit/categories")
     async def audit_categories_api() -> JSONResponse:
         """Compact category + severity histogram (no findings list).

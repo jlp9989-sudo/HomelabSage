@@ -2,6 +2,22 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.9.1 — 2026-06-04
+
+- **`GET /api/audit/by-category?category=X&limit=N`**. Returns the
+  full finding payload for a single category — drill-down
+  companion to `/api/audit/categories`. Empty `category` returns
+  empty; unknown category returns `count=0`. `limit` clamped to
+  500.
+- **MCP `system_info`**. One-call rollup: `version`,
+  `updates_by_status`, `audit_total`, `audit_counts_by_severity`,
+  `snoozed_total`, `audit_mutes_total`, `pending_dispatches`. The
+  right shape for an agent's first probe.
+
+### Internal
+
+- 1538 → 1544 tests (+6), ruff clean, 0 mypy errors against 175 files.
+
 ## v0.9.0 — 2026-06-04 — milestone
 
 Consolidates everything since v0.8.0. No new features — the v0.8.x
