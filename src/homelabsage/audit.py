@@ -235,6 +235,58 @@ def _healthcheck_stale_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
     )]
 
 
+def _oom_killed_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
+    """Surface OOM-killed context attached by the docker plugin.
+
+    `context.oom_killed` is the `OOMFinding.to_context()` shape.
+    Always emits at `high` severity — an OOM is a real bug the user
+    needs to fix BEFORE upgrading (the new image will hit the same
+    memory limit).
+    """
+    ctx = item.update.context or {}
+    oom = ctx.get("oom_killed")
+    if not isinstance(oom, dict) or not oom.get("oom_killed"):
+        return []
+    exit_code = int(oom.get("exit_code") or 0)
+    finished = oom.get("finished_at") or "?"
+    return [AuditFinding(
+        severity="high", category="oom_killed",
+        title=f"{item.update.subject} was OOM-killed",
+        detail=(
+            f"Kernel reaped the container at {finished} "
+            f"(exit_code={exit_code}). Raise `mem_limit` OR find the "
+            f"runaway request handler — upgrading on top of a memory "
+            f"miscalibration will OOM again."
+        ),
+        source_kind="oom_killed", source_ref=item.id,
+        cite=f"oom_killed=true exit_code={exit_code}",
+    )]
+
+
+def _network_mode_host_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
+    """Surface host-network context — info severity (signal, not bug).
+
+    Often intentional (Tailscale, Plex DLNA). The user mutes when
+    they've reviewed; otherwise the finding nudges them once.
+    """
+    ctx = item.update.context or {}
+    hn = ctx.get("network_mode_host")
+    if not isinstance(hn, dict):
+        return []
+    return [AuditFinding(
+        severity="info", category="network_mode_host",
+        title=f"{item.update.subject} runs with `--network=host`",
+        detail=(
+            "Host-network bypasses the docker port table and conflicts "
+            "with anything else binding the same host port. Often "
+            "intentional (Tailscale, Plex DLNA, mDNS) — mute this "
+            "finding when reviewed."
+        ),
+        source_kind="network_mode_host", source_ref=item.id,
+        cite=f"NetworkMode={hn.get('network_mode', 'host')}",
+    )]
+
+
 def _exposed_ports_findings(item: AnalyzedUpdate) -> list[AuditFinding]:
     """Surface exposed-port findings attached by the docker plugin.
 
@@ -628,6 +680,9 @@ def build_report(
         findings.extend(_restart_freq_findings(it))
         findings.extend(_healthcheck_stale_findings(it))
         findings.extend(_exposed_ports_findings(it))
+        # v0.9.4
+        findings.extend(_oom_killed_findings(it))
+        findings.extend(_network_mode_host_findings(it))
         if cfg.tag_lag.enabled:
             findings.extend(_tag_lag_findings(
                 it,

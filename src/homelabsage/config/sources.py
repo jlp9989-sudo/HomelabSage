@@ -110,6 +110,11 @@ class DockerSourceConfig(BaseModel):
     # next reboot. Strict mode also flags bounded on-failure (off).
     detect_restart_policy: bool = True
     detect_restart_policy_strict: bool = False
+    # OOM-killed detector. Default on — `State.OOMKilled` is a free
+    # signal already in every `docker inspect` output.
+    detect_oom_killed: bool = True
+    # `--network=host` detector. Default on at `info` severity.
+    detect_network_mode_host: bool = True
 
 
 class HAConfig(BaseModel):

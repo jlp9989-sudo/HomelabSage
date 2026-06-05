@@ -452,6 +452,18 @@ class DockerPlugin(Plugin):
                 if rp is not None:
                     ctx["restart_policy"] = rp.to_context()
 
+            if self.cfg.detect_oom_killed:
+                from ..oom_killed import evaluate as eval_oom
+                oom = eval_oom(c.attrs.get("State") or {})
+                if oom is not None:
+                    ctx["oom_killed"] = oom.to_context()
+
+            if self.cfg.detect_network_mode_host:
+                from ..network_mode_host import evaluate as eval_hostnet
+                hn = eval_hostnet(c.attrs.get("HostConfig") or {})
+                if hn is not None:
+                    ctx["network_mode_host"] = hn.to_context()
+
             if self.cfg.image_size_growth_detect and image_tag:
                 # Local image's on-disk size (sum of writeable + layer cache).
                 # `c.image.attrs["Size"]` is set by `docker inspect`; falsy

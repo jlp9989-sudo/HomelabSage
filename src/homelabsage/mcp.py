@@ -665,6 +665,40 @@ def _tool_scan_window_check(cfg: Config, _db: Database, _params: dict) -> dict:
     }
 
 
+def _tool_get_explainer(_cfg: Config, db: Database, params: dict) -> dict:
+    """Return the cached LLM prompt + raw response for an update.
+
+    Cheaper than `explain` (which re-runs the LLM) when the user
+    asked "why?" within the same scan cycle. Returns
+    `{ok, prompt, raw_response, model, created_at}` or
+    `{ok: false, error}` when no cached explainer exists.
+    """
+    update_id = params.get("update_id")
+    if not isinstance(update_id, str) or not update_id:
+        return {"ok": False, "error": "update_id is required"}
+    if not hasattr(db, "get_explainer"):
+        return {"ok": False, "error": "db missing helper"}
+    row = db.get_explainer(update_id)
+    if row is None:
+        return {"ok": False, "error": f"no explainer for {update_id}"}
+    return {"ok": True, **row}
+
+
+def _tool_list_heartbeats(_cfg: Config, db: Database, params: dict) -> dict:
+    """Recent heartbeat history + 24h summary.
+
+    Returns `{summary: {...}, recent: [...]}`. `limit` caps the
+    recent list (default 50, max 500). Summary is the rolling 24h
+    success/fail counts already computed by `db.heartbeat_summary`.
+    """
+    if not hasattr(db, "list_recent_heartbeats"):
+        return {"summary": {}, "recent": []}
+    limit = max(1, min(int(params.get("limit") or 50), 500))
+    summary = db.heartbeat_summary(hours=24) if hasattr(db, "heartbeat_summary") else {}
+    recent = db.list_recent_heartbeats(limit=limit)
+    return {"summary": summary, "recent": recent}
+
+
 def _tool_get_chronicle(_cfg: Config, db: Database, params: dict) -> dict:
     """Walk the last `days` of updates and return the narrative timeline.
 
@@ -1296,6 +1330,35 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_scan_window_check,
+    },
+    "get_explainer": {
+        "description": (
+            "Return the cached LLM prompt + raw response for an "
+            "update. Cheaper than `explain` (no LLM re-run). Returns "
+            "`{ok, prompt, raw_response, model, created_at}` or "
+            "`{ok: false, error}` when no cache exists."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {"update_id": {"type": "string"}},
+            "required": ["update_id"],
+            "additionalProperties": False,
+        },
+        "impl": _tool_get_explainer,
+    },
+    "list_heartbeats": {
+        "description": (
+            "Recent heartbeat history + 24h rolling summary. "
+            "`{summary: {...}, recent: [...]}`. `limit` capped 500."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+            },
+            "additionalProperties": False,
+        },
+        "impl": _tool_list_heartbeats,
     },
     "get_chronicle": {
         "description": (

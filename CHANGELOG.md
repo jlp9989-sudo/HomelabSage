@@ -2,6 +2,36 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.9.4 — 2026-06-04
+
+Two new detectors + two MCP db-exposure tools (research backlog).
+
+### Added
+
+- **`oom_killed.py`** + **`sources.docker.detect_oom_killed`**
+  (default on). Reads `State.OOMKilled`; surfaces as `high`
+  severity audit finding (`oom_killed` category). Cite includes
+  exit_code + finished_at. Catches the silent class where a
+  container OOM'd last night and the user only finds out at the
+  next OOM. Strips `0001-01-01` docker sentinel timestamps.
+- **`network_mode_host.py`** + **`sources.docker.detect_network_mode_host`**
+  (default on). Flags `HostConfig.NetworkMode == "host"` at `info`
+  severity. Often intentional (Tailscale, Plex DLNA, mDNS) — the
+  user mutes via `audit-mute add network_mode_host
+  network_mode_host <subject>` when reviewed.
+- **MCP `get_explainer(update_id)`**. Returns cached LLM
+  prompt + raw response without re-running the LLM. Cheaper than
+  the existing `explain` tool when the user asks "why?" twice.
+- **MCP `list_heartbeats(limit)`**. Returns `{summary: {...},
+  recent: [...]}` — 24h rolling success/fail + last N pings.
+  Useful for diagnosing scan staleness.
+
+### Internal
+
+- 1567 → 1583 tests (+16), ruff clean, 0 mypy errors against 179 files.
+- 2 new detector modules, 2 new MCP tools, 2 new docker config toggles,
+  2 new audit categories (`oom_killed`, `network_mode_host`).
+
 ## v0.9.3 — 2026-06-04
 
 Research-driven: wire dormant detectors into auditor + MCP chronicle.
