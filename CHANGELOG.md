@@ -2,6 +2,44 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.9.6 — 2026-06-05
+
+In-line star + snooze from the updates table (no page reload).
+
+The updates index now renders a row of GUI controls per finding so
+the user no longer has to drop to CLI or the MCP to bookmark, mute
+or filter. Built on HTMX so each click swaps just the affected
+cell — no full-page rerender.
+
+### Added
+
+- **Star toggle button** per row (`★`/`☆`). HTMX `POST
+  /updates/{id}/star/toggle` flips the `starred` state and returns
+  a fresh self-targeting button so consecutive clicks chain
+  correctly without re-fetching the page.
+- **Snooze quick-select** cell per row. HTMX `POST
+  /updates/{id}/snooze/quick` accepts a `days` form field (7/14/30/90
+  preset dropdown) and writes a future ISO timestamp; `days=0`
+  clears. The cell renders either a `💤 YYYY-MM-DD HH:MM + clear`
+  pair when snoozed or a select dropdown when not — toggled in-place.
+- **Starred / Snoozed pill filters** in the header row, alongside
+  the existing severity counts. `/?filter=starred` and
+  `/?filter=snoozed` narrow the table; the pill labels include
+  live total counts pulled from the DB (not the filtered view).
+- Unknown `filter=` values fall back to "all" (defensive).
+- New integration test `test_v096.py` (11 tests) covering the
+  toggle round-trip, the HTMX self-target contract, snooze
+  set/clear/default, all three filter views, the pill-count
+  invariant and per-row button rendering.
+
+### Internal
+
+- 1588 → 1599 tests (+11), ruff clean, 0 mypy errors against 179 files.
+- `routes_updates.py` gains a module-level `_snooze_cell_html`
+  helper shared by the HTMX endpoint and matching the template's
+  inline form, so the swapped HTML stays identical to the initial
+  render.
+
 ## v0.9.5 — 2026-06-04
 
 GUI surface expansion — every config block reachable via web.

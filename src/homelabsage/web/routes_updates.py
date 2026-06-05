@@ -21,16 +21,74 @@ from ..models import AnalyzedUpdate, UpdateStatus
 from .routes_wizard import is_wizard_complete
 
 
+def _snooze_cell_html(update_id: str, snooze_until: str | None) -> str:
+    """Render the snooze cell — a tiny form group used by the index +
+    the `quick_snooze_html` HTMX target. Kept module-level so both
+    callers stay in sync without circular helpers.
+    """
+    if snooze_until:
+        # Pretty up the timestamp: keep `YYYY-MM-DD HH:MM` then drop the
+        # rest (timezone suffix). The DB always stores ISO 8601 UTC so
+        # the split is safe.
+        pretty = snooze_until.replace("T", " ")[:16]
+        return (
+            f'<span class="muted" title="{snooze_until}">💤 {pretty}</span> '
+            f'<form method="post" action="/updates/{update_id}/snooze/quick" '
+            f'hx-post="/updates/{update_id}/snooze/quick" '
+            f'hx-swap="outerHTML" '
+            f'hx-target="closest .snooze-cell" style="display:inline">'
+            f'<input type="hidden" name="days" value="0">'
+            f'<button class="ghost" type="submit" title="Clear snooze">'
+            f'clear</button></form>'
+        )
+    return (
+        f'<form method="post" action="/updates/{update_id}/snooze/quick" '
+        f'hx-post="/updates/{update_id}/snooze/quick" '
+        f'hx-swap="outerHTML" '
+        f'hx-target="closest .snooze-cell" style="display:inline">'
+        f'<select name="days" onchange="this.form.requestSubmit()">'
+        f'<option value="">snooze…</option>'
+        f'<option value="7">7d</option>'
+        f'<option value="14">14d</option>'
+        f'<option value="30">30d</option>'
+        f'<option value="90">90d</option>'
+        f'</select></form>'
+    )
+
+
 def register_updates_routes(
     app: FastAPI, db: Database, engine: Engine, env: Environment
 ) -> None:
     @app.get("/", response_class=HTMLResponse)
-    async def index() -> HTMLResponse:
-        items = db.list(limit=500)
-        # Group by status for the simple summary at the top
+    async def index(filter: str = "") -> HTMLResponse:  # noqa: A002 — `filter` shadows builtin but FastAPI uses the param name as the query key
+        all_items = db.list(limit=500)
+        # Group by status for the simple summary at the top BEFORE filtering
+        # — so the count pills always reflect the whole DB regardless of
+        # which view the user is on.
         counts = {s.value: 0 for s in UpdateStatus}
-        for it in items:
+        for it in all_items:
             counts[it.status.value] += 1
+
+        # Pre-compute per-update star + snooze hints so the template
+        # can render the right button state without per-row DB hits.
+        starred_ids: set[str] = set()
+        snoozed_until: dict[str, str] = {}
+        if hasattr(db, "list_starred"):
+            starred_ids = {it.id for it in db.list_starred(limit=500)}
+        if hasattr(db, "list_snoozed"):
+            for row in db.list_snoozed(limit=500):
+                snoozed_until[row["id"]] = row["snooze_until"]
+        starred_count = len(starred_ids)
+        snoozed_count = len(snoozed_until)
+
+        # Filter views (header pill links). Default `""` = all updates.
+        if filter == "starred":
+            items = [it for it in all_items if it.id in starred_ids]
+        elif filter == "snoozed":
+            items = [it for it in all_items if it.id in snoozed_until]
+        else:
+            items = all_items
+
         # Re-read cfg from disk so the profile dropdown reflects the
         # current state (the engine's hot-reload already covers LLM calls;
         # this is purely a UI freshness concern).
@@ -46,18 +104,59 @@ def register_updates_routes(
         # don't redirect — a banner is recoverable, a redirect surprises
         # the user and breaks bookmarks.
         show_wizard_banner = (
-            not is_wizard_complete(engine._cfg_path) and not items
+            not is_wizard_complete(engine._cfg_path) and not all_items
         )
         tmpl = env.get_template("index.html")
         return HTMLResponse(
             tmpl.render(
                 items=items, counts=counts,
+                starred_ids=starred_ids, snoozed_until=snoozed_until,
+                starred_count=starred_count, snoozed_count=snoozed_count,
+                active_filter=filter or "all",
                 llm_enabled=engine.llm.is_enabled(),
                 llm_profiles=list(fresh.llm_profiles.keys()),
                 llm_active=fresh.llm_active,
                 show_wizard_banner=show_wizard_banner,
             )
         )
+
+    @app.post("/updates/{update_id:path}/star/toggle", response_class=HTMLResponse)
+    async def toggle_star_html(update_id: str) -> HTMLResponse:
+        """HTMX target — flips the star and returns just the new button HTML.
+
+        Separate from the JSON `POST /api/updates/<id>/star` so the form
+        doesn't need a JS layer or a redirect. Returns the rendered
+        button so HTMX can swap the cell in place.
+        """
+        new = not db.is_starred(update_id)
+        db.set_starred(update_id, new)
+        icon = "★" if new else "☆"
+        cls = "btn" if new else "btn ghost"
+        return HTMLResponse(
+            f'<button class="{cls}" '
+            f'hx-post="/updates/{update_id}/star/toggle" '
+            f'hx-swap="outerHTML" title="Toggle star">{icon}</button>'
+        )
+
+    @app.post("/updates/{update_id:path}/snooze/quick", response_class=HTMLResponse)
+    async def quick_snooze_html(
+        update_id: str, days: int = Form(7),
+    ) -> HTMLResponse:
+        """HTMX target — snooze for N days (default 7) or clear when days=0.
+
+        Returns the new snooze cell HTML so HTMX can swap it in place.
+        """
+        from datetime import timedelta as _td
+
+        from .._time import utcnow
+        if days <= 0:
+            db.set_snooze(update_id, None)
+            return HTMLResponse(
+                _snooze_cell_html(update_id, None)
+            )
+        until = (utcnow() + _td(days=days)).isoformat()
+        db.set_snooze(update_id, until)
+        return HTMLResponse(_snooze_cell_html(update_id, until))
 
     @app.post("/run")
     async def trigger_run() -> RedirectResponse:

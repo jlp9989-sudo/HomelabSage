@@ -41,24 +41,45 @@
 </div>
 {% endif %}
 
-<div style="display:flex;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
+<div style="display:flex;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center">
   {% for status, n in counts.items() if n %}
     <span class="pill">{{ status }}: {{ n }}</span>
   {% endfor %}
-  {% if not items %}<span class="muted">No updates yet. Click <em>Run now</em> to scan.</span>{% endif %}
+  <span style="margin-left:auto;display:flex;gap:.4rem">
+    <a href="/" class="pill {% if active_filter == 'all' %}active{% endif %}"
+       style="text-decoration:none;{% if active_filter == 'all' %}background:#3b5168{% endif %}">All</a>
+    <a href="/?filter=starred" class="pill"
+       style="text-decoration:none;{% if active_filter == 'starred' %}background:#3b5168{% endif %}">
+       ★ Starred {% if starred_count %}({{ starred_count }}){% endif %}</a>
+    <a href="/?filter=snoozed" class="pill"
+       style="text-decoration:none;{% if active_filter == 'snoozed' %}background:#3b5168{% endif %}">
+       💤 Snoozed {% if snoozed_count %}({{ snoozed_count }}){% endif %}</a>
+  </span>
+  {% if not items %}<span class="muted">No updates {% if active_filter != 'all' %}match this filter{% else %}yet — click <em>Run now</em> to scan{% endif %}.</span>{% endif %}
 </div>
 
 {% if items %}
 <table>
   <thead>
     <tr>
+      <th></th>
       <th>Source</th><th>Subject</th><th>Current → New</th>
-      <th>Severity</th><th>Summary</th><th>Status</th><th></th>
+      <th>Severity</th><th>Summary</th><th>Status</th>
+      <th>Snooze</th><th></th>
     </tr>
   </thead>
   <tbody>
     {% for it in items %}
     <tr>
+      <td>
+        {% set is_starred = it.id in starred_ids %}
+        <button class="{{ 'btn' if is_starred else 'btn ghost' }}"
+                hx-post="/updates/{{ it.id }}/star/toggle"
+                hx-swap="outerHTML"
+                title="Toggle star">
+          {{ '★' if is_starred else '☆' }}
+        </button>
+      </td>
       <td><code>{{ it.update.source }}</code></td>
       <td>{{ it.update.subject }}</td>
       <td><code>{{ it.update.current_version }}</code> → <code>{{ it.update.new_version }}</code></td>
@@ -73,6 +94,32 @@
         {% if it.update.release_url %} <a href="{{ it.update.release_url }}" target="_blank" rel="noopener">notes</a>{% endif %}
       </td>
       <td>{{ it.status.value }}</td>
+      <td class="snooze-cell">
+        {% if it.id in snoozed_until %}
+          {% set su = snoozed_until[it.id] %}
+          <span class="muted" title="{{ su }}">💤 {{ su.replace('T', ' ')[:16] }}</span>
+          <form method="post" action="/updates/{{ it.id }}/snooze/quick"
+                hx-post="/updates/{{ it.id }}/snooze/quick"
+                hx-swap="outerHTML"
+                hx-target="closest .snooze-cell" style="display:inline">
+            <input type="hidden" name="days" value="0">
+            <button class="ghost" type="submit" title="Clear snooze">clear</button>
+          </form>
+        {% else %}
+          <form method="post" action="/updates/{{ it.id }}/snooze/quick"
+                hx-post="/updates/{{ it.id }}/snooze/quick"
+                hx-swap="outerHTML"
+                hx-target="closest .snooze-cell" style="display:inline">
+            <select name="days" onchange="this.form.requestSubmit()">
+              <option value="">snooze…</option>
+              <option value="7">7d</option>
+              <option value="14">14d</option>
+              <option value="30">30d</option>
+              <option value="90">90d</option>
+            </select>
+          </form>
+        {% endif %}
+      </td>
       <td class="actions">
         <form method="post" action="/updates/{{ it.id }}/status">
           <input type="hidden" name="status" value="applied">
