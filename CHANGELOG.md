@@ -2,6 +2,39 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.9.5 — 2026-06-04
+
+GUI surface expansion — every config block reachable via web.
+
+A background audit agent mapped the current GUI vs. the
+`Config` dataclass and found **17 config blocks invisible to
+the web UI** (everything added after v0.6.0). The schema-driven
+form renderer already handles them; only the `SETTING_BLOCKS`
+registry was missing the entries. This release adds them all.
+
+### Added
+
+- **22 new blocks in `SETTING_BLOCKS`** (now 38 total, was 16):
+  - **outputs**: `apprise`, `smtp`, `slack`, `msteams`,
+    `pushover`, `webhook`, `batching`
+  - **runtime**: `scan_window`, `llm_health_gate`,
+    `auto_apply`, `image_pins`, `compose_lint`, `tag_lag`,
+    `tls_check`, `disk_pressure`, `audit_alerts`,
+    `backup_health`, `health_check`, `log_anomaly`, `i18n`
+  - **sources**: `fedora`, `scripts`
+  - **auth**: `web/auth`
+- New integration test `test_v095.py` (5 tests) asserting every
+  registered block resolves via both `/api/settings/{block}`
+  and `GET /settings/{block}` HTML, plus the index lists them
+  all. Guards against regressions where someone adds a Pydantic
+  block but forgets to register it in the UI.
+
+### Internal
+
+- 1583 → 1588 tests (+5), ruff clean, 0 mypy errors against 179 files.
+- Zero new modules — pure registry wiring. The schema-driven
+  HTML renderer auto-discovered every new field's type.
+
 ## v0.9.4 — 2026-06-04
 
 Two new detectors + two MCP db-exposure tools (research backlog).
