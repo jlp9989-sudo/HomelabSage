@@ -2,6 +2,39 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.11.1 — 2026-06-06
+
+Refactor pass #2: **`mcp.py` split**. The 1831-line god module is
+now 153 LOC of envelope + dispatch + route registration, with the
+50 `_tool_*` impls and the 660-line `TOOLS` JSON-Schema descriptor
+moved to a sibling `mcp_tools.py`. No behavioural change.
+
+### Refactored
+
+- `mcp.py` (1831 → 153 LOC): JSON-RPC error helpers, `dispatch()`,
+  `register_mcp_routes()`. Imports only `TOOLS` from the new sibling.
+- `mcp_tools.py` (NEW, 1715 LOC): all 50 `_tool_*` impls, the
+  `TOOLS` registry, and the impl-only helpers
+  (`_summarise_update`, `_full_update`, `_run_coro`). Tools cluster
+  by section comments; the JSON-Schema descriptor still lives in
+  one big literal for now (a future refactor can co-locate each
+  descriptor with its impl via a decorator).
+
+### Test changes
+
+- `test_v062.test_mcp_run_coro_helper_handles_nested_loop` imports
+  `_run_coro` from `mcp_tools` (was `mcp`).
+- Everything else untouched — `dispatch`, `TOOLS`, and
+  `register_mcp_routes` are still importable from `mcp` at the
+  original paths.
+
+### Internal
+
+- 1725 → 1725 tests (no net change, one import path updated).
+  Ruff clean, 0 mypy errors against 181 source files.
+- `mcp.py` is now navigable end-to-end on one screen; `mcp_tools.py`
+  is mechanical line-by-line (each tool is independent).
+
 ## v0.11.0 — 2026-06-06
 
 Refactor pass #1 from the post-v1.0-punch code-quality audit:
