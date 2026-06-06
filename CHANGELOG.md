@@ -2,6 +2,39 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.11.3 — 2026-06-06
+
+Refactor pass #4: **`routes_updates.py` split by surface**. The
+790-LOC module with 25 routes is now three single-purpose files —
+HTML rendering, JSON API, and external webhook receivers. No
+behavioural change; every URL still resolves to the same handler.
+
+### Refactored
+
+- `routes_updates.py` (790 → 417 LOC): HTML routes only — index,
+  search page, snooze/star/note HTMX endpoints, status apply +
+  preflight gate, CSV download, `/run`.
+- `routes_updates_api.py` (NEW, 206 LOC): all 11 `/api/updates/*`
+  JSON endpoints (`list`, `note` read+write, `star`, `snooze`,
+  `recurring-failures`, `starred`, `search`, `bulk`,
+  `snoozed` GET+DELETE).
+- `routes_inbox.py` (NEW, 207 LOC): the two webhook receivers
+  (`/api/inbox/{source}`, `/api/webhook/github-release`). These
+  are HMAC-gated rather than Basic-Auth-gated and don't conceptually
+  belong with the dashboard at all.
+- `web/__init__.py` registers the three modules in order. URLs
+  unchanged.
+
+### Internal
+
+- 1725 → 1725 tests (no net change; same handlers in the same
+  URL shapes). Ruff clean, 0 mypy errors against 183 source files.
+- Three refactor passes since v0.10.7 (Output ABC + mcp split +
+  hasattr strip + routes split) close 7 of the 10 code-quality
+  findings from the 6-jun audit. Remaining: #3 (engine.run_once
+  230-LOC god function), #4 (audit.build_report cascade →
+  registry), #9 (tests by feature instead of by release).
+
 ## v0.11.2 — 2026-06-06
 
 Refactor pass #3: **dead-code cleanup**. All 41 `hasattr(db, X)`

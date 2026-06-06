@@ -35,6 +35,7 @@ from .routes_audit import register_audit_routes
 from .routes_diagnostics import register_diagnostics_routes
 from .routes_explain import register_explain_routes
 from .routes_health import register_health_routes
+from .routes_inbox import register_inbox_routes
 from .routes_interview import register_interview_routes
 from .routes_llm_profiles import register_llm_profiles_routes
 from .routes_metrics import register_metrics_route
@@ -45,6 +46,7 @@ from .routes_settings_html import register_settings_html_routes
 from .routes_settings_test import register_settings_test_routes
 from .routes_stack_health import register_stack_health_routes
 from .routes_updates import register_updates_routes
+from .routes_updates_api import register_updates_api_routes
 from .routes_usage import register_usage_routes
 from .routes_widgets import register_widget_routes
 from .routes_wizard import register_wizard_routes
@@ -89,6 +91,8 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
 
     register_lifecycle(app, cfg, engine)
     register_updates_routes(app, db, engine, env)
+    register_updates_api_routes(app, db, engine)
+    register_inbox_routes(app, db)
     register_interview_routes(app, cfg, db, env)
     register_notes_routes(app, editor, env)
     register_settings_routes(app, cfg, cfg_path)
