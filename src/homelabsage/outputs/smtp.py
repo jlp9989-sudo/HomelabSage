@@ -26,7 +26,6 @@ from email.message import EmailMessage
 
 from ..models import AnalyzedUpdate, Severity
 from . import Output
-from ._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -44,9 +43,7 @@ class SMTPOutput(Output):
             return False
         if not self.cfg.host or not self.cfg.from_addr or not self.cfg.to_addrs:
             return False
-        if not item.analysis:
-            return False
-        return item.analysis.severity.order >= self._min.order
+        return self._severity_passes(item)
 
     def _build_message(self, item: AnalyzedUpdate, recipient: str) -> EmailMessage:
         u = item.update
@@ -104,7 +101,7 @@ class SMTPOutput(Output):
         try:
             await asyncio.to_thread(self._send_sync, item)
         except Exception as e:
-            log.error("SMTP push failed for %s: %s", item.id, safe_error(e))
+            self._log_push_failure(item, e)
 
     def _send_sync(self, item: AnalyzedUpdate) -> None:
         """Synchronous send — runs in a worker thread so the engine's

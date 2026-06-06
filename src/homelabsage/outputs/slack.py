@@ -22,11 +22,8 @@ from __future__ import annotations
 
 import logging
 
-import httpx
-
 from ..models import AnalyzedUpdate, Severity
 from . import Output
-from ._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -52,9 +49,7 @@ class SlackOutput(Output):
     def _should_send(self, item: AnalyzedUpdate) -> bool:
         if not self.cfg.enabled or not self.cfg.webhook_url:
             return False
-        if not item.analysis:
-            return False
-        return item.analysis.severity.order >= self._min.order
+        return self._severity_passes(item)
 
     def _build_payload(self, item: AnalyzedUpdate) -> dict:
         u = item.update
@@ -109,11 +104,6 @@ class SlackOutput(Output):
     async def send(self, item: AnalyzedUpdate) -> None:
         if not self._should_send(item):
             return
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                r = await client.post(
-                    self.cfg.webhook_url, json=self._build_payload(item),
-                )
-                r.raise_for_status()
-        except httpx.HTTPError as e:
-            log.error("Slack push failed for %s: %s", item.id, safe_error(e))
+        await self._push_json(
+            self.cfg.webhook_url, item=item, json=self._build_payload(item),
+        )

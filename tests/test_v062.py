@@ -390,8 +390,8 @@ def test_webhook_drops_headers_with_crlf(monkeypatch):
             captured["headers"] = headers
             return FakeResp()
 
-    import homelabsage.outputs.webhook as wh
-    monkeypatch.setattr(wh.httpx, "AsyncClient", FakeClient)
+    import homelabsage.outputs as outputs_mod
+    monkeypatch.setattr(outputs_mod.httpx, "AsyncClient", FakeClient)
     asyncio.run(out.send(item))
     assert "X-Bad" not in captured["headers"]
     assert "X-Injected" not in captured["headers"]

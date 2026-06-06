@@ -23,12 +23,9 @@ from __future__ import annotations
 
 import logging
 
-import httpx
-
 from ..config import GotifyOutputConfig
 from ..models import AnalyzedUpdate, Severity
 from . import Output
-from ._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -55,9 +52,7 @@ class GotifyOutput(Output):
     def _should_send(self, item: AnalyzedUpdate) -> bool:
         if not self.cfg.enabled or not self.cfg.server_url or not self.cfg.token:
             return False
-        if not item.analysis:
-            return False
-        return item.analysis.severity.order >= self._min.order
+        return self._severity_passes(item)
 
     def _priority_for(self, severity: str) -> int:
         if severity in self.cfg.priority_overrides:
@@ -86,13 +81,8 @@ class GotifyOutput(Output):
         if not self._should_send(item):
             return
         url = f"{self.cfg.server_url.rstrip('/')}/message"
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                r = await client.post(
-                    url,
-                    params={"token": self.cfg.token},
-                    json=self._format(item),
-                )
-                r.raise_for_status()
-        except httpx.HTTPError as e:
-            log.error("Gotify push failed for %s: %s", item.id, safe_error(e))
+        await self._push_json(
+            url, item=item,
+            json=self._format(item),
+            params={"token": self.cfg.token},
+        )

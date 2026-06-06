@@ -31,7 +31,6 @@ import httpx
 from ..config import NtfyOutputConfig
 from ..models import AnalyzedUpdate, Severity
 from . import Output
-from ._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -67,9 +66,7 @@ class NtfyOutput(Output):
     def _should_send(self, item: AnalyzedUpdate) -> bool:
         if not self.cfg.enabled or not self.cfg.server_url or not self.cfg.topic:
             return False
-        if not item.analysis:
-            return False
-        return item.analysis.severity.order >= self._min.order
+        return self._severity_passes(item)
 
     def _topic_url(self) -> str:
         return f"{self.cfg.server_url.rstrip('/')}/{self.cfg.topic.lstrip('/')}"
@@ -102,11 +99,13 @@ class NtfyOutput(Output):
         if not self._should_send(item):
             return
         body, headers = self._build(item)
+        # ntfy uses a plain-text body (not JSON) so we keep a custom POST
+        # instead of `_push_json`. Failure path is the same — sanitised log
+        # via the shared `_log_push_failure`.
         try:
             async with httpx.AsyncClient(timeout=15) as client:
-                # ntfy accepts the message body as a plain-text POST. Encode
-                # explicitly so unicode (emoji, accented service names) round-
-                # trips correctly via the Title header too.
+                # Encode explicitly so unicode (emoji, accented service names)
+                # round-trips correctly via the Title header too.
                 r = await client.post(
                     self._topic_url(),
                     content=body.encode("utf-8"),
@@ -114,4 +113,4 @@ class NtfyOutput(Output):
                 )
                 r.raise_for_status()
         except httpx.HTTPError as e:
-            log.error("Ntfy push failed for %s: %s", item.id, safe_error(e))
+            self._log_push_failure(item, e)

@@ -113,8 +113,10 @@ def test_webhook_calls_httpx_with_bearer(monkeypatch):
             captured["headers"] = headers
             return FakeResponse()
 
-    import homelabsage.outputs.webhook as wh
-    monkeypatch.setattr(wh.httpx, "AsyncClient", FakeClient)
+    # v0.11.0: httpx call is now centralized in the Output ABC; patch the
+    # symbol where it actually lives.
+    import homelabsage.outputs as outputs_mod
+    monkeypatch.setattr(outputs_mod.httpx, "AsyncClient", FakeClient)
     asyncio.run(out.send(item))
     assert captured["url"] == "http://x.example/hook"
     assert captured["headers"]["Authorization"] == "Bearer abc123"

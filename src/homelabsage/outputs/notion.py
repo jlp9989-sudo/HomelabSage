@@ -28,7 +28,6 @@ from ..db import Database
 from ..models import AnalyzedUpdate
 from ..secret_guard import redact_text
 from . import Output
-from ._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -136,4 +135,4 @@ class NotionOutput(Output):
                         if self.db is not None:
                             self.db.set_notion_page_id(item.id, page_id)
         except httpx.HTTPError as e:
-            log.error("Notion write failed for %s: %s", item.id, safe_error(e))
+            self._log_push_failure(item, e)

@@ -24,7 +24,6 @@ import logging
 
 from ..models import AnalyzedUpdate, Severity
 from . import Output
-from ._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -73,9 +72,7 @@ class AppriseOutput(Output):
     def _should_send(self, item: AnalyzedUpdate) -> bool:
         if not self.cfg.enabled or not self.cfg.urls:
             return False
-        if not item.analysis:
-            return False
-        return item.analysis.severity.order >= self._min.order
+        return self._severity_passes(item)
 
     def _build(self, item: AnalyzedUpdate) -> tuple[str, str]:
         u = item.update
@@ -124,4 +121,4 @@ class AppriseOutput(Output):
             if not ok:
                 log.warning("apprise notify reported partial failure for %s", item.id)
         except Exception as e:
-            log.error("apprise notify failed for %s: %s", item.id, safe_error(e))
+            self._log_push_failure(item, e)

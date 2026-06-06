@@ -137,34 +137,67 @@ def test_safe_error_without_response_attr():
 # ─── End-to-end: log output never carries the token ───────────────
 
 
-def test_telegram_log_does_not_leak_token(caplog, monkeypatch):
-    """Capture the logger on a Telegram push that 401s with the token in
-    the URL. Verify the captured log line never contains the token."""
-    from homelabsage.outputs import telegram as tg_mod
+def test_telegram_log_does_not_leak_token(caplog):
+    """Drive a real TelegramOutput through `_log_push_failure` and verify
+    the captured log line never contains the URL/token. After v0.11.0 the
+    sanitised log helper is on the Output ABC; we exercise it here via a
+    fully-constructed subclass."""
+    from homelabsage.config import TelegramOutputConfig
+    from homelabsage.models import (
+        Analysis,
+        AnalyzedUpdate,
+        Severity,
+        Update,
+    )
+    from homelabsage.outputs import log as outputs_log
+    from homelabsage.outputs.telegram import TelegramOutput
 
+    out = TelegramOutput(TelegramOutputConfig(
+        enabled=True, bot_token="t", chat_id="c",
+    ))
+    item = AnalyzedUpdate(
+        update=Update(source="docker", subject="mealie",
+                      current_version="1", new_version="2"),
+        analysis=Analysis(severity=Severity.HIGH, summary="x"),
+    )
     fake = _FakeHTTPStatusError(
         "https://api.telegram.org/botSECRETLEAKYTOKEN/sendMessage",
         401,
     )
-    caplog.set_level(logging.ERROR, logger=tg_mod.log.name)
-    tg_mod.log.error(
-        "Telegram push failed for %s: %s",
-        "docker:mealie:2.0",
-        tg_mod.safe_error(fake),
-    )
+    caplog.set_level(logging.ERROR, logger=outputs_log.name)
+    out._log_push_failure(item, fake)
     full_log = "\n".join(r.getMessage() for r in caplog.records)
     assert "SECRETLEAKYTOKEN" not in full_log
     assert "api.telegram.org" not in full_log
     assert "401" in full_log
 
 
-@pytest.mark.parametrize("module", [
-    "telegram", "gotify", "discord", "ntfy", "slack",
-    "msteams", "pushover", "webhook", "apprise", "smtp", "notion",
+@pytest.mark.parametrize("module_name,class_name", [
+    ("telegram", "TelegramOutput"),
+    ("gotify", "GotifyOutput"),
+    ("discord", "DiscordOutput"),
+    ("ntfy", "NtfyOutput"),
+    ("slack", "SlackOutput"),
+    ("msteams", "MSTeamsOutput"),
+    ("pushover", "PushoverOutput"),
+    ("webhook", "WebhookOutput"),
+    ("apprise", "AppriseOutput"),
+    ("smtp", "SMTPOutput"),
+    ("notion", "NotionOutput"),
 ])
-def test_every_output_imports_safe_error(module):
-    """Defensive guard so a future refactor can't drop the import on one
-    output while leaving the others sanitized."""
+def test_every_output_inherits_sanitized_base(module_name, class_name):
+    """Each output must inherit from `Output`, which centralises the
+    safe_error sanitisation in `_log_push_failure` and `_push_json`. The
+    base class re-checks that safe_error is wired so a future refactor
+    can't silently bypass the redaction on one channel."""
     import importlib
-    mod = importlib.import_module(f"homelabsage.outputs.{module}")
-    assert hasattr(mod, "safe_error"), f"{module} missing safe_error import"
+
+    from homelabsage.outputs import Output, _errlog
+    mod = importlib.import_module(f"homelabsage.outputs.{module_name}")
+    cls = getattr(mod, class_name)
+    assert issubclass(cls, Output), f"{class_name} does not inherit Output"
+    # The base class binds `safe_error` via `_log_push_failure`. Verify the
+    # symbol is reachable from `outputs._errlog` and used inside the base.
+    assert hasattr(_errlog, "safe_error")
+    src = __import__("inspect").getsource(Output._log_push_failure)
+    assert "safe_error" in src

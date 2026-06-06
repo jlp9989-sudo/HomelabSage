@@ -28,12 +28,9 @@ from __future__ import annotations
 
 import logging
 
-import httpx
-
 from .. import __version__
 from ..models import AnalyzedUpdate, Severity
 from . import Output
-from ._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -49,9 +46,7 @@ class WebhookOutput(Output):
     def _should_send(self, item: AnalyzedUpdate) -> bool:
         if not self.cfg.enabled or not self.cfg.url:
             return False
-        if not item.analysis:
-            return False
-        return item.analysis.severity.order >= self._min.order
+        return self._severity_passes(item)
 
     def _envelope(self, item: AnalyzedUpdate) -> dict:
         u = item.update
@@ -116,11 +111,7 @@ class WebhookOutput(Output):
             if "\r" not in tok and "\n" not in tok:
                 headers["Authorization"] = f"Bearer {tok}"
         headers.setdefault("Content-Type", "application/json")
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                r = await client.post(
-                    self.cfg.url, json=self._envelope(item), headers=headers,
-                )
-                r.raise_for_status()
-        except httpx.HTTPError as e:
-            log.error("webhook push failed for %s: %s", item.id, safe_error(e))
+        await self._push_json(
+            self.cfg.url, item=item,
+            json=self._envelope(item), headers=headers,
+        )

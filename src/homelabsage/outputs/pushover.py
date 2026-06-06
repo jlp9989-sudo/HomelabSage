@@ -22,7 +22,6 @@ import httpx
 
 from ..models import AnalyzedUpdate, Severity
 from . import Output
-from ._errlog import safe_error
 
 log = logging.getLogger(__name__)
 
@@ -53,9 +52,7 @@ class PushoverOutput(Output):
     def _should_send(self, item: AnalyzedUpdate) -> bool:
         if not self.cfg.enabled or not self.cfg.token or not self.cfg.user_key:
             return False
-        if not item.analysis:
-            return False
-        return item.analysis.severity.order >= self._min.order
+        return self._severity_passes(item)
 
     def _build_form(self, item: AnalyzedUpdate) -> dict[str, str]:
         u = item.update
@@ -97,9 +94,11 @@ class PushoverOutput(Output):
     async def send(self, item: AnalyzedUpdate) -> None:
         if not self._should_send(item):
             return
+        # Pushover wants form-encoded `data=`, not JSON — keep custom POST
+        # instead of `_push_json`. Failure path shares the base log helper.
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 r = await client.post(_PUSHOVER_URL, data=self._build_form(item))
                 r.raise_for_status()
         except httpx.HTTPError as e:
-            log.error("Pushover push failed for %s: %s", item.id, safe_error(e))
+            self._log_push_failure(item, e)

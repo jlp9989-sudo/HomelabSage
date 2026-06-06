@@ -2,6 +2,53 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.11.0 — 2026-06-06
+
+Refactor pass #1 from the post-v1.0-punch code-quality audit:
+**Output ABC consolidation**. 11 push outputs lose ~80 LOC of
+boilerplate by hoisting the shared severity gate + httpx wrapper +
+sanitised failure log to the base class. No behavioural change.
+
+### Refactored
+
+- `outputs/__init__.Output` gains three opt-in helpers:
+  - `_severity_passes(item)` — returns True iff
+    `item.analysis.severity >= self._min`. Replaces the 3-line check
+    that was duplicated in every subclass.
+  - `_log_push_failure(item, exc)` — emits the
+    `"<id> push failed for X: <type> (status N)"` log line via the
+    centralised `safe_error` redactor. Single source of truth for
+    failure logging.
+  - `_push_json(url, *, item, json, params=, headers=, timeout=)` —
+    fire-and-forget JSON POST that wraps the httpx try/except. 6 of
+    the 11 outputs (Discord, Telegram, Gotify, Slack, MSTeams,
+    Webhook) drop ~6 LOC each by using it.
+- Outputs with non-JSON shapes (ntfy text/plain, pushover form,
+  apprise library call, smtp via smtplib) keep custom sends but
+  share `_log_push_failure` for consistent redaction.
+- Notion's PATCH+POST fallback path stays bespoke (the v0.10.3
+  404-self-heal logic isn't a fit for a generic helper).
+
+### Test changes
+
+- `test_every_output_imports_safe_error` (defensive marker test from
+  v0.10.0) replaced by `test_every_output_inherits_sanitized_base`
+  — same intent, asserts via `issubclass(cls, Output)` + inspect
+  on the centralised `_log_push_failure` source.
+- `test_telegram_log_does_not_leak_token` rewired to drive
+  `_log_push_failure` directly through a real `TelegramOutput`.
+- Two webhook tests updated to monkeypatch
+  `homelabsage.outputs.httpx.AsyncClient` instead of the per-module
+  alias that no longer exists.
+
+### Internal
+
+- 1725 → 1725 tests (no net add; one swap to the new defensive
+  guard). Ruff clean, 0 mypy errors against 180 source files.
+- 9 of 11 output modules drop their `httpx` import. `safe_error` is
+  imported in exactly one place (`outputs/__init__.py`) instead of
+  11.
+
 ## v0.10.7 — 2026-06-06
 
 Polish pass for the 5 Nits from the v1.0 punch list. N1 + N2 are
