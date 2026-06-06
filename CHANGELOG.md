@@ -2,6 +2,26 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.11.10 — 2026-06-06
+
+Refactor pass #11 (wave 5 of test reorg #9): **bulk rename + audit
+categories consolidation**. 11 release-pinned files that turned out to
+be single-feature post-earlier-waves get renamed to feature names:
+`test_v072`→`test_audit_jsonl_cli`, `test_v073`→`test_init_wizard`,
+`test_v075`→`test_compose_graph_cli`, `test_v080`→`test_features_cli`,
+`test_v084`→`test_dangling_images`, `test_v085`→`test_activity_cli`,
+`test_v092`→`test_where_is`,
+`test_v095`→`test_settings_blocks_registration`,
+`test_v096`→`test_star`, `test_v098`→`test_audit_mute_inline`,
+`test_v099`→`test_a11y_explain`.
+
+Plus consolidation: `test_v082` + `test_v083` + `test_v091` merged
+into `test_audit_categories.py` (9 tests covering MCP
+audit_categories + system_info + HTTP /api/audit/categories +
+/api/audit/by-category).
+
+1725 → 1725 tests. Ruff clean, 0 mypy errors / 183 source files.
+
 ## v0.11.9 — 2026-06-06
 
 Refactor pass #10 (wave 4 of test reorg #9): **audit-mute tests

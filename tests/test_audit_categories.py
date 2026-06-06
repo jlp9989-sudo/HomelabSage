@@ -1,4 +1,10 @@
-"""Tests for v0.9.1: /api/audit/by-category + MCP system_info."""
+"""Audit categories surface: MCP audit_categories + system_info + HTTP.
+
+Consolidates from 3 release-pinned files in v0.11.10:
+  - v0.8.2: MCP audit_categories
+  - v0.8.3: /api/audit/categories
+  - v0.9.1: /api/audit/by-category + MCP system_info
+"""
 
 from __future__ import annotations
 
@@ -33,7 +39,26 @@ def _seed_abandoned(db, *, subject):
     return item
 
 
-# ─── /api/audit/by-category ───────────────────────────────────────
+# ─── HTTP: /api/audit/categories ──────────────────────────────────
+
+
+def test_api_audit_categories_shape(tmp_path):
+    from homelabsage.web import create_app
+    cfg = Config()
+    cfg.storage.database_path = str(tmp_path / "t.db")
+    client = TestClient(create_app(cfg))
+    r = client.get("/api/audit/categories")
+    assert r.status_code == 200
+    body = r.json()
+    assert "counts_by_category" in body
+    assert "counts_by_severity" in body
+    assert body["total"] == 0
+    assert body["healthy"] is True
+    # Defensive: no findings list (the whole point)
+    assert "findings" not in body
+
+
+# ─── HTTP: /api/audit/by-category ─────────────────────────────────
 
 
 def test_api_audit_by_category_returns_only_matching(tmp_path):
@@ -82,7 +107,34 @@ def test_api_audit_by_category_clamps_limit(tmp_path):
     assert r.status_code == 200
 
 
-# ─── MCP system_info ─────────────────────────────────────────────
+# ─── MCP: audit_categories ────────────────────────────────────────
+
+
+def test_mcp_audit_categories_empty(tmp_path):
+    from homelabsage.mcp import TOOLS
+    cfg = Config()
+    cfg.storage.database_path = str(tmp_path / "t.db")
+    db = Database(cfg.storage.database_path)
+    impl = TOOLS["audit_categories"]["impl"]
+    out = impl(cfg, db, {})
+    assert out["total"] == 0
+    assert out["healthy"] is True
+    assert "counts_by_category" in out
+    assert "counts_by_severity" in out
+
+
+def test_mcp_audit_categories_excludes_full_findings(tmp_path):
+    """Defensive: the compact payload must not include the findings list."""
+    from homelabsage.mcp import TOOLS
+    cfg = Config()
+    cfg.storage.database_path = str(tmp_path / "t.db")
+    db = Database(cfg.storage.database_path)
+    impl = TOOLS["audit_categories"]["impl"]
+    out = impl(cfg, db, {})
+    assert "findings" not in out
+
+
+# ─── MCP: system_info ─────────────────────────────────────────────
 
 
 def test_mcp_system_info_empty_db(tmp_path):
