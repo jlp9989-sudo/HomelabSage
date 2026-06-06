@@ -2,6 +2,40 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.11.4 — 2026-06-06
+
+Refactor pass #5: **`engine.run_once` split**. Audit finding #3
+closed. The 230-LOC per-scan god method that did gate-checking,
+plugin scanning, per-update analysis, dispatch, batching, and
+heartbeating in one inline blob is now a slim ~50-LOC orchestrator
+that calls six named sub-stages. Behaviour preserved bit-for-bit.
+
+### Refactored
+
+- `engine.run_once()` reads as a linear script: scan-window gate →
+  parity probe → per-plugin loop → per-update (analyze → dispatch)
+  → batch finalise → heartbeat.
+- `_maybe_skip_scan() -> dict | None` — combined scan-window +
+  LLM-health early-return.
+- `_check_parity_gate() -> bool` — RAID mdstat probe with logging,
+  returns whether push-to-output is gated.
+- `_batch_threshold() -> Severity | None` — resolves the batching
+  severity floor from config.
+- `_analyze_single(update, stats)` — image pin + dedup + LLM call +
+  explainer + usage record + persist + auto-apply + curator hook.
+- `_dispatch_single(analyzed, push_gated, batched, batch_threshold)`
+  — per-output snooze/parity/quiet/batching gates.
+- `_finalise_batch(batched, batch_threshold, push_gated)` —
+  end-of-scan low-severity rollup flush.
+
+### Internal
+
+- 1725 → 1725 tests (no behavioural change). Ruff clean, 0 mypy
+  errors against 183 source files.
+- Five refactor passes since v0.10.7 close 8 of the 10 code-quality
+  findings from the 6-jun audit. Remaining: #4 (audit.build_report
+  cascade → registry), #9 (tests by feature instead of by release).
+
 ## v0.11.3 — 2026-06-06
 
 Refactor pass #4: **`routes_updates.py` split by surface**. The

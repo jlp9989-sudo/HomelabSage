@@ -115,12 +115,63 @@ class Engine:
         self.outputs = build_outputs(cfg, db)
 
     async def run_once(self) -> dict[str, int]:
-        """Single full cycle. Returns counts (`scanned`, `new`, `analyzed`, `failed`)."""
-        # Scan-window gate: opt-in. When the local time falls inside the
-        # configured window we skip the entire scan — no plugin polling,
-        # no LLM call, no API hits on upstream registries. Counted as
-        # `skipped` so a monitoring dashboard can see we didn't sleep
-        # the process accidentally.
+        """Single full cycle. Returns counts (`scanned`, `new`, `analyzed`,
+        `failed`).
+
+        Split into thin sub-stages in v0.11.4 so each piece is independently
+        testable + readable. The orchestration shape is intentionally linear:
+        scan-gate → parity-gate → per-plugin loop → batch flush → heartbeat.
+        """
+        skipped = await self._maybe_skip_scan()
+        if skipped is not None:
+            return skipped
+
+        log.info("Run start — plugins=%s outputs=%s",
+                 [p.id for p in self.plugins], [o.id for o in self.outputs])
+        stats = {"scanned": 0, "new": 0, "analyzed": 0, "failed": 0}
+
+        push_gated = self._check_parity_gate()
+        # Auto-flush the gated-window queue once the gate clears. Older
+        # items first; failures stay queued and retry on the next scan.
+        if not push_gated:
+            await self._flush_pending_dispatches()
+
+        # Batching state — populated as the loop runs, flushed at the end.
+        batched: list[AnalyzedUpdate] = []
+        batch_threshold = self._batch_threshold()
+
+        for plugin in self.plugins:
+            try:
+                items = await plugin.scan()
+            except Exception as e:
+                log.exception("plugin %s scan failed: %s", plugin.id, e)
+                stats["failed"] += 1
+                continue
+            stats["scanned"] += len(items)
+            for update in items:
+                analyzed = await self._analyze_single(update, stats)
+                if analyzed is None:
+                    continue  # dedup: already analyzed in a prior run
+                await self._dispatch_single(
+                    analyzed, push_gated, batched, batch_threshold,
+                )
+
+        await self._finalise_batch(batched, batch_threshold, push_gated)
+        await self._heartbeat_ok()
+        log.info("Run end — %s", stats)
+        return stats
+
+    # ─── run_once sub-stages ─────────────────────────────────────────
+
+    async def _maybe_skip_scan(self) -> dict[str, int] | None:
+        """Pre-scan gates: scan-window + LLM-backend health.
+
+        Returns the early-return stats dict when the scan should skip
+        (counted as `skipped: 1` so monitoring can see we didn't accidentally
+        sleep the process), or None to proceed.
+        """
+        # Scan-window: skip when the local time is inside the configured
+        # window — no plugin polling, no LLM call, no upstream API hits.
         if self.cfg.scan_window.enabled:
             from .scan_window import is_scan_blocked
             blocked = is_scan_blocked(
@@ -135,9 +186,8 @@ class Engine:
                     "skipped": 1,
                 }
 
-        # LLM-backend health gate: opt-in pre-flight. Skip the scan
-        # entirely when the LLM endpoint is down to avoid wasting
-        # plugin/registry work that would die on the analyser call.
+        # LLM-backend health: probe the endpoint before plugins do upstream
+        # registry work that would die on the analyser call anyway.
         if self.cfg.llm_health_gate.enabled:
             from .config import get_active_llm_config
             from .llm_health import probe as probe_llm
@@ -157,193 +207,184 @@ class Engine:
                     "scanned": 0, "new": 0, "analyzed": 0, "failed": 0,
                     "skipped": 1,
                 }
+        return None
 
-        log.info("Run start — plugins=%s outputs=%s",
-                 [p.id for p in self.plugins], [o.id for o in self.outputs])
-        stats = {"scanned": 0, "new": 0, "analyzed": 0, "failed": 0}
+    def _check_parity_gate(self) -> bool:
+        """True iff push outputs should be queued instead of fired.
 
-        # Probe parity once per run; outputs marked `is_push = True` are
-        # skipped while it's active. Persistent outputs (Notion) keep
-        # running so we don't lose state — the user just won't get a phone
-        # buzz mid-resync. When the gate clears, we replay every push that
-        # was skipped from the `pending_dispatches` queue (auto-flush).
-        push_gated = False
-        if self.cfg.parity_gate.enabled:
-            state = is_parity_running(mdstat_path=self.cfg.parity_gate.mdstat_path)
-            if state.running:
-                push_gated = True
-                log.info("Push notifications gated by parity: %s", state.reason)
+        Persistent outputs (Notion) keep running so we don't lose state;
+        the user just doesn't get a phone buzz mid-resync.
+        """
+        if not self.cfg.parity_gate.enabled:
+            return False
+        state = is_parity_running(mdstat_path=self.cfg.parity_gate.mdstat_path)
+        if state.running:
+            log.info("Push notifications gated by parity: %s", state.reason)
+            return True
+        return False
 
-        # Auto-flush: when the gate is NOT active, drain the queue of pushes
-        # that piled up during the last gated window. We dispatch in
-        # `queued_at` order so older items hit first, and DELETE the row on
-        # successful delivery so retries are bounded by output errors only.
-        if not push_gated:
-            await self._flush_pending_dispatches()
-
-        # Items collected for low-severity batching. Dispatched once at the
-        # end of the scan as a single rollup per push channel rather than
-        # one ping per item. Only populated when `outputs.batching.enabled`.
-        batched: list[AnalyzedUpdate] = []
+    def _batch_threshold(self) -> Severity | None:
+        """The severity floor below which items are deferred to the
+        end-of-scan rollup. None when batching is disabled."""
         batch_cfg = self.cfg.outputs.batching
-        batch_threshold = Severity(batch_cfg.below_severity) if batch_cfg.enabled else None
+        return Severity(batch_cfg.below_severity) if batch_cfg.enabled else None
 
-        for plugin in self.plugins:
+    async def _analyze_single(
+        self, update, stats: dict[str, int],
+    ) -> AnalyzedUpdate | None:
+        """Process one Update through pin-check → dedup → LLM → persist →
+        auto-apply → curator hook. Returns the analyzed item, or None when
+        the update is a duplicate we already analyzed in a prior run.
+        """
+        # Image-pin enforcement runs BEFORE the analyzer so the LLM sees the
+        # verdict in `context.pin_violation` and frames its recommendation
+        # against it. The Update's context dict is REPLACED (not mutated in
+        # place) so cached cross-run state isn't polluted.
+        if self.cfg.image_pins.enabled and self.cfg.image_pins.pins:
+            from .image_pins import evaluate as evaluate_pin
+            verdict = evaluate_pin(
+                subject=update.subject,
+                new_version=update.new_version,
+                pins=self.cfg.image_pins.pins,
+            )
+            if verdict is not None:
+                update.context = {
+                    **(update.context or {}),
+                    "pin_violation": verdict.to_context(),
+                }
+
+        analyzed = AnalyzedUpdate(update=update)
+        existing = self.db.get(analyzed.id)
+        # Skip LLM call when we already analyzed this exact (subject, new_version).
+        if existing and existing.analysis is not None:
+            return None
+        # Re-emitting an existing-but-unanalyzed item (previous LLM failed).
+        # Carry the Notion page_id so the output PATCHes instead of POSTing.
+        if existing and existing.notion_page_id:
+            analyzed.notion_page_id = existing.notion_page_id
+        stats["new"] += 1
+
+        if self.llm.is_enabled():
             try:
-                items = await plugin.scan()
-            except Exception as e:
-                log.exception("plugin %s scan failed: %s", plugin.id, e)
-                stats["failed"] += 1
-                continue
-            stats["scanned"] += len(items)
-            for update in items:
-                # Image-pin enforcement runs BEFORE the analyzer so the LLM
-                # already sees the verdict in `context.pin_violation` and
-                # frames its recommendation against it. Empty pins → no-op.
-                # The Update's context dict is REPLACED (not mutated in
-                # place) so plugins that cache context across runs aren't
-                # polluted by this scan's pin verdict.
-                if self.cfg.image_pins.enabled and self.cfg.image_pins.pins:
-                    from .image_pins import evaluate as evaluate_pin
-                    verdict = evaluate_pin(
-                        subject=update.subject,
-                        new_version=update.new_version,
-                        pins=self.cfg.image_pins.pins,
-                    )
-                    if verdict is not None:
-                        update.context = {
-                            **(update.context or {}),
-                            "pin_violation": verdict.to_context(),
-                        }
-                analyzed = AnalyzedUpdate(update=update)
-                # Skip LLM call if we already analyzed this exact (subject, new_version)
-                existing = self.db.get(analyzed.id)
-                if existing and existing.analysis is not None:
-                    continue
-                # Re-emitting an existing-but-unanalyzed item (e.g. previous
-                # LLM failed). Carry forward the Notion page_id so the output
-                # PATCHes the existing row instead of creating a duplicate.
-                if existing and existing.notion_page_id:
-                    analyzed.notion_page_id = existing.notion_page_id
-                stats["new"] += 1
-                if self.llm.is_enabled():
-                    try:
-                        kw = update.context.get("_note_keywords") or []
-                        notes_ctx = self.notes.context_for(update.subject, keywords=kw)
-                        analyzed.analysis = await self.llm.analyze(update, notes=notes_ctx)
-                        if analyzed.analysis:
-                            analyzed.status = UpdateStatus.ANALYZED
-                            analyzed.analyzed_at = utcnow()
-                            stats["analyzed"] += 1
-                        # Persist explainer (prompt + raw response + notes
-                        # used) AND a usage row regardless of parse
-                        # success. last_call is None only when analyze()
-                        # early-returned because the LLM is disabled.
-                        if self.llm.last_call is not None:
-                            call = self.llm.last_call
-                            cfg_now = self.llm.cfg
-                            if call.succeeded:
-                                self.db.upsert_explainer(
-                                    analyzed.id,
-                                    prompt=call.prompt,
-                                    raw_response=call.raw_response,
-                                    notes_used=notes_ctx or None,
-                                    provider=cfg_now.provider,
-                                    model=cfg_now.model,
-                                )
-                            self.db.record_llm_call(
-                                provider=cfg_now.provider,
-                                model=cfg_now.model,
-                                update_id=analyzed.id,
-                                tokens_in=call.tokens_in,
-                                tokens_out=call.tokens_out,
-                                estimated=call.tokens_estimated,
-                                duration_ms=call.duration_ms,
-                                succeeded=call.succeeded,
-                            )
-                    except Exception as e:
-                        log.exception("LLM failed on %s: %s", update.subject, e)
-                self.db.upsert(analyzed)
-                # Auto-apply whitelist — runs AFTER analysis + persistence
-                # so the LLM's `breaking_changes` + severity inform the
-                # decision. Records a fresh status to the DB if it fires.
-                if self.cfg.auto_apply.enabled and analyzed.analysis is not None:
-                    from .auto_apply import should_auto_apply
-                    decision = should_auto_apply(
-                        analyzed,
-                        allowlist=self.cfg.auto_apply.allowlist,
-                        max_severity=self.cfg.auto_apply.max_severity,
-                    )
-                    if decision.should_apply:
-                        log.info(
-                            "auto_apply: %s → APPLIED (%s)",
-                            analyzed.id, decision.reason,
+                kw = update.context.get("_note_keywords") or []
+                notes_ctx = self.notes.context_for(update.subject, keywords=kw)
+                analyzed.analysis = await self.llm.analyze(update, notes=notes_ctx)
+                if analyzed.analysis:
+                    analyzed.status = UpdateStatus.ANALYZED
+                    analyzed.analyzed_at = utcnow()
+                    stats["analyzed"] += 1
+                # Persist explainer + usage regardless of parse success.
+                if self.llm.last_call is not None:
+                    call = self.llm.last_call
+                    cfg_now = self.llm.cfg
+                    if call.succeeded:
+                        self.db.upsert_explainer(
+                            analyzed.id,
+                            prompt=call.prompt,
+                            raw_response=call.raw_response,
+                            notes_used=notes_ctx or None,
+                            provider=cfg_now.provider,
+                            model=cfg_now.model,
                         )
-                        self.db.set_status(analyzed.id, UpdateStatus.APPLIED)
-                        analyzed.status = UpdateStatus.APPLIED
-                        stats["auto_applied"] = stats.get("auto_applied", 0) + 1
-                self._incremental_hook(analyzed)
-                # Batching short-circuit: when the item is below the rollup
-                # threshold AND we have a meaningful analysis, defer push
-                # outputs to a single rollup at end-of-scan. Notion (and
-                # other persistent outputs) still run per-item.
-                deferred_to_batch = (
-                    batch_threshold is not None
-                    and below_threshold(analyzed, batch_threshold)
+                    self.db.record_llm_call(
+                        provider=cfg_now.provider,
+                        model=cfg_now.model,
+                        update_id=analyzed.id,
+                        tokens_in=call.tokens_in,
+                        tokens_out=call.tokens_out,
+                        estimated=call.tokens_estimated,
+                        duration_ms=call.duration_ms,
+                        succeeded=call.succeeded,
+                    )
+            except Exception as e:
+                log.exception("LLM failed on %s: %s", update.subject, e)
+
+        self.db.upsert(analyzed)
+        # Auto-apply runs AFTER analysis so severity + breaking_changes
+        # inform the decision.
+        if self.cfg.auto_apply.enabled and analyzed.analysis is not None:
+            from .auto_apply import should_auto_apply
+            decision = should_auto_apply(
+                analyzed,
+                allowlist=self.cfg.auto_apply.allowlist,
+                max_severity=self.cfg.auto_apply.max_severity,
+            )
+            if decision.should_apply:
+                log.info(
+                    "auto_apply: %s → APPLIED (%s)",
+                    analyzed.id, decision.reason,
                 )
-                if deferred_to_batch:
-                    batched.append(analyzed)
-                # Snooze gate: suppress push outputs entirely until
-                # the snooze timestamp passes. Notion / persistent
-                # outputs still run so the DB stays consistent with
-                # the dashboard. Snooze is opt-in per-update so it's
-                # cheap to evaluate (no global config).
-                snoozed_until = self._snooze_active_for(analyzed.id)
-                for output in self.outputs:
-                    if snoozed_until and output.is_push:
-                        # Don't queue — when the snooze clears the
-                        # user has explicitly chosen to defer this
-                        # update; replaying on the next scan would
-                        # ambush them. Just skip.
-                        continue
-                    if push_gated and output.is_push:
-                        # Queue for later flush rather than relying on the
-                        # item being re-detected — once analyzed, an Update
-                        # is dedupped by `(source, subject, new_version)`
-                        # and the per-item loop skips it entirely. The
-                        # auto-flush at the top of run_once dispatches when
-                        # the gate clears.
-                        self.db.queue_pending_dispatch(analyzed.id, output.id)
-                        continue
-                    if deferred_to_batch and output.is_push:
-                        # Sent later via dispatch_batch.
-                        continue
-                    # Quiet-hours gate composes with the parity gate. It is
-                    # per-output (each push channel has its own window) and
-                    # only applies to push outputs — Notion always writes.
-                    if output.is_push and self._quiet_blocks(output, analyzed):
-                        self.db.queue_pending_dispatch(analyzed.id, output.id)
-                        continue
-                    try:
-                        await output.send(analyzed)
-                    except Exception as e:
-                        log.exception("output %s failed: %s", output.id, e)
+                self.db.set_status(analyzed.id, UpdateStatus.APPLIED)
+                analyzed.status = UpdateStatus.APPLIED
+                stats["auto_applied"] = stats.get("auto_applied", 0) + 1
+        self._incremental_hook(analyzed)
+        return analyzed
 
-        # End-of-scan: flush the low-severity batch if we crossed the
-        # minimum count. Below min_count we DROP the batched items — the
-        # whole point of batching is "don't ping the user for trivia";
-        # forwarding the first message of a 1-item batch defeats that.
-        if (
+    async def _dispatch_single(
+        self,
+        analyzed: AnalyzedUpdate,
+        push_gated: bool,
+        batched: list[AnalyzedUpdate],
+        batch_threshold: Severity | None,
+    ) -> None:
+        """Route one analyzed update to every wired output, honoring the
+        parity / snooze / quiet-hours / batching gates per channel.
+
+        Persistent outputs (Notion) run through every path so the DB stays
+        consistent. Push outputs are gated and may be queued for later.
+        """
+        # Batching short-circuit: append to the rollup; push outputs are
+        # skipped in the loop below. Persistent outputs still run.
+        deferred_to_batch = (
             batch_threshold is not None
-            and not push_gated
-            and len(batched) >= batch_cfg.min_count
-        ):
-            results = await dispatch_batch(self.cfg, batched)
-            log.info("Batched %d updates → %s", len(batched), results)
+            and below_threshold(analyzed, batch_threshold)
+        )
+        if deferred_to_batch:
+            batched.append(analyzed)
 
-        await self._heartbeat_ok()
-        log.info("Run end — %s", stats)
-        return stats
+        # Snooze gate is per-update; the others compose per-output.
+        snoozed_until = self._snooze_active_for(analyzed.id)
+        for output in self.outputs:
+            if snoozed_until and output.is_push:
+                # Don't queue — snooze is the user's explicit "later",
+                # replaying on a future scan would ambush them.
+                continue
+            if push_gated and output.is_push:
+                # Queue for later flush (auto-flush at the top of run_once
+                # picks them up when the gate clears).
+                self.db.queue_pending_dispatch(analyzed.id, output.id)
+                continue
+            if deferred_to_batch and output.is_push:
+                # Will be sent via dispatch_batch at end-of-scan.
+                continue
+            # Quiet-hours is per-output (each push channel has its own window)
+            # and only applies to push outputs — Notion always writes.
+            if output.is_push and self._quiet_blocks(output, analyzed):
+                self.db.queue_pending_dispatch(analyzed.id, output.id)
+                continue
+            try:
+                await output.send(analyzed)
+            except Exception as e:
+                log.exception("output %s failed: %s", output.id, e)
+
+    async def _finalise_batch(
+        self,
+        batched: list[AnalyzedUpdate],
+        batch_threshold: Severity | None,
+        push_gated: bool,
+    ) -> None:
+        """Send the low-severity rollup if we crossed the min-count
+        threshold. Below it we drop the batched items — the whole point of
+        batching is "don't ping for trivia"; flushing a 1-item batch defeats
+        that. Also a no-op while the parity gate is active.
+        """
+        if batch_threshold is None or push_gated:
+            return
+        batch_cfg = self.cfg.outputs.batching
+        if len(batched) < batch_cfg.min_count:
+            return
+        results = await dispatch_batch(self.cfg, batched)
+        log.info("Batched %d updates → %s", len(batched), results)
 
     async def _flush_pending_dispatches(self) -> None:
         """Replay every queued push dispatch through the matching output.
