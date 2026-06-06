@@ -60,55 +60,6 @@ def test_api_doctor_returns_json(tmp_path):
     assert body["sections"]["llm"]["skipped"]
 
 
-def test_snooze_blocks_flush_pending_dispatches(tmp_path):
-    """v0.7.1 review fix: queued pushes must skip when snoozed."""
-    import asyncio
-
-    from homelabsage.engine import Engine
-    from homelabsage.models import (
-        Analysis,
-        AnalyzedUpdate,
-        Severity,
-        Update,
-    )
-    cfg = Config()
-    cfg.storage.database_path = str(tmp_path / "t.db")
-    db = Database(cfg.storage.database_path)
-    item = AnalyzedUpdate(
-        update=Update(
-            source="x", subject="y",
-            current_version="1", new_version="2",
-        ),
-        analysis=Analysis(severity=Severity.HIGH, summary="m"),
-    )
-    db.upsert(item)
-
-    # Build a stub push output that records calls.
-    calls: list[str] = []
-
-    class _StubPush:
-        id = "stub"
-        is_push = True
-
-        async def send(self, it):
-            calls.append(it.id)
-
-    engine = Engine(cfg, db)
-    engine.outputs = [_StubPush()]
-    try:
-        # Queue + snooze into the future
-        db.queue_pending_dispatch(item.id, "stub")
-        db.set_snooze(item.id, "2199-12-31T00:00:00+00:00")
-        asyncio.run(engine._flush_pending_dispatches())
-        # snooze in flush MUST suppress the call
-        assert calls == []
-        # Queue row stays so it retries when snooze expires
-        pending = db.list_pending_dispatches()
-        assert len(pending) == 1
-    finally:
-        engine.close()
-
-
 def test_mcp_doctor_tool(tmp_path):
     from homelabsage.mcp import TOOLS
     cfg = Config()

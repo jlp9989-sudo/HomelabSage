@@ -71,17 +71,7 @@ def test_purge_dry_run_changes_nothing(tmp_path):
     assert len(db.list(limit=10)) == 1
 
 
-def test_purge_skips_snoozed(tmp_path):
-    db = Database(str(tmp_path / "t.db"))
-    now = datetime.now(UTC)
-    item = _seed_with_detected_at(
-        db, subject="snoozy",
-        status=UpdateStatus.APPLIED,
-        detected_at_iso=(now - timedelta(days=200)).isoformat(),
-    )
-    db.set_snooze(item.id, "2199-01-01T00:00:00+00:00")
-    n = db.purge_old_updates(older_than_days=90)
-    assert n == 0
+# test_purge_skips_snoozed moved to test_snooze.py in v0.11.6.
 
 
 def test_purge_zero_days_noop(tmp_path):

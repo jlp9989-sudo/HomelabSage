@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
-
 from fastapi.testclient import TestClient
 
 from homelabsage.config import Config
@@ -52,55 +50,7 @@ def test_star_toggle_response_has_aria_label(tmp_path):
     assert 'aria-pressed="true"' in r.text
 
 
-# ─── custom snooze datepicker ─────────────────────────────────────
-
-
-def test_snooze_until_sets_future_date(tmp_path):
-    client, db = _client(tmp_path)
-    item = _seed(db)
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
-    r = client.post(
-        f"/updates/{item.id}/snooze/until",
-        data={"until": tomorrow},
-    )
-    assert r.status_code == 200
-    until = db.get_snooze(item.id)
-    assert until is not None
-    assert until.startswith(tomorrow)
-    assert "💤" in r.text
-
-
-def test_snooze_until_blank_clears(tmp_path):
-    client, db = _client(tmp_path)
-    item = _seed(db)
-    db.set_snooze(item.id, "2199-01-01T00:00:00+00:00")
-    r = client.post(f"/updates/{item.id}/snooze/until", data={"until": ""})
-    assert r.status_code == 200
-    assert db.get_snooze(item.id) is None
-
-
-def test_snooze_until_past_date_clears(tmp_path):
-    """Picking today/yesterday is defensive: same as clear."""
-    client, db = _client(tmp_path)
-    item = _seed(db)
-    db.set_snooze(item.id, "2199-01-01T00:00:00+00:00")
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
-    r = client.post(f"/updates/{item.id}/snooze/until", data={"until": yesterday})
-    assert r.status_code == 200
-    assert db.get_snooze(item.id) is None
-
-
-def test_snooze_until_invalid_400(tmp_path):
-    client, db = _client(tmp_path)
-    item = _seed(db)
-    r = client.post(f"/updates/{item.id}/snooze/until", data={"until": "not-a-date"})
-    assert r.status_code == 400
-
-
-def test_snooze_until_404_on_bogus_id(tmp_path):
-    client, _db = _client(tmp_path)
-    r = client.post("/updates/does-not-exist/snooze/until", data={"until": "2099-01-01"})
-    assert r.status_code == 404
+# Snooze datepicker tests moved to test_snooze.py in v0.11.6.
 
 
 def test_index_renders_custom_date_input(tmp_path):

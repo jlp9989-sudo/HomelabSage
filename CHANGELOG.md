@@ -2,6 +2,37 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.11.6 — 2026-06-06
+
+Refactor pass #7 (wave 1 of test reorg #9): **snooze tests
+consolidated**. Audit memo flagged "snooze tests dispersos en 5
+archivos" — actually 13 once counted properly. All now live in one
+`tests/test_snooze.py` (43 tests) covering db helpers, HTTP API,
+HTMX endpoints, CLI, MCP tools, engine flush gate, and purge
+interaction.
+
+### Refactored
+
+- `tests/test_snooze.py` — new home for every snooze test. Shared
+  `_seed` / `_client` / `_config_for_cli` helpers at the top, then
+  sections: db set/get/clear, list+clear_all, HTTP API, HTML HTMX,
+  CLI, MCP tools, engine wiring, purge interaction.
+- Snooze tests removed from: `test_v068.py`, `test_v069.py`,
+  `test_v071.py`, `test_v072.py` (rewritten — only the audit
+  `--jsonl` test remained), `test_v076.py`, `test_v079.py`,
+  `test_v083.py`, `test_v096.py`, `test_v097.py`, `test_v099.py`.
+  Each file's docstring updated to note the snooze move.
+
+### Internal
+
+- 1725 → 1725 tests (no behavioural change — every snooze test
+  preserved by name). Ruff clean, 0 mypy errors against 183 source
+  files.
+- Audit finding #9 is now a multi-wave sprint. Wave 1 (snooze) is
+  the highest-leverage slice per the audit memo. Remaining waves
+  (audit-related test files, MCP tool tests, output tests) tracked
+  as v0.11.7+.
+
 ## v0.11.5 — 2026-06-06
 
 Refactor pass #6: **`audit.build_report` cascade → registry**. Audit

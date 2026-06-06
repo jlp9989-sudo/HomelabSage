@@ -88,78 +88,9 @@ def test_restart_drift_to_context_shape():
     assert ctx["severity"] == "info"
 
 
-# ─── snooze engine wiring ─────────────────────────────────────────
-
-
-def test_snooze_active_for_returns_iso_when_future(tmp_path):
-    from homelabsage.db import Database
-    from homelabsage.engine import Engine
-    from homelabsage.models import AnalyzedUpdate, Update
-    cfg = Config()
-    cfg.storage.database_path = str(tmp_path / "t.db")
-    db = Database(cfg.storage.database_path)
-    item = AnalyzedUpdate(
-        update=Update(
-            source="x", subject="y",
-            current_version="1", new_version="2",
-        ),
-    )
-    db.upsert(item)
-    future = "2199-12-31T00:00:00+00:00"
-    db.set_snooze(item.id, future)
-    engine = Engine(cfg, db)
-    try:
-        assert engine._snooze_active_for(item.id) == future
-    finally:
-        engine.close()
-
-
-def test_snooze_active_for_past_returns_none(tmp_path):
-    from homelabsage.db import Database
-    from homelabsage.engine import Engine
-    from homelabsage.models import AnalyzedUpdate, Update
-    cfg = Config()
-    cfg.storage.database_path = str(tmp_path / "t.db")
-    db = Database(cfg.storage.database_path)
-    item = AnalyzedUpdate(
-        update=Update(
-            source="x", subject="y",
-            current_version="1", new_version="2",
-        ),
-    )
-    db.upsert(item)
-    db.set_snooze(item.id, "2020-01-01T00:00:00+00:00")
-    engine = Engine(cfg, db)
-    try:
-        assert engine._snooze_active_for(item.id) is None
-    finally:
-        engine.close()
-
-
-def test_snooze_active_for_corrupt_returns_none(tmp_path):
-    """Garbage timestamp must not silence the update permanently."""
-    from homelabsage.db import Database
-    from homelabsage.engine import Engine
-    from homelabsage.models import AnalyzedUpdate, Update
-    cfg = Config()
-    cfg.storage.database_path = str(tmp_path / "t.db")
-    db = Database(cfg.storage.database_path)
-    item = AnalyzedUpdate(
-        update=Update(
-            source="x", subject="y",
-            current_version="1", new_version="2",
-        ),
-    )
-    db.upsert(item)
-    db.set_snooze(item.id, "not-a-date")
-    engine = Engine(cfg, db)
-    try:
-        assert engine._snooze_active_for(item.id) is None
-    finally:
-        engine.close()
-
-
 # ─── GitHub release webhook ───────────────────────────────────────
+# Snooze engine wiring tests moved to test_snooze.py in v0.11.6.
+
 
 
 def _make_release_payload(*, tag="v1.0.0", repo="owner/repo",

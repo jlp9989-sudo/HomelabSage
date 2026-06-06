@@ -1,4 +1,7 @@
-"""Tests for v0.9.6: star/snooze HTMX buttons + Starred/Snoozed filter views."""
+"""Tests for v0.9.6: star HTMX buttons + Starred filter view.
+
+Snooze HTMX + filter tests moved to test_snooze.py in v0.11.6.
+"""
 
 from __future__ import annotations
 
@@ -56,49 +59,6 @@ def test_star_toggle_returns_button_with_swap_endpoint(tmp_path):
     assert "hx-swap=" in r.text
 
 
-# ─── snooze quick ─────────────────────────────────────────────────
-
-
-def test_snooze_quick_sets_future_timestamp(tmp_path):
-    client, db = _client(tmp_path)
-    item = _seed(db)
-    r = client.post(
-        f"/updates/{item.id}/snooze/quick",
-        data={"days": "7"},
-    )
-    assert r.status_code == 200
-    until = db.get_snooze(item.id)
-    assert until is not None
-    # The future ISO timestamp should start with 202x or later
-    assert until[:2] == "20"
-    # Response shows the snooze cell with a clear button
-    assert "💤" in r.text
-    assert "clear" in r.text
-
-
-def test_snooze_quick_zero_days_clears(tmp_path):
-    client, db = _client(tmp_path)
-    item = _seed(db)
-    db.set_snooze(item.id, "2199-01-01T00:00:00+00:00")
-    r = client.post(
-        f"/updates/{item.id}/snooze/quick",
-        data={"days": "0"},
-    )
-    assert r.status_code == 200
-    assert db.get_snooze(item.id) is None
-    # Cleared cell shows the snooze-select form again
-    assert "snooze…" in r.text
-
-
-def test_snooze_quick_default_days_when_unset(tmp_path):
-    """No `days` form field → default 7 (FastAPI Form default)."""
-    client, db = _client(tmp_path)
-    item = _seed(db)
-    r = client.post(f"/updates/{item.id}/snooze/quick", data={})
-    assert r.status_code == 200
-    assert db.get_snooze(item.id) is not None
-
-
 # ─── filter views ────────────────────────────────────────────────
 
 
@@ -113,17 +73,6 @@ def test_index_filter_starred(tmp_path):
     assert "beta" not in r.text
     # The all-state pill on the same view shows full counts
     assert "Starred (1)" in r.text
-
-
-def test_index_filter_snoozed(tmp_path):
-    client, db = _client(tmp_path)
-    a = _seed(db, subject="alpha")
-    _seed(db, subject="beta")
-    db.set_snooze(a.id, "2199-01-01T00:00:00+00:00")
-    r = client.get("/?filter=snoozed")
-    assert r.status_code == 200
-    assert "alpha" in r.text
-    assert "beta" not in r.text
 
 
 def test_index_default_filter_shows_all(tmp_path):

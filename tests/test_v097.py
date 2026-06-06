@@ -163,18 +163,12 @@ def test_blank_submit_preserves_dict_secret(tmp_path):
     assert saved["outputs"]["webhook"]["headers"] == {"X-Token": "keepme"}
 
 
-# ─── star/snooze atomic + 404 ─────────────────────────────────────
+# ─── star atomic + 404 ─────────────────────────────────────
 
 
 def test_star_toggle_404_on_bogus_id(tmp_path):
     client, _db, _ = _client(tmp_path)
     r = client.post("/updates/does-not-exist/star/toggle")
-    assert r.status_code == 404
-
-
-def test_snooze_quick_404_on_bogus_id(tmp_path):
-    client, _db, _ = _client(tmp_path)
-    r = client.post("/updates/does-not-exist/snooze/quick", data={"days": "7"})
     assert r.status_code == 404
 
 
@@ -187,16 +181,6 @@ def test_star_toggle_is_atomic(tmp_path):
         r = client.post(f"/updates/{item.id}/star/toggle")
         assert r.status_code == 200
     assert db.is_starred(item.id) is True
-
-
-def test_snooze_quick_negative_days_clears(tmp_path):
-    """days = -5 → treated as 0 (clear), not a past timestamp wedge."""
-    client, db, _ = _client(tmp_path)
-    item = _seed(db)
-    db.set_snooze(item.id, "2199-01-01T00:00:00+00:00")
-    r = client.post(f"/updates/{item.id}/snooze/quick", data={"days": "-5"})
-    assert r.status_code == 200
-    assert db.get_snooze(item.id) is None
 
 
 # ─── pill counts ──────────────────────────────────────────────────
@@ -212,10 +196,5 @@ def test_starred_pill_counts_via_count_query(tmp_path):
     assert db.count_starred() == 1
 
 
-def test_snoozed_pill_counts_via_count_query(tmp_path):
-    client, db, _ = _client(tmp_path)
-    item = _seed(db, subject="alpha")
-    db.set_snooze(item.id, "2199-01-01T00:00:00+00:00")
-    r = client.get("/")
-    assert "Snoozed (1)" in r.text
-    assert db.count_snoozed() == 1
+# Snooze 404 + negative-days + pill count tests moved to test_snooze.py
+# in v0.11.6.

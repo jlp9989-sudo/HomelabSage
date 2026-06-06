@@ -1,4 +1,7 @@
-"""Tests for v0.6.8: snooze, container disappearance, DNS check, MCP additions."""
+"""Tests for v0.6.8: container disappearance, DNS check, MCP additions.
+
+Snooze tests moved to test_snooze.py in v0.11.6.
+"""
 
 from __future__ import annotations
 
@@ -15,79 +18,6 @@ from homelabsage.disappearance import (
 )
 from homelabsage.dns_check import DNSFinding, check_hostnames
 from homelabsage.dns_check import probe as probe_dns
-
-# ─── snooze ────────────────────────────────────────────────────────
-
-
-def test_snooze_set_and_get(tmp_path):
-    from homelabsage.db import Database
-    from homelabsage.models import AnalyzedUpdate, Update
-    db = Database(str(tmp_path / "t.db"))
-    item = AnalyzedUpdate(
-        update=Update(
-            source="x", subject="y",
-            current_version="1", new_version="2",
-        ),
-    )
-    db.upsert(item)
-    assert db.get_snooze(item.id) is None
-    assert db.set_snooze(item.id, "2026-12-31T00:00:00+00:00") is True
-    assert db.get_snooze(item.id) == "2026-12-31T00:00:00+00:00"
-
-
-def test_snooze_clear(tmp_path):
-    from homelabsage.db import Database
-    from homelabsage.models import AnalyzedUpdate, Update
-    db = Database(str(tmp_path / "t.db"))
-    item = AnalyzedUpdate(
-        update=Update(
-            source="x", subject="y",
-            current_version="1", new_version="2",
-        ),
-    )
-    db.upsert(item)
-    db.set_snooze(item.id, "2026-12-31T00:00:00+00:00")
-    assert db.set_snooze(item.id, None) is True
-    assert db.get_snooze(item.id) is None
-
-
-def test_snooze_unknown_update_returns_false(tmp_path):
-    from homelabsage.db import Database
-    db = Database(str(tmp_path / "t.db"))
-    assert db.set_snooze("ghost-id", "2026-12-31T00:00:00+00:00") is False
-    assert db.get_snooze("ghost-id") is None
-
-
-def test_snooze_api_validates_iso8601(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from homelabsage.db import Database
-    from homelabsage.models import AnalyzedUpdate, Update
-    from homelabsage.web import create_app
-    cfg = Config()
-    cfg.storage.database_path = str(tmp_path / "t.db")
-    db = Database(cfg.storage.database_path)
-    item = AnalyzedUpdate(
-        update=Update(
-            source="x", subject="y",
-            current_version="1", new_version="2",
-        ),
-    )
-    db.upsert(item)
-    app = create_app(cfg)
-    client = TestClient(app)
-    r = client.post(
-        f"/api/updates/{item.id}/snooze",
-        json={"snooze_until": "not-a-date"},
-    )
-    assert r.status_code == 400
-    r = client.post(
-        f"/api/updates/{item.id}/snooze",
-        json={"snooze_until": "2026-12-31T00:00:00+00:00"},
-    )
-    assert r.status_code == 200
-    assert r.json()["snooze_until"] == "2026-12-31T00:00:00+00:00"
-
 
 # ─── disappearance ────────────────────────────────────────────────
 
@@ -179,61 +109,6 @@ def test_dns_finding_to_context_shape():
 
 
 # ─── MCP tools ────────────────────────────────────────────────────
-
-
-def test_mcp_snooze_update_validates_iso(tmp_path):
-    from homelabsage.db import Database
-    from homelabsage.mcp import TOOLS
-    from homelabsage.models import AnalyzedUpdate, Update
-    db = Database(str(tmp_path / "t.db"))
-    item = AnalyzedUpdate(
-        update=Update(
-            source="x", subject="y",
-            current_version="1", new_version="2",
-        ),
-    )
-    db.upsert(item)
-    cfg = Config()
-    impl = TOOLS["snooze_update"]["impl"]
-    bad = impl(cfg, db, {"update_id": item.id, "snooze_until": "garbage"})
-    assert bad["ok"] is False
-    ok = impl(cfg, db, {
-        "update_id": item.id,
-        "snooze_until": "2026-12-31T00:00:00+00:00",
-    })
-    assert ok["ok"] is True
-    assert ok["snooze_until"] == "2026-12-31T00:00:00+00:00"
-
-
-def test_mcp_snooze_update_clears_with_null(tmp_path):
-    from homelabsage.db import Database
-    from homelabsage.mcp import TOOLS
-    from homelabsage.models import AnalyzedUpdate, Update
-    db = Database(str(tmp_path / "t.db"))
-    item = AnalyzedUpdate(
-        update=Update(
-            source="x", subject="y",
-            current_version="1", new_version="2",
-        ),
-    )
-    db.upsert(item)
-    db.set_snooze(item.id, "2026-12-31T00:00:00+00:00")
-    cfg = Config()
-    impl = TOOLS["snooze_update"]["impl"]
-    out = impl(cfg, db, {"update_id": item.id, "snooze_until": None})
-    assert out["ok"] is True
-    assert out["snooze_until"] is None
-
-
-def test_mcp_snooze_update_unknown_id(tmp_path):
-    from homelabsage.db import Database
-    from homelabsage.mcp import TOOLS
-    db = Database(str(tmp_path / "t.db"))
-    cfg = Config()
-    impl = TOOLS["snooze_update"]["impl"]
-    out = impl(cfg, db, {"update_id": "ghost",
-                         "snooze_until": "2026-12-31T00:00:00+00:00"})
-    assert out["ok"] is False
 
 
 def test_mcp_recurring_failures_empty(tmp_path):

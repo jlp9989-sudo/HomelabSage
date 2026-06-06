@@ -136,50 +136,8 @@ def test_mcp_compose_graph_mermaid_no_paths():
     assert "no compose scan paths" in out["reason"]
 
 
-# ─── clear_all_snoozes (db + endpoint + MCP) ──────────────────────
-
-
-def test_db_clear_all_snoozes(tmp_path):
-    db = Database(str(tmp_path / "t.db"))
-    a = _seed_update(db, subject="a")
-    b = _seed_update(db, subject="b")
-    c = _seed_update(db, subject="c")
-    db.set_snooze(a.id, "2199-01-01T00:00:00+00:00")
-    db.set_snooze(b.id, "2199-01-01T00:00:00+00:00")
-    # c left unsnoozed
-    assert db.clear_all_snoozes() == 2
-    # idempotent on second call
-    assert db.clear_all_snoozes() == 0
-    assert db.get_snooze(a.id) is None
-    assert db.get_snooze(b.id) is None
-    assert db.get_snooze(c.id) is None
-
-
-def test_api_delete_snoozed(tmp_path):
-    from homelabsage.web import create_app
-    cfg = Config()
-    cfg.storage.database_path = str(tmp_path / "t.db")
-    db = Database(cfg.storage.database_path)
-    item = _seed_update(db)
-    db.set_snooze(item.id, "2199-01-01T00:00:00+00:00")
-    client = TestClient(create_app(cfg))
-    r = client.delete("/api/updates/snoozed")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["ok"] is True
-    assert body["cleared"] == 1
-
-
-def test_mcp_clear_all_snoozes(tmp_path):
-    from homelabsage.mcp import TOOLS
-    cfg = Config()
-    db = Database(str(tmp_path / "t.db"))
-    item = _seed_update(db)
-    db.set_snooze(item.id, "2199-01-01T00:00:00+00:00")
-    impl = TOOLS["clear_all_snoozes"]["impl"]
-    out = impl(cfg, db, {})
-    assert out["ok"] is True
-    assert out["cleared"] == 1
+# clear_all_snoozes db + endpoint + MCP tests moved to test_snooze.py
+# in v0.11.6.
 
 
 # ─── /api/updates/recurring-failures ──────────────────────────────
