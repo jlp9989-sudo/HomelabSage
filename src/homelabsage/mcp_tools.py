@@ -351,8 +351,6 @@ def _tool_explain(_cfg: Config, db: Database, params: dict) -> dict:
     update_id = params.get("update_id")
     if not update_id:
         raise ValueError("update_id is required")
-    if not hasattr(db, "get_explainer"):
-        raise ValueError("explainers mixin not wired into this DB")
     row = db.get_explainer(update_id)
     if row is None:
         raise ValueError(f"no explainer for update_id={update_id!r}")
@@ -434,8 +432,6 @@ def _tool_audit_mute_add(_cfg: Config, db: Database, params: dict) -> dict:
         except ValueError:
             return {"ok": False, "error": "expires_at must be ISO 8601"}
     reason = params.get("reason")
-    if not hasattr(db, "add_audit_mute"):
-        return {"ok": False, "error": "db missing helper"}
     db.add_audit_mute(
         category=params["category"],
         source_kind=params["source_kind"],
@@ -448,8 +444,6 @@ def _tool_audit_mute_add(_cfg: Config, db: Database, params: dict) -> dict:
 
 def _tool_audit_mute_list(_cfg: Config, db: Database, params: dict) -> dict:
     """List audit-finding mutes (active by default)."""
-    if not hasattr(db, "list_audit_mutes"):
-        return {"count": 0, "items": []}
     include_expired = bool(params.get("include_expired") or False)
     rows = db.list_audit_mutes(include_expired=include_expired)
     return {"count": len(rows), "items": rows}
@@ -461,8 +455,6 @@ def _tool_audit_mute_remove(_cfg: Config, db: Database, params: dict) -> dict:
         v = params.get(field)
         if not isinstance(v, str) or not v.strip():
             return {"ok": False, "error": f"{field} is required"}
-    if not hasattr(db, "remove_audit_mute"):
-        return {"ok": False, "error": "db missing helper"}
     ok = db.remove_audit_mute(
         category=params["category"],
         source_kind=params["source_kind"],
@@ -473,8 +465,6 @@ def _tool_audit_mute_remove(_cfg: Config, db: Database, params: dict) -> dict:
 
 def _tool_audit_mute_purge_expired(_cfg: Config, db: Database, _params: dict) -> dict:
     """Drop every audit-mute row whose `expires_at` is in the past."""
-    if not hasattr(db, "purge_expired_audit_mutes"):
-        return {"ok": False, "purged": 0, "error": "db missing helper"}
     n = db.purge_expired_audit_mutes()
     return {"ok": True, "purged": n}
 
@@ -573,8 +563,6 @@ def _tool_is_snoozed(_cfg: Config, db: Database, params: dict) -> dict:
     if not isinstance(update_id, str) or not update_id:
         return {"snoozed": False, "snooze_until": None,
                 "error": "update_id is required"}
-    if not hasattr(db, "get_snooze"):
-        return {"snoozed": False, "snooze_until": None}
     raw = db.get_snooze(update_id)
     if not raw:
         return {"snoozed": False, "snooze_until": None}
@@ -597,8 +585,6 @@ def _tool_is_snoozed(_cfg: Config, db: Database, params: dict) -> dict:
 
 def _tool_list_snoozed(_cfg: Config, db: Database, params: dict) -> dict:
     """List currently-snoozed updates (snooze_until > now)."""
-    if not hasattr(db, "list_snoozed"):
-        return {"count": 0, "items": []}
     limit = max(1, min(int(params.get("limit") or 200), 500))
     rows = db.list_snoozed(limit=limit)
     return {"count": len(rows), "items": rows}
@@ -606,24 +592,18 @@ def _tool_list_snoozed(_cfg: Config, db: Database, params: dict) -> dict:
 
 def _tool_clear_all_snoozes(_cfg: Config, db: Database, _params: dict) -> dict:
     """Clear `snooze_until` on every snoozed update."""
-    if not hasattr(db, "clear_all_snoozes"):
-        return {"ok": False, "cleared": 0, "error": "db missing helper"}
     cleared = db.clear_all_snoozes()
     return {"ok": True, "cleared": cleared}
 
 
 def _tool_clear_pending_dispatches(_cfg: Config, db: Database, _params: dict) -> dict:
     """Drop every row from the pending push-dispatch queue."""
-    if not hasattr(db, "clear_pending_dispatches"):
-        return {"ok": False, "cleared": 0, "error": "db missing helper"}
     cleared = db.clear_pending_dispatches()
     return {"ok": True, "cleared": cleared}
 
 
 def _tool_purge_old_updates(_cfg: Config, db: Database, params: dict) -> dict:
     """Drop APPLIED+DISMISSED updates older than `older_than_days`."""
-    if not hasattr(db, "purge_old_updates"):
-        return {"ok": False, "purged": 0, "error": "db missing helper"}
     days = max(1, int(params.get("older_than_days") or 90))
     dry = bool(params.get("dry_run") or False)
     n = db.purge_old_updates(older_than_days=days, dry_run=dry)
@@ -663,8 +643,6 @@ def _tool_get_explainer(_cfg: Config, db: Database, params: dict) -> dict:
     update_id = params.get("update_id")
     if not isinstance(update_id, str) or not update_id:
         return {"ok": False, "error": "update_id is required"}
-    if not hasattr(db, "get_explainer"):
-        return {"ok": False, "error": "db missing helper"}
     row = db.get_explainer(update_id)
     if row is None:
         return {"ok": False, "error": f"no explainer for {update_id}"}
@@ -678,10 +656,8 @@ def _tool_list_heartbeats(_cfg: Config, db: Database, params: dict) -> dict:
     recent list (default 50, max 500). Summary is the rolling 24h
     success/fail counts already computed by `db.heartbeat_summary`.
     """
-    if not hasattr(db, "list_recent_heartbeats"):
-        return {"summary": {}, "recent": []}
     limit = max(1, min(int(params.get("limit") or 50), 500))
-    summary = db.heartbeat_summary(hours=24) if hasattr(db, "heartbeat_summary") else {}
+    summary = db.heartbeat_summary(hours=24)
     recent = db.list_recent_heartbeats(limit=limit)
     return {"summary": summary, "recent": recent}
 
@@ -815,12 +791,10 @@ def _tool_system_info(cfg: Config, db: Database, _params: dict) -> dict:
     report = build_report(cfg, db)
     snoozed = (
         len(db.list_snoozed(limit=500))
-        if hasattr(db, "list_snoozed") else 0
-    )
+       )
     mutes = (
         len(db.list_audit_mutes())
-        if hasattr(db, "list_audit_mutes") else 0
-    )
+       )
     return {
         "version": __version__,
         "updates_by_status": counts,
@@ -895,8 +869,6 @@ def _tool_snooze_update(_cfg: Config, db: Database, params: dict) -> dict:
 
 def _tool_recurring_failures(_cfg: Config, db: Database, params: dict) -> dict:
     """List updates that have failed N+ times."""
-    if not hasattr(db, "list_recurring_failures"):
-        return {"count": 0, "items": []}
     min_count = max(1, int(params.get("min_count") or 2))
     limit = max(1, min(int(params.get("limit") or 50), 500))
     rows = db.list_recurring_failures(min_count=min_count, limit=limit)
@@ -1001,8 +973,6 @@ def _tool_health_check_results(_cfg: Config, db: Database, params: dict) -> dict
     Returns the failures by default (the actionable set); pass
     `include_ok=true` for the full history.
     """
-    if not hasattr(db, "list_recent_health_checks"):
-        return {"count": 0, "items": []}
     limit = int(params.get("limit") or 100)
     rows = db.list_recent_health_checks(limit=max(1, min(limit, 500)))
     if not params.get("include_ok"):

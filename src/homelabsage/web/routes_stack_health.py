@@ -62,9 +62,7 @@ def register_stack_health_routes(app: FastAPI, cfg: Config, db: Database) -> Non
             state = is_parity_running(mdstat_path=cfg.parity_gate.mdstat_path)
             parity_active, parity_reason = state.running, state.reason
 
-        heartbeat = {}
-        if hasattr(db, "heartbeat_summary"):
-            heartbeat = db.heartbeat_summary(hours=24)
+        heartbeat = db.heartbeat_summary(hours=24)
 
         backup_results: list[dict] = []
         if cfg.backup_health.enabled and cfg.backup_health.repos:
@@ -79,11 +77,10 @@ def register_stack_health_routes(app: FastAPI, cfg: Config, db: Database) -> Non
                 )
                 backup_results.append(h.to_context())
 
-        recent_health_check_fails: list[dict] = []
-        if hasattr(db, "list_recent_health_checks"):
-            for row in db.list_recent_health_checks(limit=50):
-                if not row.get("ok"):
-                    recent_health_check_fails.append(row)
+        recent_health_check_fails: list[dict] = [
+            row for row in db.list_recent_health_checks(limit=50)
+            if not row.get("ok")
+        ]
 
         return {
             "version": __version__,

@@ -715,12 +715,9 @@ def build_report(
         backup_report = BackupHealthReport(results=results)
     findings.extend(_backup_health_findings(backup_report))
 
-    # Post-update regressions + log anomalies — read from their tables when
-    # the DB exposes them (no-op when the mixins aren't wired in).
-    if hasattr(db, "list_recent_health_checks"):
-        findings.extend(_health_check_findings(db.list_recent_health_checks(limit=200)))
-    if hasattr(db, "list_recent_log_anomalies"):
-        findings.extend(_log_anomaly_findings(db.list_recent_log_anomalies(limit=200)))
+    # Post-update regressions + log anomalies — read from their tables.
+    findings.extend(_health_check_findings(db.list_recent_health_checks(limit=200)))
+    findings.extend(_log_anomaly_findings(db.list_recent_log_anomalies(limit=200)))
 
     # Compose linter — same scan paths as the cascade detector so the
     # user doesn't configure two lists. No-op when paths empty.
@@ -756,23 +753,21 @@ def build_report(
     # Recurring failures — updates the user has retried + failed
     # multiple times. Surfaces as a finding so they stop bashing the
     # same wall.
-    if hasattr(db, "list_recurring_failures"):
-        findings.extend(_recurring_failure_findings(
-            db.list_recurring_failures(min_count=2),
-        ))
+    findings.extend(_recurring_failure_findings(
+        db.list_recurring_failures(min_count=2),
+    ))
 
     # Audit-mute filter (v0.8.1). The user can mute findings by their
     # stable `(category, source_kind, source_ref)` fingerprint. Mutes
     # apply AFTER every detector runs so they can't accidentally hide
     # a finding that didn't exist when the mute was set (the user
     # picks fingerprints they've actually seen).
-    if hasattr(db, "active_audit_mute_keys"):
-        muted = db.active_audit_mute_keys()
-        if muted:
-            findings = [
-                f for f in findings
-                if (f.category, f.source_kind, f.source_ref) not in muted
-            ]
+    muted = db.active_audit_mute_keys()
+    if muted:
+        findings = [
+            f for f in findings
+            if (f.category, f.source_kind, f.source_ref) not in muted
+        ]
 
     # Severity first (critical → info), then category alphabetical so the
     # same input always produces the same output.

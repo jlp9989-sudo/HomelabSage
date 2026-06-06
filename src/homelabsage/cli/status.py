@@ -49,10 +49,7 @@ def status_cmd(
     # Pending dispatch queue
     pending = len(db.list_pending_dispatches())
 
-    # Snooze count (best-effort — helper added in v0.7.2)
-    snoozed = 0
-    if hasattr(db, "list_snoozed"):
-        snoozed = len(db.list_snoozed(limit=500))
+    snoozed = len(db.list_snoozed(limit=500))
 
     console.print(
         f"[bold]HomelabSage v{__version__}[/bold]"

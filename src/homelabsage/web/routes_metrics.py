@@ -94,16 +94,15 @@ def _render_metrics(cfg: Config, db: Database) -> str:
         )
 
     # Heartbeats — 24h success/failure
-    if hasattr(db, "heartbeat_summary"):
-        hb = db.heartbeat_summary(hours=24)
-        lines.append("\n# HELP homelabsage_heartbeats_total Heartbeat pings 24h")
-        lines.append("# TYPE homelabsage_heartbeats_total counter")
-        lines.append(
-            f'homelabsage_heartbeats_total{{ok="true"}} {hb.get("succeeded") or 0}'
-        )
-        lines.append(
-            f'homelabsage_heartbeats_total{{ok="false"}} {hb.get("failed") or 0}'
-        )
+    hb = db.heartbeat_summary(hours=24)
+    lines.append("\n# HELP homelabsage_heartbeats_total Heartbeat pings 24h")
+    lines.append("# TYPE homelabsage_heartbeats_total counter")
+    lines.append(
+        f'homelabsage_heartbeats_total{{ok="true"}} {hb.get("succeeded") or 0}'
+    )
+    lines.append(
+        f'homelabsage_heartbeats_total{{ok="false"}} {hb.get("failed") or 0}'
+    )
 
     # LLM usage 30d
     summary = db.usage_summary(days=30)

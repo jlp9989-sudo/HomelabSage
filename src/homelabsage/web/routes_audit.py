@@ -25,10 +25,7 @@ def register_audit_routes(app: FastAPI, cfg: Config, db: Database, env: Environm
     async def audit_page() -> HTMLResponse:
         report = build_report(cfg, db)
         body_md = render_markdown(report)
-        active_mutes = (
-            db.list_audit_mutes(include_expired=False)
-            if hasattr(db, "list_audit_mutes") else []
-        )
+        active_mutes = db.list_audit_mutes(include_expired=False)
         tmpl = env.get_template("audit.html")
         return HTMLResponse(
             tmpl.render(report=report, body_md=body_md, active_mutes=active_mutes),

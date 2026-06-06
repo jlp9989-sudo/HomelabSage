@@ -2,6 +2,50 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.11.2 — 2026-06-06
+
+Refactor pass #3: **dead-code cleanup**. All 41 `hasattr(db, X)`
+defensive guards stripped — every method probed lives on a mixin
+that `Database` always inherits. No behavioural change.
+
+### Refactored
+
+- 17 sites in `mcp_tools.py` (`_tool_*` impls) lose their
+  `if not hasattr(db, …): raise/return` blocks. The mixin
+  composition in `db/__init__.py:48` guarantees the methods exist.
+- 12 sites in `web/routes_updates.py` lose `hasattr(db, …) else`
+  ternaries — the view-context block goes from 12 fragmented lines
+  to a tight comprehension.
+- 5 sites in `web/routes_audit.py`, `web/routes_stack_health.py`,
+  `web/routes_metrics.py`, `cli/status.py` lose their fallbacks.
+- 4 sites in `audit.py` lose the noop branches around
+  `list_recent_health_checks`, `list_recent_log_anomalies`,
+  `list_recurring_failures`, `active_audit_mute_keys`.
+- The legacy "Database stub" `toggle_starred` fallback in
+  `routes_updates.toggle_star_html` deleted: there is no stub DB,
+  the read-then-write fallback was dead.
+
+### Why this is safe
+
+- `Database(UpdatesMixin, InterviewMixin, WatchedMixin, PendingMixin,
+  ExplainersMixin, UsageMixin, HealthCheckMixin, LogAnomalyMixin,
+  HeartbeatsMixin, AuditMutesMixin)` (db/__init__.py:48) is the
+  single concrete instance in the codebase.
+- mypy now catches typos in DB method names that were previously
+  silently swallowed by `hasattr(db, "typoed_name")` → False branch.
+
+### Internal
+
+- 1725 → 1725 tests (no net change; behaviour preserved).
+- Ruff clean, 0 mypy errors against 181 source files.
+- The three refactor passes (v0.11.0 ABC + v0.11.1 mcp split +
+  v0.11.2 hasattr strip) together close 6 of the 10 code-quality
+  findings from the 6-jun audit: #1 (output dup), #2 (mcp god
+  module), #6 (hasattr guards), plus the related sub-findings #8
+  (batch dup), #10 (settings_test mirror), and most of #7 (inline
+  imports). Findings #3-#5 + #9 (engine god-fn, audit cascade,
+  routes_updates split, test reorg) remain for future passes.
+
 ## v0.11.1 — 2026-06-06
 
 Refactor pass #2: **`mcp.py` split**. The 1831-line god module is

@@ -136,28 +136,18 @@ def register_updates_routes(
 
         # Pre-compute per-update star + snooze hints so the template
         # can render the right button state without per-row DB hits.
-        starred_ids: set[str] = set()
-        snoozed_until: dict[str, str] = {}
-        if hasattr(db, "list_starred"):
-            starred_ids = {it.id for it in db.list_starred(limit=500)}
-        if hasattr(db, "list_snoozed"):
-            for row in db.list_snoozed(limit=500):
-                snoozed_until[row["id"]] = row["snooze_until"]
-        explained_ids: set[str] = (
-            db.list_explained_ids() if hasattr(db, "list_explained_ids") else set()
-        )
-        notes_by_id: dict[str, str] = (
-            db.list_user_notes() if hasattr(db, "list_user_notes") else {}
-        )
-        # Pill counts query COUNT(*) directly so they stay accurate beyond
-        # the 500-row list cap. Fall back to set size for stub DBs lacking
-        # the count helpers.
-        starred_count = (
-            db.count_starred() if hasattr(db, "count_starred") else len(starred_ids)
-        )
-        snoozed_count = (
-            db.count_snoozed() if hasattr(db, "count_snoozed") else len(snoozed_until)
-        )
+        starred_ids: set[str] = {
+            it.id for it in db.list_starred(limit=500)
+        }
+        snoozed_until: dict[str, str] = {
+            row["id"]: row["snooze_until"]
+            for row in db.list_snoozed(limit=500)
+        }
+        explained_ids: set[str] = db.list_explained_ids()
+        notes_by_id: dict[str, str] = db.list_user_notes()
+        # COUNT(*) helpers stay accurate beyond the 500-row list cap.
+        starred_count = db.count_starred()
+        snoozed_count = db.count_snoozed()
 
         # Filter views (header pill links). Default `""` = all updates.
         if filter == "starred":
@@ -215,26 +205,16 @@ def register_updates_routes(
         )
         starred_ids: set[str] = set()
         snoozed_until: dict[str, str] = {}
-        if hasattr(db, "list_starred"):
-            starred_ids = {it.id for it in db.list_starred(limit=500)}
-        if hasattr(db, "list_snoozed"):
-            for row in db.list_snoozed(limit=500):
-                snoozed_until[row["id"]] = row["snooze_until"]
-        explained_ids: set[str] = (
-            db.list_explained_ids() if hasattr(db, "list_explained_ids") else set()
-        )
-        notes_by_id: dict[str, str] = (
-            db.list_user_notes() if hasattr(db, "list_user_notes") else {}
-        )
+        starred_ids = {it.id for it in db.list_starred(limit=500)}
+        for row in db.list_snoozed(limit=500):
+            snoozed_until[row["id"]] = row["snooze_until"]
+        explained_ids: set[str] = db.list_explained_ids()
+        notes_by_id: dict[str, str] = db.list_user_notes()
         counts = {s.value: 0 for s in UpdateStatus}
         for it in items:
             counts[it.status.value] += 1
-        starred_count = (
-            db.count_starred() if hasattr(db, "count_starred") else len(starred_ids)
-        )
-        snoozed_count = (
-            db.count_snoozed() if hasattr(db, "count_snoozed") else len(snoozed_until)
-        )
+        starred_count = db.count_starred()
+        snoozed_count = db.count_snoozed()
         tmpl = env.get_template("index.html")
         return HTMLResponse(
             tmpl.render(
@@ -317,13 +297,7 @@ def register_updates_routes(
         404 if the row is missing rather than rendering a happy button for
         an id that doesn't exist.
         """
-        new = db.toggle_starred(update_id) if hasattr(db, "toggle_starred") else None
-        if new is None and not hasattr(db, "toggle_starred"):
-            # Legacy DB stub path — preserve old read-then-write behaviour.
-            if db.get(update_id) is None:
-                raise HTTPException(404, f"no update with id={update_id}")
-            new = not db.is_starred(update_id)
-            db.set_starred(update_id, new)
+        new = db.toggle_starred(update_id)
         if new is None:
             raise HTTPException(404, f"no update with id={update_id}")
         icon = "★" if new else "☆"
@@ -493,8 +467,6 @@ def register_updates_routes(
         min_count: int = 2, limit: int = 100,
     ) -> dict:
         """Updates that have flipped to FAILED at least `min_count` times."""
-        if not hasattr(db, "list_recurring_failures"):
-            return {"count": 0, "items": []}
         m = max(1, min_count)
         cap = max(1, min(limit, 500))
         rows = await asyncio.to_thread(
