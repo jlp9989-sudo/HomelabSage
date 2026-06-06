@@ -2,6 +2,26 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.11.8 — 2026-06-06
+
+Refactor pass #9 (wave 3 of test reorg #9): **audit-history tests
+consolidated**. 44 tests covering history append/load/list/diff/prune,
+`/api/audit/{diff,history,history.jsonl}`, MCP
+audit_history+audit_diff+audit_prune, audit_alert webhook, and CLI
+`--severity` + `--diff-only` filters now live in
+`tests/test_audit_history.py`.
+
+Source files:
+- `test_v074.py` deleted (was 100% audit history + alerts).
+- `test_v077.py` deleted (was 100% MCP audit_prune + history.jsonl +
+  audit --diff-only).
+- `test_v073.py` slimmed to init wizard only.
+- `test_v075.py` slimmed to compose-graph CLI + render_mermaid only.
+- `test_v076.py` slimmed to MCP compose_graph_mermaid +
+  /api/updates/recurring-failures only.
+
+1725 → 1725 tests. Ruff clean, 0 mypy errors / 183 source files.
+
 ## v0.11.7 — 2026-06-06
 
 Refactor pass #8 (wave 2 of test reorg #9): **doctor tests

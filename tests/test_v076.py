@@ -1,27 +1,16 @@
-"""Tests for v0.7.6: audit-prune, MCP compose_graph_mermaid + clear_all_snoozes,
-/api/updates/recurring-failures + DELETE /api/updates/snoozed, doctor --severity-floor."""
+"""Tests for v0.7.6: MCP compose_graph_mermaid + /api/updates/recurring-failures.
+
+audit-prune (db + CLI), clear_all_snoozes, and doctor --severity-floor
+tests moved to test_audit_history.py, test_snooze.py, and test_doctor.py
+respectively in v0.11.6 / v0.11.7 / v0.11.8.
+"""
 
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from typer.testing import CliRunner
 
-from homelabsage.audit_history import FILE_NAME, append, prune
-from homelabsage.cli import app
 from homelabsage.config import Config
 from homelabsage.db import Database
-
-
-def _report(findings: list[dict] | None = None, *,
-            generated_at: str = "2026-06-04T12:00:00Z"):
-    fs = findings or []
-    return {
-        "generated_at": generated_at,
-        "healthy": not fs,
-        "counts_by_severity": {"medium": len(fs)} if fs else {},
-        "counts_by_category": {},
-        "findings": fs,
-    }
 
 
 def _seed_update(db, *, source="x", subject="y"):
@@ -34,72 +23,6 @@ def _seed_update(db, *, source="x", subject="y"):
     )
     db.upsert(item)
     return item
-
-
-# ─── audit_history.prune ──────────────────────────────────────────
-
-
-def test_prune_drops_oldest(tmp_path):
-    notes = tmp_path / "notes"
-    for i in range(10):
-        append(notes, _report(generated_at=f"2026-06-{i+1:02d}T00:00:00Z"))
-    dropped = prune(notes, keep_last=3)
-    assert dropped == 7
-    body = (notes / FILE_NAME).read_text().strip().splitlines()
-    assert len(body) == 3
-
-
-def test_prune_noop_when_within_cap(tmp_path):
-    notes = tmp_path / "notes"
-    append(notes, _report())
-    assert prune(notes, keep_last=10) == 0
-
-
-def test_prune_missing_file_returns_zero(tmp_path):
-    assert prune(tmp_path / "missing", keep_last=10) == 0
-
-
-def test_prune_keep_zero_truncates(tmp_path):
-    notes = tmp_path / "notes"
-    for i in range(3):
-        append(notes, _report(generated_at=f"2026-06-{i+1:02d}T00:00:00Z"))
-    dropped = prune(notes, keep_last=0)
-    assert dropped == 3
-    assert (notes / FILE_NAME).read_text() == ""
-
-
-def test_prune_rejects_negative_keep(tmp_path):
-    notes = tmp_path / "notes"
-    append(notes, _report())
-    assert prune(notes, keep_last=-1) == 0
-
-
-# ─── audit-prune CLI ──────────────────────────────────────────────
-
-
-def test_cli_audit_prune(tmp_path):
-    cfg_path = tmp_path / "config.yaml"
-    notes_dir = tmp_path / "notes"
-    db_path = tmp_path / "h.db"
-    cfg_path.write_text(
-        f"""storage:
-  database_path: {db_path}
-llm:
-  endpoint: ""
-notes:
-  notes_dir: {notes_dir}
-""",
-    )
-    for i in range(5):
-        append(notes_dir, _report(generated_at=f"2026-06-{i+1:02d}T00:00:00Z"))
-    runner = CliRunner()
-    result = runner.invoke(
-        app, ["audit-prune", "--config", str(cfg_path), "--keep", "2"],
-    )
-    assert result.exit_code == 0
-    assert "Pruned 3" in result.stdout
-    remaining = (notes_dir / FILE_NAME).read_text().strip().splitlines()
-    assert len(remaining) == 2
 
 
 # ─── MCP compose_graph_mermaid ────────────────────────────────────
@@ -136,10 +59,6 @@ def test_mcp_compose_graph_mermaid_no_paths():
     assert "no compose scan paths" in out["reason"]
 
 
-# clear_all_snoozes db + endpoint + MCP tests moved to test_snooze.py
-# in v0.11.6.
-
-
 # ─── /api/updates/recurring-failures ──────────────────────────────
 
 
@@ -162,6 +81,3 @@ def test_api_recurring_failures(tmp_path):
     body = r.json()
     assert body["count"] == 1
     assert body["items"][0]["failure_count"] == 3
-
-
-# doctor --severity-floor tests moved to test_doctor.py in v0.11.7.
