@@ -1,6 +1,17 @@
-"""Tests for v0.8.1: audit_mutes (db + filter + CLI + HTTP + MCP)."""
+"""Audit mutes: DB CRUD + filter + CLI + HTTP + MCP.
+
+Consolidates the audit-mute surface from 2 release-pinned files in
+v0.11.9:
+  - v0.8.1: db.add_audit_mute/list/remove + build_report filter +
+    CLI audit-mute add/list/remove + /api/audit/mutes + MCP
+    audit_mute_add/list/remove
+  - v0.8.2: CLI audit-mute purge-expired + add-from-stdin (bulk) +
+    MCP audit_mute_purge_expired + DELETE /api/audit/mutes/expired
+"""
 
 from __future__ import annotations
+
+import json
 
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
@@ -9,7 +20,23 @@ from homelabsage.cli import app
 from homelabsage.config import Config
 from homelabsage.db import Database
 
-# ─── db.add_audit_mute / list / remove ─────────────────────────────
+# ─── shared helpers ───────────────────────────────────────────────
+
+
+def _config_for_cli(tmp_path):
+    cfg_path = tmp_path / "config.yaml"
+    db_path = tmp_path / "h.db"
+    cfg_path.write_text(
+        f"""storage:
+  database_path: {db_path}
+llm:
+  endpoint: ""
+""",
+    )
+    return cfg_path, db_path
+
+
+# ─── db: add / list / remove / active_keys / purge_expired ────────
 
 
 def test_add_and_list_audit_mute(tmp_path):
@@ -129,24 +156,11 @@ def test_build_report_filters_muted_fingerprints(tmp_path):
     assert not any(f.category == "abandoned" for f in rep_after.findings)
 
 
-# ─── CLI: homelabsage audit-mute add/list/remove ──────────────────
-
-
-def _config_for_cli(tmp_path):
-    cfg_path = tmp_path / "config.yaml"
-    db_path = tmp_path / "h.db"
-    cfg_path.write_text(
-        f"""storage:
-  database_path: {db_path}
-llm:
-  endpoint: ""
-""",
-    )
-    return cfg_path, db_path
+# ─── CLI: audit-mute add / list / remove ──────────────────────────
 
 
 def test_cli_audit_mute_add_and_list(tmp_path):
-    cfg_path, db_path = _config_for_cli(tmp_path)
+    cfg_path, _db_path = _config_for_cli(tmp_path)
     runner = CliRunner()
     r = runner.invoke(
         app, [
@@ -194,7 +208,109 @@ def test_cli_audit_mute_add_rejects_bad_relative(tmp_path):
     assert r.exit_code != 0
 
 
-# ─── HTTP /api/audit/mutes ─────────────────────────────────────────
+# ─── CLI: audit-mute purge-expired ────────────────────────────────
+
+
+def test_cli_audit_mute_purge_expired(tmp_path):
+    cfg_path, db_path = _config_for_cli(tmp_path)
+    db = Database(str(db_path))
+    db.add_audit_mute(
+        category="a", source_kind="a", source_ref="r",
+        expires_at="2020-01-01T00:00:00+00:00",
+    )
+    db.add_audit_mute(
+        category="b", source_kind="b", source_ref="r",
+        expires_at="2199-01-01T00:00:00+00:00",
+    )
+    db.close()
+    runner = CliRunner()
+    r = runner.invoke(
+        app, ["audit-mute", "purge-expired", "--config", str(cfg_path)],
+    )
+    assert r.exit_code == 0
+    assert "Purged 1" in r.stdout
+    db = Database(str(db_path))
+    rows = db.list_audit_mutes(include_expired=True)
+    assert {row["category"] for row in rows} == {"b"}
+
+
+def test_cli_audit_mute_purge_expired_noop(tmp_path):
+    cfg_path, _db_path = _config_for_cli(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(
+        app, ["audit-mute", "purge-expired", "--config", str(cfg_path)],
+    )
+    assert r.exit_code == 0
+    assert "Nothing to purge" in r.stdout
+
+
+# ─── CLI: audit-mute add-from-stdin (bulk) ────────────────────────
+
+
+def test_cli_audit_mute_add_from_stdin_bulk(tmp_path):
+    cfg_path, db_path = _config_for_cli(tmp_path)
+    runner = CliRunner()
+    stdin = "\n".join([
+        json.dumps({"category": "cve", "source_kind": "cve",
+                    "source_ref": "x@1", "severity": "high"}),
+        json.dumps({"category": "cve", "source_kind": "cve",
+                    "source_ref": "y@2", "severity": "medium"}),
+        json.dumps({"category": "compose_override",
+                    "source_kind": "compose_override",
+                    "source_ref": "/stacks/a"}),
+        "",  # blank line ignored
+    ]) + "\n"
+    r = runner.invoke(
+        app, [
+            "audit-mute", "add-from-stdin",
+            "--config", str(cfg_path),
+            "--for", "30d", "--reason", "bulk",
+        ],
+        input=stdin,
+    )
+    assert r.exit_code == 0, r.stdout
+    assert "Muted 3 fingerprint" in r.stdout
+    db = Database(str(db_path))
+    assert len(db.list_audit_mutes()) == 3
+
+
+def test_cli_audit_mute_add_from_stdin_skips_malformed(tmp_path):
+    cfg_path, _db_path = _config_for_cli(tmp_path)
+    runner = CliRunner()
+    stdin = "\n".join([
+        "not json at all",
+        json.dumps({"category": "x"}),                       # missing fields
+        json.dumps(["not", "a", "dict"]),                    # wrong shape
+        json.dumps({"category": "ok", "source_kind": "k",
+                    "source_ref": "r"}),                     # valid
+    ]) + "\n"
+    r = runner.invoke(
+        app, [
+            "audit-mute", "add-from-stdin",
+            "--config", str(cfg_path),
+        ],
+        input=stdin,
+    )
+    assert r.exit_code == 0
+    assert "Muted 1" in r.stdout
+    assert "Skipped 3" in r.stdout
+
+
+def test_cli_audit_mute_add_from_stdin_rejects_bad_for(tmp_path):
+    cfg_path, _ = _config_for_cli(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(
+        app, [
+            "audit-mute", "add-from-stdin",
+            "--config", str(cfg_path),
+            "--for", "garbage",
+        ],
+        input="",
+    )
+    assert r.exit_code != 0
+
+
+# ─── HTTP: /api/audit/mutes + /expired ────────────────────────────
 
 
 def test_api_audit_mutes_post_get_delete(tmp_path):
@@ -259,7 +375,28 @@ def test_api_audit_mutes_post_requires_fields(tmp_path):
     assert r.status_code == 400
 
 
-# ─── MCP audit_mute_add/list/remove ────────────────────────────────
+def test_api_audit_mutes_purge_expired(tmp_path):
+    from homelabsage.web import create_app
+    cfg = Config()
+    cfg.storage.database_path = str(tmp_path / "t.db")
+    db = Database(cfg.storage.database_path)
+    db.add_audit_mute(
+        category="a", source_kind="a", source_ref="r",
+        expires_at="2020-01-01T00:00:00+00:00",
+    )
+    db.add_audit_mute(
+        category="b", source_kind="b", source_ref="r",
+        expires_at="2199-01-01T00:00:00+00:00",
+    )
+    client = TestClient(create_app(cfg))
+    r = client.delete("/api/audit/mutes/expired")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["purged"] == 1
+
+
+# ─── MCP: audit_mute_add / list / remove / purge_expired ──────────
 
 
 def test_mcp_audit_mute_add_list_remove(tmp_path):
@@ -302,3 +439,27 @@ def test_mcp_audit_mute_add_requires_fields(tmp_path):
     add = TOOLS["audit_mute_add"]["impl"]
     out = add(cfg, db, {"category": "x"})
     assert out["ok"] is False
+
+
+def test_mcp_audit_mute_purge_expired(tmp_path):
+    from homelabsage.mcp import TOOLS
+    cfg = Config()
+    db = Database(str(tmp_path / "t.db"))
+    db.add_audit_mute(
+        category="a", source_kind="a", source_ref="r",
+        expires_at="2020-01-01T00:00:00+00:00",
+    )
+    impl = TOOLS["audit_mute_purge_expired"]["impl"]
+    out = impl(cfg, db, {})
+    assert out["ok"] is True
+    assert out["purged"] == 1
+
+
+def test_mcp_audit_mute_purge_expired_when_empty(tmp_path):
+    from homelabsage.mcp import TOOLS
+    cfg = Config()
+    db = Database(str(tmp_path / "t.db"))
+    impl = TOOLS["audit_mute_purge_expired"]["impl"]
+    out = impl(cfg, db, {})
+    assert out["ok"] is True
+    assert out["purged"] == 0

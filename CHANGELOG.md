@@ -2,6 +2,21 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.11.9 — 2026-06-06
+
+Refactor pass #10 (wave 4 of test reorg #9): **audit-mute tests
+consolidated**. 24 tests covering db CRUD + active_keys + purge_expired,
+build_report mute filter, CLI audit-mute add/list/remove/purge-expired/
+add-from-stdin, /api/audit/mutes + /expired, MCP
+audit_mute_add/list/remove/purge_expired now live in
+`tests/test_audit_mutes.py`.
+
+Source files:
+- `test_v081.py` deleted (was 100% audit-mute).
+- `test_v082.py` slimmed to MCP audit_categories only.
+
+1725 → 1725 tests. Ruff clean, 0 mypy errors / 183 source files.
+
 ## v0.11.8 — 2026-06-06
 
 Refactor pass #9 (wave 3 of test reorg #9): **audit-history tests
