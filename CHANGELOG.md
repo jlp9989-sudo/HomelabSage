@@ -2,6 +2,46 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.11.5 — 2026-06-06
+
+Refactor pass #6: **`audit.build_report` cascade → registry**. Audit
+finding #4 closed. The 17-block `findings.extend(_X_findings(...))`
+cascade is gone; 8 inline `from .X import Y` imports hoisted to
+module top. Adding a new per-update detector is now a one-line edit
+to `_PER_UPDATE_DETECTORS`.
+
+### Refactored
+
+- `_PER_UPDATE_DETECTORS: list[Callable[[AnalyzedUpdate], …]]` —
+  registry of 11 unconditional detectors. Iterated once per
+  non-applied/dismissed update.
+- `_collect_per_update_findings(cfg, item)` — runs every registered
+  detector + tag-lag (config-gated, so it stays outside the
+  unconditional registry).
+- `_collect_state_findings(cfg, db, backup_report)` — runs the
+  non-per-update probes (pending dispatches, parity, backup health,
+  health checks, log anomalies, compose lint, disk pressure, compose
+  override, env perms, recurring failures).
+- `_state_parity(cfg)` + `_state_backup_health(cfg, backup_report)`
+  extracted to named helpers (the only state probes with non-trivial
+  setup).
+- `_apply_audit_mutes(db, findings)` — extracted from `build_report`.
+- 8 inline imports hoisted: `audit_alert`, `audit_history` (×2),
+  `backup_health`, `compose_lint`, `compose_override`,
+  `disk_pressure`, `env_perms`, `tag_lag`. None were anti-circular —
+  verified by import graph.
+- `build_report` now reads as a linear script: per-update loop →
+  state findings → mutes → sort + counts → AuditReport.
+
+### Internal
+
+- 1725 → 1725 tests (no behavioural change). Ruff clean, 0 mypy
+  errors against 183 source files.
+- Six refactor passes since v0.10.7 close 9 of the 10 code-quality
+  findings from the 6-jun audit. Only #9 remains (tests organised
+  by release file instead of by feature) — explicitly deferred as
+  a separate sprint per the audit memo; doesn't block v1.0.
+
 ## v0.11.4 — 2026-06-06
 
 Refactor pass #5: **`engine.run_once` split**. Audit finding #3

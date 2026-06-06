@@ -28,15 +28,25 @@ hallucinations on facts that are already concrete.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ._time import utcnow
+from .audit_alert import fire_if_new
+from .audit_history import append as append_history
+from .audit_history import diff_against_latest
+from .backup_health import BackupHealthReport, probe_repo
+from .compose_lint import lint_paths
+from .compose_override import scan as scan_overrides
 from .config import Config
 from .db import Database
+from .disk_pressure import evaluate as eval_disk
+from .env_perms import scan as scan_env_perms
 from .models import AnalyzedUpdate, UpdateStatus
 from .parity import is_parity_running
+from .tag_lag import derive_tag_lag
 
 log = logging.getLogger(__name__)
 
@@ -361,7 +371,6 @@ def _tag_lag_findings(
     ctx = item.update.context or {}
     if "remote_pushed_at" not in ctx and "local_pulled_at" not in ctx:
         return []
-    from .tag_lag import derive_tag_lag
     lag = derive_tag_lag(
         ctx,
         warn_after_days=warn_after_days,
@@ -648,6 +657,121 @@ def _disk_pressure_findings(findings_in: list) -> list[AuditFinding]:
 _SEVERITY_ORDER = {"critical": 3, "high": 2, "medium": 1, "info": 0}
 
 
+# Registry of unconditional per-update detectors. Each takes the
+# AnalyzedUpdate and returns 0..N findings. To add a detector, drop
+# its `_X_findings` helper in this list — no edits to `build_report`.
+_PER_UPDATE_DETECTORS: list[
+    Callable[[AnalyzedUpdate], list[AuditFinding]]
+] = [
+    _cve_findings,
+    _abandoned_findings,
+    _orphan_findings,
+    _alternative_findings,
+    _bloatware_findings,
+    _container_age_findings,
+    _restart_freq_findings,
+    _healthcheck_stale_findings,
+    _exposed_ports_findings,
+    _oom_killed_findings,
+    _network_mode_host_findings,
+]
+
+
+def _collect_per_update_findings(
+    cfg: Config, item: AnalyzedUpdate,
+) -> list[AuditFinding]:
+    """Run every per-update detector. Tag-lag is gated by config so it
+    stays outside the unconditional registry."""
+    found: list[AuditFinding] = []
+    for detector in _PER_UPDATE_DETECTORS:
+        found.extend(detector(item))
+    if cfg.tag_lag.enabled:
+        found.extend(_tag_lag_findings(
+            item,
+            warn_after_days=cfg.tag_lag.warn_after_days,
+            critical_after_days=cfg.tag_lag.critical_after_days,
+        ))
+    return found
+
+
+def _state_parity(cfg: Config) -> list[AuditFinding]:
+    active, reason = False, ""
+    if cfg.parity_gate.enabled:
+        state = is_parity_running(mdstat_path=cfg.parity_gate.mdstat_path)
+        active, reason = state.running, state.reason
+    return _parity_findings(active, reason)
+
+
+def _state_backup_health(
+    cfg: Config, backup_report: object | None,
+) -> list[AuditFinding]:
+    """Backup health: prefer the engine-provided cached report; fall back
+    to a fresh probe so `homelabsage audit` works without a scan."""
+    if backup_report is None and cfg.backup_health.enabled and cfg.backup_health.repos:
+        results = [
+            probe_repo(
+                name=repo.name, tool=repo.tool, env=repo.env,
+                binary=(repo.binary or None),
+                warn_after_days=repo.warn_after_days,
+                critical_after_days=repo.critical_after_days,
+                timeout=float(repo.timeout_seconds),
+            )
+            for repo in cfg.backup_health.repos
+        ]
+        backup_report = BackupHealthReport(results=results)
+    return _backup_health_findings(backup_report)
+
+
+def _collect_state_findings(
+    cfg: Config, db: Database, backup_report: object | None,
+) -> list[AuditFinding]:
+    """Run state-level (non-per-update) detectors. Order matters only
+    insofar as the final sort is stable on category+title for ties."""
+    found: list[AuditFinding] = []
+    found.extend(_pending_dispatch_findings(db.list_pending_dispatches()))
+    found.extend(_state_parity(cfg))
+    found.extend(_state_backup_health(cfg, backup_report))
+    found.extend(_health_check_findings(db.list_recent_health_checks(limit=200)))
+    found.extend(_log_anomaly_findings(db.list_recent_log_anomalies(limit=200)))
+    if cfg.sources.docker.compose_scan_paths and cfg.compose_lint.enabled:
+        found.extend(_compose_lint_findings(
+            lint_paths(cfg.sources.docker.compose_scan_paths),
+        ))
+    if cfg.disk_pressure.enabled and cfg.disk_pressure.paths:
+        found.extend(_disk_pressure_findings(
+            eval_disk(cfg.disk_pressure.paths),
+        ))
+    if (cfg.sources.docker.detect_compose_override
+            and cfg.sources.docker.compose_scan_paths):
+        found.extend(_compose_override_findings(
+            scan_overrides(cfg.sources.docker.compose_scan_paths),
+        ))
+    if cfg.sources.docker.compose_scan_paths:
+        found.extend(_env_perm_findings(
+            scan_env_perms(cfg.sources.docker.compose_scan_paths),
+        ))
+    found.extend(_recurring_failure_findings(
+        db.list_recurring_failures(min_count=2),
+    ))
+    return found
+
+
+def _apply_audit_mutes(
+    db: Database, findings: list[AuditFinding],
+) -> list[AuditFinding]:
+    """The user can mute findings by their stable
+    `(category, source_kind, source_ref)` fingerprint. Mutes apply
+    AFTER every detector runs so they can't accidentally hide a finding
+    that didn't exist when the mute was set."""
+    muted = db.active_audit_mute_keys()
+    if not muted:
+        return findings
+    return [
+        f for f in findings
+        if (f.category, f.source_kind, f.source_ref) not in muted
+    ]
+
+
 def build_report(
     cfg: Config, db: Database, *, limit: int = 500,
     backup_report: object | None = None,
@@ -662,112 +786,15 @@ def build_report(
     the auditor runs its own probe lazily so the CLI works standalone.
     """
     findings: list[AuditFinding] = []
-    items = db.list(limit=limit)
-    for it in items:
+    for it in db.list(limit=limit):
         # Audit IGNORES applied / dismissed updates — those are decisions
         # already made, surfacing them again is noise.
         if it.status in (UpdateStatus.APPLIED, UpdateStatus.DISMISSED):
             continue
-        findings.extend(_cve_findings(it))
-        findings.extend(_abandoned_findings(it))
-        findings.extend(_orphan_findings(it))
-        findings.extend(_alternative_findings(it))
-        findings.extend(_bloatware_findings(it))
-        findings.extend(_container_age_findings(it))
-        # v0.9.3: surface detectors that previously only attached
-        # context for the LLM analyzer — now they're first-class
-        # audit findings too.
-        findings.extend(_restart_freq_findings(it))
-        findings.extend(_healthcheck_stale_findings(it))
-        findings.extend(_exposed_ports_findings(it))
-        # v0.9.4
-        findings.extend(_oom_killed_findings(it))
-        findings.extend(_network_mode_host_findings(it))
-        if cfg.tag_lag.enabled:
-            findings.extend(_tag_lag_findings(
-                it,
-                warn_after_days=cfg.tag_lag.warn_after_days,
-                critical_after_days=cfg.tag_lag.critical_after_days,
-            ))
+        findings.extend(_collect_per_update_findings(cfg, it))
 
-    # State-level signals — not per-update.
-    findings.extend(_pending_dispatch_findings(db.list_pending_dispatches()))
-
-    parity_active, parity_reason = False, ""
-    if cfg.parity_gate.enabled:
-        state = is_parity_running(mdstat_path=cfg.parity_gate.mdstat_path)
-        parity_active, parity_reason = state.running, state.reason
-    findings.extend(_parity_findings(parity_active, parity_reason))
-
-    # Backup health: prefer the engine-provided cached report; fall back
-    # to a fresh probe so `homelabsage audit` works without a scan.
-    if backup_report is None and cfg.backup_health.enabled and cfg.backup_health.repos:
-        from .backup_health import BackupHealthReport, probe_repo
-        results = []
-        for repo in cfg.backup_health.repos:
-            results.append(probe_repo(
-                name=repo.name, tool=repo.tool, env=repo.env,
-                binary=(repo.binary or None),
-                warn_after_days=repo.warn_after_days,
-                critical_after_days=repo.critical_after_days,
-                timeout=float(repo.timeout_seconds),
-            ))
-        backup_report = BackupHealthReport(results=results)
-    findings.extend(_backup_health_findings(backup_report))
-
-    # Post-update regressions + log anomalies — read from their tables.
-    findings.extend(_health_check_findings(db.list_recent_health_checks(limit=200)))
-    findings.extend(_log_anomaly_findings(db.list_recent_log_anomalies(limit=200)))
-
-    # Compose linter — same scan paths as the cascade detector so the
-    # user doesn't configure two lists. No-op when paths empty.
-    if cfg.sources.docker.compose_scan_paths and cfg.compose_lint.enabled:
-        from .compose_lint import lint_paths
-        lint_report = lint_paths(cfg.sources.docker.compose_scan_paths)
-        findings.extend(_compose_lint_findings(lint_report))
-
-    # Disk-pressure probe — opt-in; the user lists the filesystems
-    # whose free-space matters.
-    if cfg.disk_pressure.enabled and cfg.disk_pressure.paths:
-        from .disk_pressure import evaluate as eval_disk
-        findings.extend(_disk_pressure_findings(
-            eval_disk(cfg.disk_pressure.paths),
-        ))
-
-    # Compose override-file detector — surfaces that the running
-    # merged graph differs from what the cascade parser sees.
-    if (cfg.sources.docker.detect_compose_override
-            and cfg.sources.docker.compose_scan_paths):
-        from .compose_override import scan as scan_overrides
-        findings.extend(_compose_override_findings(
-            scan_overrides(cfg.sources.docker.compose_scan_paths),
-        ))
-
-    # `.env` permissions — uses the same compose-scan paths.
-    if cfg.sources.docker.compose_scan_paths:
-        from .env_perms import scan as scan_env_perms
-        findings.extend(_env_perm_findings(
-            scan_env_perms(cfg.sources.docker.compose_scan_paths),
-        ))
-
-    # Recurring failures — updates the user has retried + failed
-    # multiple times. Surfaces as a finding so they stop bashing the
-    # same wall.
-    findings.extend(_recurring_failure_findings(
-        db.list_recurring_failures(min_count=2),
-    ))
-
-    # Audit-mute filter (v0.8.1). The user can mute findings by their
-    # stable `(category, source_kind, source_ref)` fingerprint. Mutes
-    # apply AFTER every detector runs so they can't accidentally hide
-    # a finding that didn't exist when the mute was set (the user
-    # picks fingerprints they've actually seen).
-    muted = db.active_audit_mute_keys()
-    if muted:
-        findings = [
-            f for f in findings
-            if (f.category, f.source_kind, f.source_ref) not in muted
-        ]
+    findings.extend(_collect_state_findings(cfg, db, backup_report))
+    findings = _apply_audit_mutes(db, findings)
 
     # Severity first (critical → info), then category alphabetical so the
     # same input always produces the same output.
@@ -862,8 +889,6 @@ def run_audit(cfg: Config, db: Database) -> tuple[AuditReport, Path | None]:
         # Diff against the previous snapshot BEFORE appending — once
         # we append, "latest" becomes the report we just generated.
         if cfg.audit_alerts.enabled and cfg.audit_alerts.webhook_urls:
-            from .audit_alert import fire_if_new
-            from .audit_history import diff_against_latest
             diff = diff_against_latest(notes_dir, report_json)
             fire_if_new(
                 webhook_urls=list(cfg.audit_alerts.webhook_urls),
@@ -875,6 +900,5 @@ def run_audit(cfg: Config, db: Database) -> tuple[AuditReport, Path | None]:
                 ),
                 generated_at=report_json.get("generated_at", ""),
             )
-        from .audit_history import append as append_history
         append_history(notes_dir, report_json)
     return report, notes_path
