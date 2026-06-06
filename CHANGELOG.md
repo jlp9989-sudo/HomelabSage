@@ -2,6 +2,36 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.11.11 — 2026-06-06
+
+Refactor pass #12 (wave 6 of test reorg #9): **bulk-rename of every
+remaining release-pinned file**. Audit finding #9 closed — no test
+file requires `grep` to discover what subsystem it covers. Filenames
+now signal content directly via:
+- single-feature names where dominant: `test_disappearance_dns.py`,
+  `test_engine_wiring.py`, `test_github_webhook_restart_drift.py`,
+  `test_oom_network_explainer.py`, `test_secret_masking_hardening.py`,
+  `test_status_version_cli.py`, `test_purge_scan_window_cli.py`,
+  `test_search_csv_notes.py`, `test_dormant_detectors_wired.py`,
+  `test_webhook_metrics_user_notes.py`, `test_search_inbox_mcp.py`.
+- `*_grab_bag.py` suffix for files that intentionally bundle 3-5
+  related fixes/features from a release (v047, v048, v049, v062,
+  v063, v064, v065, v066, v067, v076): the file docstring lists the
+  features covered, and the grab-bag suffix signals "release polish
+  bundle" rather than coherent feature.
+- `*_polish_v0XXX.py` for the 8 v0.10.x bug-hunt polish releases
+  whose content is intentionally a punch-list of small fixes,
+  cohesive only as the response to a specific code review.
+
+1725 → 1725 tests. Ruff clean, 0 mypy errors / 183 source files.
+
+**All 10 code-quality findings from the 6-jun audit are now closed.**
+Six refactor passes since v0.10.7 — Output ABC, mcp/ split, hasattr
+strip, routes_updates split, engine.run_once split, audit.build_report
+registry, snooze tests, doctor tests, audit-history tests, audit-mutes
+tests, audit-categories tests, bulk file rename. 1725 → 1725 tests
+preserved end-to-end with triple-gate verde on each release.
+
 ## v0.11.10 — 2026-06-06
 
 Refactor pass #11 (wave 5 of test reorg #9): **bulk rename + audit
