@@ -35,12 +35,40 @@ class PendingMixin:
             (update_id, output_id, utcnow().isoformat()),
         )
 
-    def list_pending_dispatches(self) -> list[dict]:
+    def list_pending_dispatches(self, *, limit: int = 1000) -> list[dict]:
+        """Oldest-first window of queued (update, output) pairs.
+
+        N5: pre-v0.10.7 had no LIMIT and scaled linearly with the queue
+        size. The PRIMARY KEY caps growth per (update_id, output_id) but
+        a long parity window with many updates can still accumulate
+        thousands of rows. Default 1000 is generous for the engine's
+        flush loop, which drains one per scan anyway.
+        """
         rows = self._conn.execute(
             "SELECT update_id, output_id, queued_at FROM pending_dispatches "
-            "ORDER BY queued_at ASC"
+            "ORDER BY queued_at ASC LIMIT ?",
+            (max(1, limit),),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def purge_pending_dispatches_older_than(self, *, days: int) -> int:
+        """Drop pending dispatches older than `days`.
+
+        N3: a misconfigured push output during a long parity window
+        keeps appending rows; nothing pruned them. After this TTL the
+        operator can wire a periodic call (engine startup, scheduled
+        task) to evict ancient rows that will never fire usefully.
+        Returns the count purged. `days <= 0` is a no-op.
+        """
+        if days <= 0:
+            return 0
+        from datetime import timedelta
+        cutoff = (utcnow() - timedelta(days=days)).isoformat()
+        cur = self._conn.execute(
+            "DELETE FROM pending_dispatches WHERE queued_at < ?",
+            (cutoff,),
+        )
+        return int(cur.rowcount or 0)
 
     def delete_pending_dispatch(self, update_id: str, output_id: str) -> None:
         self._conn.execute(

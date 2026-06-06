@@ -216,5 +216,9 @@ def is_purpose_fallback(body: str) -> bool:
         stripped = line.strip().lstrip("#> *-").strip().strip("`'\"")
         if not stripped:
             continue
-        return bool(_FALLBACK_RE.search(stripped))
+        # N4: anchor with `fullmatch` so the bailout has to be the WHOLE
+        # first line, not a substring. Stops a coherent note that just
+        # mentions the fallback template (e.g. "fixed the 'no purpose
+        # stated yet — fill in' confusion") from being treated as bail.
+        return bool(_FALLBACK_RE.fullmatch(stripped))
     return False

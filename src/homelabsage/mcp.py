@@ -230,10 +230,13 @@ def _run_coro(coro):
     """Run a coroutine to completion from a sync context that may or
     may not already be inside an event loop.
 
-    The MCP dispatcher is called from an async FastAPI handler, so
-    `asyncio.run()` raises `RuntimeError: cannot be called from a
-    running event loop`. We detect that case and execute the coroutine
-    on a dedicated thread with its own loop.
+    Since v0.10.1 the HTTP `/mcp` route awaits `asyncio.to_thread(dispatch,
+    …)`, so the thread executing this helper does NOT have a running
+    loop — the `asyncio.run` branch is the only one HTTP callers take.
+    The thread-spawn fallback is defensive for direct importers that
+    call `dispatch()` from inside their own async code (the standalone
+    tool path) — keeping it lets us stay independent of who invokes us
+    without rewriting the call sites.
     """
     import asyncio
     import threading

@@ -2,6 +2,46 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.10.7 — 2026-06-06
+
+Polish pass for the 5 Nits from the v1.0 punch list. N1 + N2 are
+documented (no functional change needed); N3, N4, N5 ship as small,
+testable improvements.
+
+### Fixed (Nit)
+
+- **N3 — `db.purge_pending_dispatches_older_than(days=N)`** added so
+  a misconfigured push output during a long parity window can be
+  evicted via a one-liner instead of `clear_pending_dispatches` (the
+  panic button). Returns the count purged. `days <= 0` is a no-op.
+- **N4 — Rule-7 fallback regex anchored.** `is_purpose_fallback`
+  now uses `fullmatch` so a coherent note that just *mentions* the
+  fallback template (e.g. "fixed the 'no purpose stated yet — fill
+  in' confusion") is no longer misclassified as a bailout.
+- **N5 — `list_pending_dispatches(limit=N)`** gains a default cap
+  (1000) so an unbounded scan from MCP doesn't pull megabytes of
+  queue at once.
+
+### Documented (Nit)
+
+- **N1 — Curator docker client lifecycle.** The engine doesn't hold
+  a curator instance today, so the existing `Curator.close()` is
+  the only required cleanup. Flag stays in the punch list as a
+  hook for a future `/curate` web endpoint.
+- **N2 — `_run_coro` thread-spawn fallback** is now correctly
+  understood. Since v0.10.1's `asyncio.to_thread(dispatch, …)` wrap,
+  HTTP callers always take the `asyncio.run` branch — the thread
+  spawn is defensive for direct importers that call dispatch
+  from inside their own async code. Docstring updated.
+
+### Internal
+
+- 1714 → 1725 tests (+11). Ruff clean, 0 mypy errors against 180
+  source files.
+- v1.0 punch list status: **all 5C + all 12I + 3/5N closed**. N1 and
+  N2 are no-op-today documentation entries. Branch tagged-ready for
+  v1.0.0 milestone.
+
 ## v0.10.6 — 2026-06-05
 
 Webhook output secret-scrub + KV-redact tightening. Closes I8 + I11
