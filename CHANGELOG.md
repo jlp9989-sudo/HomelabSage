@@ -2,6 +2,18 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.11.7 — 2026-06-06
+
+Refactor pass #8 (wave 2 of test reorg #9): **doctor tests
+consolidated**. 12 tests covering CLI + `--watch` + `--severity-floor`
++ `_audit_has_findings_at_or_above` helper + module-level
+`build_report` + `/api/doctor` + MCP `doctor` tool now live in
+`tests/test_doctor.py`. Files `test_v070.py` + `test_v071.py`
+deleted (were 100% doctor). `test_v074.py` + `test_v076.py` slimmed.
+
+1725 → 1725 tests. Ruff clean, 0 mypy errors / 183 source files.
+Audit finding #9 wave 2 done.
+
 ## v0.11.6 — 2026-06-06
 
 Refactor pass #7 (wave 1 of test reorg #9): **snooze tests

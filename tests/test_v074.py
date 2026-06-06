@@ -213,30 +213,4 @@ def test_audit_alerts_config_defaults():
     assert c.min_severity == "medium"
 
 
-# ─── doctor --watch ──────────────────────────────────────────────
-
-
-def test_doctor_watch_zero_acts_as_oneshot(tmp_path):
-    """--watch 0 (default) keeps the single-run behaviour."""
-    from typer.testing import CliRunner
-
-    from homelabsage.cli import app
-    cfg_path = tmp_path / "config.yaml"
-    db_path = tmp_path / "h.db"
-    cfg_path.write_text(
-        f"""storage:
-  database_path: {db_path}
-llm:
-  endpoint: ""
-""",
-    )
-    runner = CliRunner()
-    result = runner.invoke(
-        app, [
-            "doctor", "--config", str(cfg_path), "--skip-llm",
-            "--watch", "0",
-        ],
-    )
-    # Exit 0 healthy (nothing configured = nothing to fail)
-    assert result.exit_code == 0
-    assert "Verdict" in result.stdout
+# doctor --watch test moved to test_doctor.py in v0.11.7.
