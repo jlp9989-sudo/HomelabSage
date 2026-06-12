@@ -1,3 +1,3 @@
 """HomelabSage — AI-powered homelab analyzer."""
 
-__version__ = "0.13.3"
+__version__ = "0.14.0"

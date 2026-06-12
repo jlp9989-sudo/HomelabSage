@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from .config import LLMConfig
 from .models import Analysis, Severity, Update
+from .prompts import assemble as _assemble_prompt
 from .prompts import load_template as _load_prompt_template
 
 
@@ -86,7 +87,12 @@ def _strip_think_blocks(text: str) -> str:
 
 
 def build_prompt(update: Update, notes: str = "") -> str:
-    return _load_prompt_template("analyzer").format(
+    # Assemble first: keep only the conditional rules whose context block
+    # this update actually carries, so the model isn't handed ~15 rules it
+    # must ignore. The unconditional rules + tail are untouched.
+    present_keys = set((update.context or {}).keys())
+    template = _assemble_prompt(_load_prompt_template("analyzer"), present_keys)
+    return template.format(
         source=update.source,
         subject=update.subject,
         current_version=update.current_version,

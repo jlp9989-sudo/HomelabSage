@@ -2,6 +2,28 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.14.0 — 2026-06-12
+
+**Conditional prompt assembly** — the analyzer prompt had grown to 24
+rules, but ~16 are gated on a specific context block ("If the context
+block contains X…") that a typical update doesn't carry. All 24 shipped
+on every call, so the local 35B had to read and ignore ~15 irrelevant
+(and occasionally contradictory) rules per analysis.
+
+- Each context-gated rule in `prompts/analyzer.md` is now wrapped in
+  `<!-- BEGIN/END CONDITIONAL RULES -->` and tagged with
+  `<!-- when: key1,key2 -->` (verified against the real `context` keys
+  detectors write). `prompts.assemble()` keeps a rule only when one of
+  its keys is in the update's context; the preamble, unconditional rules,
+  and the Update/notes/release-notes tail are always sent.
+- `build_prompt()` assembles before formatting. A plain docker update
+  (one signal) now ships 1 conditional rule instead of 16 — ~40% smaller
+  rule body, ~1-2k fewer tokens per call, and the model only sees rules
+  whose data is actually present. Rules stay in markdown (no Python edit
+  to tune them); an unmarked template (test override) is sent verbatim.
+
+1724 → 1732 tests. Ruff clean, 0 mypy errors / 184 source files.
+
 ## v0.13.3 — 2026-06-12
 
 **Security pass** — the three findings from the 12-jun review's security

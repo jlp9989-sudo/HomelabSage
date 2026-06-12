@@ -40,12 +40,17 @@ Rules:
   literal warning "do not interrupt the first start after upgrade — let any
   database migration finish". Note this in the summary too. Interrupting these
   is the most common silent-corruption path for users.
+
+The following rules apply only because the matching context block is present:
+<!-- BEGIN CONDITIONAL RULES -->
+<!-- when: orphan_since_days -->
 - If the context block contains "orphan_since_days" with a value ≥ 30, the
   container has been stopped for that many days. Mention this fact in the
   summary verbatim ("stopped <N> days ago") and set "recommended_action" to
   "decide whether this container is still needed; if not, remove it instead of
   upgrading". Do not raise severity solely on orphan status — security CVEs are
   still the only "critical" trigger.
+<!-- when: alternatives -->
 - If the context block contains "alternatives" (a list of other images that
   cover the same purpose with higher adoption and recent maintenance), you MAY
   surface at most ONE of them in "new_features_relevant" or
@@ -55,6 +60,7 @@ Rules:
   entirely if none of the alternatives is more popular than the current image
   by a margin you'd describe as "much more" (the gate filter already ensures
   that, but trust your reading of the data).
+<!-- when: release_notes_diff -->
 - If the context block contains "release_notes_diff" with a non-empty
   `body`, it concatenates EVERY release between the user's current
   version and the candidate version (`from_version` → `to_version`,
@@ -66,16 +72,19 @@ Rules:
   longer". Cite the version each finding lands in (e.g. "in 2.4.0:
   removed --legacy-auth flag"). When `truncated=true`, mention that
   later releases were not included.
+<!-- when: image_size_growth -->
 - If the context block contains "image_size_growth" with `triggered=true`,
   mention in `summary` that the image roughly tripled / doubled / etc in
   size (cite the ratio VERBATIM, e.g. "image grew 2.4× — 80 → 195 MiB").
   Add an entry to `breaking_changes` only when the user's notes flag
   constrained storage; otherwise the growth is informational.
+<!-- when: cascade -->
 - If the context block contains "cascade.depends_on_me" with any entries,
   mention in `recommended_action` that the listed services will also need
   to restart / be checked. Quote up to 3 service names verbatim. This is
   informational — do NOT raise severity unless the release notes
   themselves mention breaking changes that affect downstream services.
+<!-- when: puid_pgid -->
 - If the context block contains "puid_pgid" AND the release notes mention
   any of: "PUID", "PGID", "user", "uid", "gid", "permissions", "non-root",
   "rootless", "drop privileges": add a `breaking_changes` entry that
@@ -84,6 +93,7 @@ Rules:
   data ownership before restarting; check `id` inside the container after
   upgrade". If the release notes do NOT mention any of these, ignore
   `puid_pgid` entirely — its presence alone is not a finding.
+<!-- when: cve -->
 - If the context block contains "cve" with `counts.critical > 0`, raise
   severity to `"critical"` regardless of release-note content, mention the
   number of critical CVEs in the summary VERBATIM (e.g. "3 critical CVEs
@@ -92,6 +102,7 @@ Rules:
   severity to at least `"high"` and mention the count similarly. Do NOT
   invent CVE IDs that aren't in the context — quote `top_critical` /
   `top_high` verbatim.
+<!-- when: repo_health -->
 - If the context block contains "repo_health" with status `"abandoned"`, the
   upstream repo is archived or hasn't been pushed in over a year. Set
   `recommended_action` to mention this fact ("upstream repo appears
@@ -101,6 +112,7 @@ Rules:
   real security liability over time. If status is `"stale"`, mention it in
   the summary as "upstream activity has slowed (no push in <N> days)" but do
   NOT change severity — slowdown is information, not a verdict.
+<!-- when: release_cadence -->
 - If the context block contains "release_cadence" with severity `"high"`,
   the project has not cut a release in MORE than 4× its historical
   median cadence. This is a strong "going stale" signal — release the
@@ -110,6 +122,7 @@ Rules:
   "no release in <current_gap_days>d (median cadence: <median_days>d) —
   upstream may be paused; consider mirror / fork". Severity `medium`
   (≥2×) gets a mention in the summary but no severity escalation.
+<!-- when: renovate -->
 - If the context block contains "renovate", the maintainer uses Renovate
   and their `automerge` setting is a strong signal: `true` / list-of-rules
   with auto-merge-enabled rules → mention "the upstream maintainer has
@@ -117,17 +130,20 @@ Rules:
   in the summary. Do NOT use this to downgrade your severity below medium
   — the maintainer's confidence is one input, the user's specific
   environment is another.
+<!-- when: pr_changelog -->
 - If the context block contains "pr_changelog" with `merge_prs` non-empty,
   the upstream release notes were sparse; the synthetic changelog lists
   recently-merged PRs. Mine `merge_prs[*].subject` for breaking-change
   keywords ("BREAKING", "remove", "drop support", "migrate") the same way
   you would the release notes. Cite the PR number verbatim (e.g. "PR
   #1234 removed XYZ") so the reader can verify.
+<!-- when: container_age -->
 - If the context block contains "container_age" with `days_old >= 365`,
   the container has been running over a year without recreation. Add a
   `breaking_changes` entry only when the release notes mention env-var
   or volume changes — otherwise just mention in `summary` as a "consider
   a fresh recreate after upgrade" hint.
+<!-- when: pin_violation -->
 - If the context block contains "pin_violation", the user has explicitly
   pinned this image to an older version range (`pin`) and the new version
   CROSSES the pin. This is the highest-trust signal in the prompt — the
@@ -137,6 +153,7 @@ Rules:
   intentionally before applying.", and ensure severity is at least
   `medium`. Do NOT downgrade severity below medium even if the release
   notes look benign; the pin is a user-asserted constraint.
+<!-- when: image_fit -->
 - If the context block contains "image_fit", the candidate image may not
   fit in the free space on the filesystem that backs the docker image
   store. `verdict="wont_fit"` means the pull is LARGER than the free space
@@ -148,6 +165,7 @@ Rules:
   mention `headroom_after_mib` in the summary and add a `breaking_changes`
   entry "low disk headroom after pull (<headroom_after_mib> MiB left on
   <path>)". Quote the MiB numbers and `path` VERBATIM.
+<!-- when: restart_freq,oom_killed,healthcheck_stale -->
 - If the context block contains any of "restart_freq", "oom_killed", or
   "healthcheck_stale", the container is ALREADY unstable before this
   update (flapping, out-of-memory killed, or unhealthy for hours). Factor
@@ -159,6 +177,7 @@ Rules:
   `recommended_action` to check the cause before applying. Do NOT raise
   severity on instability alone — it's framing, not a verdict, unless the
   release notes themselves address the failure mode.
+<!-- when: backup_health -->
 - If the context block contains "backup_health", your most recent backups
   are stale or unverifiable: each entry in `repos` has `staleness_days`,
   `severity`, and `ok` (false = the probe failed entirely). When THIS
@@ -169,6 +188,7 @@ Rules:
   repo). Mention the staleness in the summary. Do NOT raise severity on
   backup staleness alone if the update itself is benign — a stale backup
   is a reason to pause a RISKY apply, not to inflate a harmless one.
+<!-- END CONDITIONAL RULES -->
 
 # Update
 - Source: {source}
