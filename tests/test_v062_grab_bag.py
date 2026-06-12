@@ -258,10 +258,15 @@ def test_auth_bypass_paths_are_exact():
     )
     assert "/healthz" in AUTH_BYPASS_EXACT
     assert "/metrics" in AUTH_BYPASS_EXACT
-    assert "/api/stack-health" in AUTH_BYPASS_EXACT
+    assert "/api/version" in AUTH_BYPASS_EXACT
     assert "/widget/" in AUTH_BYPASS_PREFIX
+    # v0.13.3: doctor + stack-health run live probes and leak paths /
+    # hostnames / backup-repo URLs — they are auth-gated, not bypassed.
+    assert "/api/doctor" not in AUTH_BYPASS_EXACT
+    assert "/api/stack-health" not in AUTH_BYPASS_EXACT
+    assert not _is_bypassed("/api/doctor")
+    assert not _is_bypassed("/api/stack-health")
     # Typo doesn't match
-    assert not _is_bypassed("/api/stack_health")
     assert not _is_bypassed("/metric")
     # Correct paths match
     assert _is_bypassed("/healthz")

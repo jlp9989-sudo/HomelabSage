@@ -38,7 +38,9 @@ def register_stack_health_routes(app: FastAPI, cfg: Config, db: Database) -> Non
 
         Same probes (LLM / TLS / DNS / disk / compose / audit) in a
         structured shape suitable for HA / Homepage widgets / Kuma.
-        Read-only, auth-bypassed (matches `/api/stack-health`).
+        Read-only. Requires auth when enabled — it exposes paths +
+        hostnames and runs a live LLM probe, so it is NOT in the
+        auth-bypass set; scrapers authenticate with a Bearer token.
         Set `skip_llm=1` for offline runs.
         """
         import asyncio

@@ -19,13 +19,19 @@ from fastapi import FastAPI, Request, Response
 
 from ..config import WebAuthConfig
 
-# Exact-match auth-bypass paths. `/healthz` for Docker / Kuma probes,
-# `/api/stack-health` + `/metrics` for dashboard scrapers.
+# Exact-match auth-bypass paths. Deliberately minimal: only liveness +
+# aggregate-count surfaces that carry NO infra detail.
+#   `/healthz`     — Docker / Kuma liveness, returns `{ok: true}`.
+#   `/api/version` — version + feature flags, no host/path data.
+#   `/metrics`     — Prometheus counters.
+# NOT bypassed (require auth when it's enabled): `/api/doctor` and
+# `/api/stack-health` — both run live probes (LLM / backup subprocess)
+# and expose filesystem paths, internal hostnames, and backup-repo
+# stderr (S3/SFTP URLs). Dashboards that scrape them under auth send a
+# Bearer token (`web.auth.api_keys`); pure-count widgets use `/widget/*`.
 AUTH_BYPASS_EXACT: frozenset[str] = frozenset({
     "/healthz",
     "/api/version",
-    "/api/stack-health",
-    "/api/doctor",
     "/metrics",
     # GitHub webhooks don't send Authorization headers. We bypass
     # Basic Auth here BUT only because the endpoint itself enforces

@@ -28,6 +28,7 @@ from .llm import LLMClient
 from .models import Analysis, AnalyzedUpdate, Update
 from .notes import NotesProvider
 from .registries import dockerhub_tag_info
+from .safe_url import fetch_text_guarded
 
 log = logging.getLogger(__name__)
 
@@ -469,17 +470,13 @@ def _strip_html_fallback(html: str) -> str:
 
 
 async def _fetch_article(url: str, *, timeout: float = 20.0) -> str | None:
-    try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            r = await client.get(url, headers={
-                "User-Agent": "Mozilla/5.0 HomelabSage/analyse-url",
-            })
-            if r.status_code != 200:
-                return None
-            return r.text
-    except httpx.HTTPError as e:
-        log.debug("article fetch %s failed: %s", url, e)
-        return None
+    # SSRF-guarded: the URL is user-supplied, so we validate every redirect
+    # hop resolves to a public address before connecting (see safe_url).
+    return await fetch_text_guarded(
+        url,
+        timeout=timeout,
+        headers={"User-Agent": "Mozilla/5.0 HomelabSage/analyse-url"},
+    )
 
 
 def _extract_article_text(html: str, *, url: str) -> str:

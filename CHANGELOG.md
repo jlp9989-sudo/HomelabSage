@@ -2,6 +2,37 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.13.3 — 2026-06-12
+
+**Security pass** — the three findings from the 12-jun review's security
+agent.
+
+- **SSRF guard** (`safe_url.py`, new): `analyse <url>` fetched an
+  arbitrary user-supplied URL with `follow_redirects=True` and a host
+  blocklist that only covered `localhost/127.0.0.1/0.0.0.0` — a URL
+  pointing at `169.254.169.254` (cloud metadata) or a `192.168.x` router,
+  or a public URL that 302-redirects to one, would be fetched from inside
+  the homelab and its body fed to the LLM + dashboard. Now
+  `check_url_public()` rejects any host resolving to a private / loopback
+  / link-local / reserved / multicast address (IPv4 + IPv6, and rejects
+  if ANY answer in a multi-A record is private — the DNS-rebinding
+  shape), and `fetch_text_guarded()` follows redirects MANUALLY,
+  re-validating every hop. Wired into `analyse_url._fetch_article`.
+- **`/api/doctor` + `/api/stack-health` are no longer auth-bypassed.**
+  Both run live probes (LLM health / backup subprocess) and expose
+  filesystem paths, internal hostnames, and backup-repo stderr (S3/SFTP
+  URLs) — they stayed open even when the user enabled auth. Removed from
+  `AUTH_BYPASS_EXACT`; they now require auth when it's on. The
+  no-infra-detail surfaces (`/healthz`, `/api/version`, `/metrics`,
+  `/widget/*`) remain open for probes/scrapers; authenticated scrapers
+  send a Bearer token (`web.auth.api_keys`).
+- **Startup warning when auth is off.** `create_app` now logs a loud
+  warning that the mutating settings API is unauthenticated and to enable
+  auth before exposing the port beyond a trusted LAN. (Default stays off
+  — first-run needs no password — but the risk is now stated, not silent.)
+
+1699 → 1724 tests. Ruff clean, 0 mypy errors / 184 source files.
+
 ## v0.13.2 — 2026-06-12
 
 **mcp_tools split** — the last finding from the 12-jun architecture

@@ -88,6 +88,19 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
     # means we register it AFTER auth.
     if cfg.web.auth.enabled and cfg.web.auth.password:
         attach_basic_auth(app, cfg.web.auth)
+    else:
+        # No auth means the mutating config API (PATCH /api/settings) is
+        # open to anyone who can reach the port — they could repoint the
+        # LLM endpoint and have every prompt (env vars, compose, notes)
+        # shipped to a server they control. Fine on a trusted single-user
+        # LAN, dangerous if the port is exposed. Warn loudly, once.
+        why = ("enabled=false" if not cfg.web.auth.enabled
+               else "no password set")
+        log.warning(
+            "web.auth is OFF (%s) — the settings API is unauthenticated. "
+            "Set web.auth.enabled + a password before exposing this port "
+            "beyond a trusted LAN.", why,
+        )
     attach_csrf_guard(app)
 
     register_lifecycle(app, cfg, engine)

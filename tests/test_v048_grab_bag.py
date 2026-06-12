@@ -290,8 +290,9 @@ def test_stack_health_returns_full_shape(tmp_path: Path):
         assert "active" in body["parity"]
 
 
-def test_stack_health_bypasses_auth(tmp_path: Path):
-    """When auth is enabled, /api/stack-health stays open (like /widget/*)."""
+def test_stack_health_requires_auth(tmp_path: Path):
+    """v0.13.3: /api/stack-health exposes paths + backup-repo URLs, so it
+    is auth-gated, not bypassed. (Full coverage in test_auth_gating.py.)"""
     body = (
         "llm:\n  provider: disabled\n  model: stub\n  endpoint: http://stub\n"
         "scheduler:\n  enabled: false\n"
@@ -305,8 +306,10 @@ def test_stack_health_bypasses_auth(tmp_path: Path):
     cfg = load_config(cfg_path)
     app = web.create_app(cfg, cfg_path=cfg_path)
     with TestClient(app) as client:
-        r = client.get("/api/stack-health")
-        assert r.status_code == 200
+        assert client.get("/api/stack-health").status_code == 401
+        assert client.get(
+            "/api/stack-health", auth=("javi", "secret"),
+        ).status_code == 200
 
 
 # ─── /profile page ──────────────────────────────────────────────────
