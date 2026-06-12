@@ -22,7 +22,7 @@ Watches your stack (Docker containers, Home Assistant, Linux packages, firmware,
 
 The LLM doesn't analyze updates in a vacuum — you can point it at your own `notes/` directory (markdown), and it pulls in only the sections that match the update subject. That's how it knows "your Elasticsearch is versionlocked on 8.x because of RAGFlow" before recommending an upgrade.
 
-> Status: **pre-alpha**, in active development. The Docker plugin is the most mature; the others are scaffolds.
+> Status: **beta**, in active development. Docker is the primary source; Home Assistant, Fedora-over-SSH, and arbitrary watched GitHub/Codeberg repos are implemented and tested.
 
 ---
 
@@ -57,9 +57,9 @@ mkdir -p notes data
 cat > config.yaml <<'EOF'
 llm:
   provider: openai
-  endpoint: https://api.groq.com/openai
-  model: llama-3.3-70b-versatile
-  api_key: "PASTE_YOUR_GROQ_KEY_HERE"   # free at console.groq.com
+  endpoint: https://generativelanguage.googleapis.com/v1beta/openai
+  model: gemini-3.1-flash-lite           # best free cloud pick in our benchmark (see below)
+  api_key: "PASTE_YOUR_AI_STUDIO_KEY"    # free at aistudio.google.com
 sources:
   docker:
     enabled: true
@@ -77,11 +77,16 @@ docker run --rm -d --name homelabsage \
   -v "$PWD/data:/app/data" \
   ghcr.io/jlp9989-sudo/homelabsage:latest serve
 
-# Trigger a scan immediately (instead of waiting for the 09:00 cron)
+# 1. Let the curator write a note about a few of your containers — this is
+#    what separates HomelabSage from a plain update notifier: the analyzer
+#    will read these notes and judge updates against YOUR setup.
+docker exec homelabsage homelabsage curate --discover --limit 3
+
+# 2. Scan now (instead of waiting for the 09:00 cron)
 docker exec homelabsage homelabsage check
 ```
 
-Open <http://localhost:8000>. You'll see one row per detected update, each with severity, summary, and a recommended action. Drop a `.md` file in `./notes` and the next scan will use it for context.
+Open <http://localhost:8000>. You'll see one row per detected update, each with severity, summary, and a recommended action — informed by the notes the curator just wrote. Edit those notes (or add your own `.md` files in `./notes`) and the next scan uses them as context. Then visit `/autoconfig` — HomelabSage inspects your host (compose paths, docker root dir, Unraid parity) and proposes the matching settings for one-click review.
 
 For a real deploy (compose, scheduled scans, Notion/Telegram outputs, local LLM), see [Install](#install) and [Configuration](#configuration).
 
@@ -96,6 +101,10 @@ Most release-note watchers (Diun, WatchTower, Renovate) tell you *that* there is
 ## Features
 
 - **Plugin-based sources.** One file = one source. Docker + Home Assistant + Fedora over SSH today; opt-in `watched_repos` plugin for arbitrary GitHub/Codeberg repos you run outside containers. See [docs/plugin-sdk.md](docs/plugin-sdk.md).
+- **Auto-configuration.** `homelabsage autoconfig` (or the `/autoconfig` page) inspects your host — compose paths from container labels, the docker root dir, Unraid/mdraid parity — and proposes the matching settings with evidence. You review, tick, apply; your own entries always survive the merge.
+- **Cross-signal analysis.** The analyzer doesn't just read changelogs: it warns when a pull *won't fit* in your free disk space, when the container is *already unstable* (flapping / OOM-killed / unhealthy) before you touch it, and when you're about to apply a breaking change *on stale backups* (restic/borg/kopia probe).
+- **Audit + doctor.** `/audit` is a prioritized report of everything wrong that isn't an update (CVEs, abandoned upstreams, flapping containers, exposed ports, env-file permissions, disk pressure…), with a mute list and history diffing. `homelabsage doctor` bundles the health probes into one exit-code-friendly command.
+- **MCP server.** `/mcp` speaks JSON-RPC with 50 tools, so Claude Code / Cursor / any MCP client can query updates, run audits, snooze rows, or pull rollback recipes.
 - **Local LLM by default.** Ollama-compatible API; works with [Ollama](https://ollama.com), [llama.cpp server](https://github.com/ggml-org/llama.cpp), LM Studio, or any OpenAI-compat endpoint. Falls back to OpenAI / Anthropic / Groq / Gemini / OpenRouter if you really want to.
 - **Tolerant JSON parser.** Strips markdown fences, surrounding prose, accepts case-insensitive severity, falls back to a `summary`-only best-effort when the model bends the schema. Removes inline `<think>…</think>` blocks from reasoning models.
 - **Your notes are the secret sauce.** Point `notes.notes_dir` at a folder of `.md` files (your CLAUDE.md, ARCHITECTURE.md, OPS.md, etc). For each update, only the sections that mention the subject get injected — no token bloat.
@@ -117,29 +126,30 @@ Most release-note watchers (Diun, WatchTower, Renovate) tell you *that* there is
 
 ## Architecture
 
-Each layer is one file. The whole thing is ~2,500 lines of Python.
+One plugin = one file, one output = one file. ~31k lines of Python, ~1,700 tests, no SPA, no ORM.
 
 ```
    ┌──────────────────────────────────────────────────────────────┐
    │  Plugins         scan() → list[Update]                       │
    │  ────────                                                    │
    │   docker         containers → OCI label → GitHub releases    │
-   │   homeassistant  /api/config + sensor.hacs                   │
-   │   fedora         dnf check-update                  (planned) │
-   │   llamacpp       releases.atom                     (planned) │
-   │   huggingface    repo revisions                    (planned) │
-   │   rss_feeds      announcements / forums            (planned) │
+   │   homeassistant  /api/config + HACS + Supervisor add-ons     │
+   │   fedora         dnf check-update over SSH                   │
+   │   github_watched arbitrary GitHub/Codeberg repos (opt-in)    │
    └──────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
    ┌──────────────────────────────────────────────────────────────┐
    │  Engine          for each Update:                            │
    │  ──────                                                      │
-   │    1. fetch release notes (markdown)                         │
-   │    2. NotesProvider — pull matching sections from your docs  │
-   │    3. LLM analyze (Ollama / llama.cpp / OpenAI / Anthropic)  │
-   │    4. persist (SQLite)                                       │
-   │    5. route to outputs                                       │
+   │    1. fetch release notes (full span between your version    │
+   │       and the candidate, not just the latest)                │
+   │    2. cross-signals — pins, will-it-fit, backup freshness    │
+   │    3. NotesProvider — pull matching sections from your docs  │
+   │    4. LLM analyze (only the prompt rules whose context       │
+   │       signals are present get sent)                          │
+   │    5. persist (SQLite) → route to outputs (severity gates,   │
+   │       quiet hours, parity gate, low-severity batching)       │
    └──────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
@@ -148,7 +158,9 @@ Each layer is one file. The whole thing is ~2,500 lines of Python.
    │  ───────                                                     │
    │   Web UI       FastAPI + Jinja2 (HTTP Basic Auth optional)   │
    │   Notion       database row per analyzed update              │
-   │   Telegram     severity-gated push                           │
+   │   Push         Telegram · Discord · Ntfy · Gotify · Slack    │
+   │                · MS Teams · Pushover · SMTP · Apprise ·      │
+   │                generic webhook — all severity-gated          │
    │   Heartbeat    Uptime Kuma / Healthchecks ping after each run│
    └──────────────────────────────────────────────────────────────┘
 ```
@@ -277,7 +289,7 @@ Any `${VAR}` is expanded from the environment (or a `.env` file next to `config.
 
 ### LLM provider setup
 
-**llama.cpp server / Ollama (local, recommended):**
+**Ollama (local):**
 
 ```yaml
 llm:
@@ -286,7 +298,19 @@ llm:
   model: qwen3:30b
 ```
 
-The "ollama" provider hits the OpenAI-compatible `/v1/chat/completions` endpoint, so any server that speaks that protocol works (Ollama, llama.cpp `llama-server`, LM Studio, vLLM, Text Generation WebUI). The name is historical — don't read into it.
+The `ollama` provider speaks Ollama's **native API** (`POST /api/generate` with `format: json`) — use it only against an actual Ollama server.
+
+**llama.cpp `llama-server` / LM Studio / vLLM / any OpenAI-compatible server (local, recommended):**
+
+```yaml
+llm:
+  provider: openai
+  endpoint: http://192.168.1.10:11434     # llama-server with an OpenAI-compat /v1
+  model: Qwen3.6-35B-Abl
+  # no api_key needed for a local server
+```
+
+These servers implement `/v1/chat/completions`, not Ollama's `/api/generate` — point them at the `openai` provider or every call 404s. (The endpoint may share Ollama's classic `:11434` port; what matters is the protocol, not the port.)
 
 **OpenAI / Anthropic (cloud, fallback):**
 
@@ -389,13 +413,25 @@ homelabsage list --source docker --status new --limit 20
 homelabsage serve                # web UI + scheduler (long-running)
 homelabsage version
 
+# setup
+homelabsage init                 # write a starter config.yaml
+homelabsage autoconfig           # detect settings from this host, review proposals
+homelabsage autoconfig --apply   # …and apply them to the user overlay
+
 # diagnostics + notes
 homelabsage curate --discover    # auto-write `notes/<service>.md` per running container
 homelabsage curate --system      # write `notes/system.md` from host probes (kernel, docker info, GPUs, ZFS, Unraid)
+homelabsage doctor               # bundled health probes, exit-code friendly (--watch N for continuous)
+homelabsage audit                # everything wrong that isn't an update (--jsonl / --severity)
 homelabsage scripts              # enumerate cron / systemd timers / Unraid User Scripts
 homelabsage export --redact      # sanitised JSON dump of containers + recent analyses
-homelabsage analyse <github-url> # one-shot analysis of any GitHub/Codeberg repo URL
+homelabsage analyse <url>        # one-shot analysis: GitHub/Codeberg repo, Docker Hub image, HF model, or article
 homelabsage csi <container>      # post-mortem assistant: last update + filtered logs + LLM diagnosis
+
+# row management
+homelabsage snooze <id> --for 7d # suppress pushes for an update (--list / --clear)
+homelabsage history -o all.csv   # dump the updates table for spreadsheet review
+homelabsage where-is <name>      # which compose file defines this service (file + line)
 
 # notification flow
 homelabsage digest               # build + send the weekly rollup manually
@@ -420,16 +456,21 @@ Add `-v` for debug logging, `-c /path/to/config.yaml` for a custom config.
 
 ## Web UI
 
-`/`                   dashboard of analyzed updates, severity-coloured
+`/`                   dashboard of analyzed updates, severity-coloured, star/snooze inline
+`/search`             substring search over subject + summary + breaking changes + your notes
+`/audit`              prioritized "everything wrong that isn't an update" report
+`/autoconfig`         host-detected settings proposals, evidence + one-click apply
 `/notes`              list your markdown notes
 `/notes/edit/<file>`  edit a note in-browser
 `/diagnostics`        "what HomelabSage sees" — per-container verdict (tracked / floating_tag / no_repo / no_version / skipped_by_rule)
 `/interview`          unanswered curator questions (Rule 7 fallbacks)
-`/settings`           schema-driven settings forms, one card per config block
-`/setup`              first-run wizard (3 steps: LLM → plugins → outputs)
+`/usage`              LLM token/cost tracking per provider + model
+`/profile`            "what's actually enabled?" one-page summary
+`/settings`           schema-driven settings forms, grouped (Essentials → Advanced), on/off chips
+`/wizard`             first-run wizard (3 steps: LLM → Docker → scheduler)
 `/healthz`            liveness (always 200, no auth — for healthchecks)
 
-Auth is HTTP Basic. `/healthz` is excluded so container/Kuma probes keep working.
+Auth is HTTP Basic (+ optional Bearer API keys for scrapers). Only `/healthz`, `/api/version`, `/metrics` and the `/widget/*` count endpoints bypass it — everything that reveals paths or hostnames requires credentials.
 
 ---
 
@@ -471,9 +512,9 @@ git clone https://github.com/jlp9989-sudo/HomelabSage
 cd HomelabSage
 pip install -e ".[dev]"
 
-pytest -q                # 35 tests, <1s
+pytest -q                # ~1,700 tests, ~70s
 ruff check .             # lint
-mypy src/homelabsage     # types
+mypy src/homelabsage     # types — 0 errors is the bar
 ```
 
 CI runs the same three checks on every PR — see `.github/workflows/ci.yml`.
@@ -482,20 +523,26 @@ CI runs the same three checks on every PR — see `.github/workflows/ci.yml`.
 
 ```
 src/homelabsage/
-  __init__.py
-  cli.py            Typer entrypoint
-  config.py         YAML + env-var loader (Pydantic)
-  db.py             SQLite, stdlib only
-  engine.py         scan → LLM → persist → outputs
-  github.py         tiny GitHub API helper
-  llm.py            OpenAI-compat client + tolerant JSON parser
+  engine.py         scan → cross-signals → LLM → persist → outputs
   models.py         Update / Analysis / Severity / Status
-  notes.py          NotesProvider + NotesEditor
-  web.py            FastAPI app + Basic Auth
-  outputs/          notion.py · telegram.py · heartbeat.py
-  plugins/          docker.py · homeassistant.py · …
-  templates/        Jinja2 (server-rendered, no JS framework)
-tests/              pytest, 35 tests
+  llm.py            LLM client + tolerant JSON parser
+  autoconfig.py     host inspection → settings proposals
+  audit.py          finding registries + report builder
+  safe_url.py       SSRF guard for user-supplied URLs
+  <detector>.py     one pure module per signal (image_fit, tag_lag,
+                    disk_pressure, backup_health, restart_freq, …)
+  config/           Pydantic blocks, one module per group
+  db/               SQLite mixins, one module per table family
+  cli/              Typer commands, one module per command
+  web/              FastAPI routes, one module per surface
+  mcp_tools/        MCP tool impls + JSON-Schema registry, by domain
+  outputs/          notion · telegram · discord · ntfy · gotify ·
+                    slack · msteams · pushover · smtp · apprise · webhook
+  plugins/          docker · homeassistant · fedora · github_watched
+  curator/          note-writing pipeline (discover / system / interview)
+  prompts/          analyzer rules in markdown, assembled per update
+  templates/        Jinja2 (server-rendered, htmx, no JS framework)
+tests/              pytest, ~1,700 tests
 ```
 
 ---
@@ -513,11 +560,13 @@ HomelabSage is designed for the **single-user, self-hosted, LAN-or-VPN-only** th
 
 **What's protected out of the box:**
 
-- HTTP Basic Auth gates the whole UI (enable via `web.auth.enabled: true` + password).
+- HTTP Basic Auth gates the whole UI (enable via `web.auth.enabled: true` + password). When auth is off, the server logs a loud startup warning — the settings API is mutating, so don't expose the port beyond a trusted LAN without it.
+- **SSRF guard**: `analyse <url>` fetches user-supplied URLs, so every fetch validates that the host resolves only to public addresses (private ranges, loopback, link-local/cloud-metadata, IPv6 equivalents all rejected) and re-validates **every redirect hop** — a public URL that 302s into your LAN is blocked at the hop.
 - **CSRF mitigation**: every state-changing request (POST / PATCH / DELETE) verifies the `Origin` (or `Referer` fallback) header against the request's `Host`. A logged-in user visiting an attacker-controlled site cannot trigger a settings change via their browser. The check honours `X-Forwarded-Proto` so it works correctly behind a TLS-terminating reverse proxy.
+- **Minimal auth-bypass surface**: only `/healthz`, `/api/version`, `/metrics` and the count-only `/widget/*` endpoints skip auth. Anything that reveals paths, hostnames or backup-repo URLs (`/api/doctor`, `/api/stack-health`) requires credentials; scrapers use a Bearer key from `web.auth.api_keys`.
+- Secrets are masked shape-preservingly in the settings API and HTML forms; a pre-LLM redaction pass (`secret_guard`) strips API keys / tokens / PEM blocks from prompts sent to cloud providers.
 - The notes editor refuses `..` path traversal and non-`.md` / non-`.txt` extensions.
 - The settings overlay file is written with mode `0o600` (owner read/write only).
-- The `/healthz` endpoint is intentionally unauthenticated — Docker / Uptime Kuma / Kubernetes probes need to reach it without credentials.
 
 **What's not, and what to add yourself if you need it:**
 
