@@ -50,6 +50,7 @@ from ..llm import PROVIDER_PRESETS
 from ..redact import _field_is_secret
 from .routes_settings import (
     SETTING_BLOCKS,
+    SETTING_GROUPS,
     _block_to_dotted_keys,
     _get_dotted,
     _resolve_block,
@@ -282,22 +283,48 @@ def _block_form_context(
 def register_settings_html_routes(
     app: FastAPI, cfg: Config, cfg_path: Path | None, env: Environment
 ) -> None:
+    def _block_enabled(fresh_cfg: Config, dotted: str) -> bool | None:
+        """Effective on/off state for the index card's chip.
+
+        Blocks with an `enabled` bool report it; the LLM block reports
+        `provider != "disabled"`. Always-on blocks (web, storage, notes…)
+        return None — no chip, nothing to toggle.
+        """
+        obj: Any = fresh_cfg
+        for p in dotted.split("."):
+            obj = getattr(obj, p)
+        if dotted == "llm":
+            return getattr(obj, "provider", "disabled") != "disabled"
+        enabled = getattr(obj, "enabled", None)
+        return bool(enabled) if isinstance(enabled, bool) else None
+
     def _render_index() -> HTMLResponse:
         overlay = load_overlay(user_overlay_path(cfg_path)) if cfg_path else {}
         flat = set(overlay_keys(overlay))
-        blocks = [
-            {
+        fresh_cfg = load_config(cfg_path) if cfg_path and cfg_path.exists() else cfg
+
+        def _card(name: str) -> dict[str, Any]:
+            dotted, submodel = SETTING_BLOCKS[name]
+            return {
                 "id": name,
                 "title": submodel.__name__,
                 "dotted_path": dotted,
                 "override_count": sum(1 for k in flat if k.startswith(dotted)),
+                "enabled": _block_enabled(fresh_cfg, dotted),
             }
-            for name, (dotted, submodel) in SETTING_BLOCKS.items()
+
+        groups = [
+            {
+                "title": g["title"],
+                "description": g["description"],
+                "blocks": [_card(name) for name in g["blocks"]],
+            }
+            for g in SETTING_GROUPS
         ]
         tmpl = env.get_template("settings_index.html")
         return HTMLResponse(
             tmpl.render(
-                blocks=blocks,
+                groups=groups,
                 overlay_writable=cfg_path is not None,
                 overlay_path=str(user_overlay_path(cfg_path)) if cfg_path else "",
                 total_overrides=len(flat),

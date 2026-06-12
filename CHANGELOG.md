@@ -2,6 +2,25 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.12.1 — 2026-06-12
+
+**Grouped settings index** — the `/settings` page was a flat grid of 38
+cards with no hierarchy, which read as "this product is complicated" to a
+new user when ~30 of those blocks are opt-in extras. UI-only change; block
+URLs and the JSON API are untouched.
+
+- New `SETTING_GROUPS` (routes_settings.py, next to `SETTING_BLOCKS` —
+  same single-point-of-edit pattern): five sections with descriptions —
+  Essentials / More sources / Notifications / Server / Advanced (opt-in).
+  Guard test enforces every block lands in exactly one group, so a new
+  block can't silently vanish from the page or render twice.
+- Per-card **on/off state chip** read from the effective config (`enabled`
+  field where the block has one; `llm` reports `provider != "disabled"`;
+  always-on blocks get no chip). Disabled cards render dimmed so the eye
+  goes to what's actually configured.
+
+1749 → 1751 tests. Ruff clean, 0 mypy errors.
+
 ## v0.12.0 — 2026-06-12
 
 **Cross-signal analysis** — turn three standalone detectors into update

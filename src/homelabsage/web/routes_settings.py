@@ -166,6 +166,66 @@ SETTING_BLOCKS: dict[str, tuple[str, type[BaseModel]]] = {
 }
 
 
+# Display grouping for the settings index page. A flat grid of 38 cards
+# reads as "this product is complicated" — grouping tells a new user which
+# handful of blocks they actually need and which 30 are opt-in extras they
+# can ignore. UI-only: the JSON API and block URLs are unaffected.
+#
+# Every SETTING_BLOCKS key must appear in EXACTLY one group — a test guards
+# this so a new block can't silently fall off the index page.
+SETTING_GROUPS: list[dict[str, Any]] = [
+    {
+        "title": "Essentials",
+        "description": (
+            "What a working install needs: the LLM that reads release "
+            "notes, the Docker scan, when to run it, and the notes that "
+            "teach the analyzer about YOUR setup."
+        ),
+        "blocks": ["llm", "sources/docker", "scheduler", "notes", "curator"],
+    },
+    {
+        "title": "More sources",
+        "description": "Optional things to scan beyond Docker containers.",
+        "blocks": [
+            "sources/homeassistant", "sources/github_watched",
+            "sources/fedora", "sources/scripts",
+        ],
+    },
+    {
+        "title": "Notifications",
+        "description": (
+            "Where analyzed updates get delivered. Enable the one or two "
+            "channels you use; Notion persists rows, the rest push."
+        ),
+        "blocks": [
+            "outputs/notion", "outputs/telegram", "outputs/discord",
+            "outputs/ntfy", "outputs/gotify", "outputs/apprise",
+            "outputs/smtp", "outputs/slack", "outputs/msteams",
+            "outputs/pushover", "outputs/webhook", "outputs/batching",
+            "digest",
+        ],
+    },
+    {
+        "title": "Server",
+        "description": "Web UI, auth, storage paths, language.",
+        "blocks": ["web", "web/auth", "storage", "i18n"],
+    },
+    {
+        "title": "Advanced (opt-in)",
+        "description": (
+            "Extra detectors and gates, all off by default. A fresh "
+            "install works fine without touching any of these."
+        ),
+        "blocks": [
+            "parity_gate", "scan_window", "llm_health_gate", "auto_apply",
+            "image_pins", "compose_lint", "tag_lag", "tls_check",
+            "disk_pressure", "audit_alerts", "backup_health",
+            "health_check", "log_anomaly",
+        ],
+    },
+]
+
+
 # ─── helpers ──────────────────────────────────────────────────────────────
 
 def _get_dotted(d: dict[str, Any], dotted: str) -> Any:

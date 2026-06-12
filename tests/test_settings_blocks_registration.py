@@ -72,6 +72,42 @@ def test_every_block_html_form_renders(tmp_path):
         assert "<form" in r.text or block in r.text
 
 
+def test_every_block_in_exactly_one_group():
+    """v0.12: the settings index renders from SETTING_GROUPS, so a block
+    missing from every group silently vanishes from the page, and one in
+    two groups renders twice. Guard the partition.
+    """
+    from homelabsage.web.routes_settings import SETTING_GROUPS
+
+    seen: list[str] = []
+    for g in SETTING_GROUPS:
+        seen.extend(g["blocks"])
+    assert sorted(seen) == sorted(set(seen)), (
+        f"duplicated across groups: {[b for b in seen if seen.count(b) > 1]}"
+    )
+    assert set(seen) == set(SETTING_BLOCKS), (
+        f"not in any group: {set(SETTING_BLOCKS) - set(seen)}, "
+        f"grouped but unregistered: {set(seen) - set(SETTING_BLOCKS)}"
+    )
+
+
+def test_settings_index_renders_group_headers_and_state_chips(tmp_path):
+    """The grouped index shows section headers and per-block on/off chips."""
+    from homelabsage.web.routes_settings import SETTING_GROUPS
+
+    client = _client(tmp_path)
+    r = client.get("/settings")
+    assert r.status_code == 200
+    for g in SETTING_GROUPS:
+        assert f"<h2>{g['title']}</h2>" in r.text, f"group {g['title']!r} missing"
+    # Default Config: docker source is enabled=True, telegram output is
+    # enabled=False, llm provider defaults to a non-disabled preset value
+    # only if set — storage has no `enabled` at all (no chip on its card).
+    assert '<span class="state-chip on">on</span>' in r.text
+    assert '<span class="state-chip">off</span>' in r.text
+    assert 'block-card off' in r.text   # disabled cards are dimmed
+
+
 def test_v05plus_blocks_are_registered():
     """Defensive: confirm the v0.6+/v0.7+/v0.8+ config blocks landed."""
     expected = {

@@ -20,15 +20,25 @@
   </p>
 {% endif %}
 
-<div class="blocks-grid">
-  {% for b in blocks %}
-    <a class="block-card" href="/settings/{{ b.id }}">
-      <h3>{{ b.title }}</h3>
-      <div class="desc">{{ b.dotted_path }}</div>
-      {% if b.override_count %}
-        <span class="override-badge">{{ b.override_count }} override{{ '' if b.override_count == 1 else 's' }}</span>
-      {% endif %}
-    </a>
-  {% endfor %}
-</div>
+{% for g in groups %}
+<section class="settings-group">
+  <h2>{{ g.title }}</h2>
+  <p class="muted group-desc">{{ g.description }}</p>
+  <div class="blocks-grid">
+    {% for b in g.blocks %}
+      <a class="block-card{{ ' off' if b.enabled is sameas false }}" href="/settings/{{ b.id }}">
+        <h3>{{ b.title }}
+          {% if b.enabled is sameas true %}<span class="state-chip on">on</span>
+          {% elif b.enabled is sameas false %}<span class="state-chip">off</span>
+          {% endif %}
+        </h3>
+        <div class="desc">{{ b.dotted_path }}</div>
+        {% if b.override_count %}
+          <span class="override-badge">{{ b.override_count }} override{{ '' if b.override_count == 1 else 's' }}</span>
+        {% endif %}
+      </a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
 {% endblock %}
