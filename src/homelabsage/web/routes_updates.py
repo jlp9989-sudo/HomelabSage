@@ -19,6 +19,9 @@ from ..engine import Engine
 from ..models import UpdateStatus
 from .routes_wizard import is_wizard_complete
 
+# Strong references to fire-and-forget scan tasks (see trigger_run).
+_background_tasks: set[asyncio.Task] = set()
+
 
 def _html_escape(s: str) -> str:
     return (
@@ -373,7 +376,13 @@ def register_updates_routes(
 
     @app.post("/run")
     async def trigger_run() -> RedirectResponse:
-        asyncio.create_task(engine.run_once())
+        # Keep a strong reference: asyncio only holds a weakref to tasks,
+        # so a bare create_task can be garbage-collected mid-scan. The
+        # engine's run lock makes a double-click harmless (second run
+        # reports skipped_concurrent and returns).
+        task = asyncio.create_task(engine.run_once())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
         return RedirectResponse("/", status_code=303)
 
     @app.post("/updates/{update_id:path}/status")

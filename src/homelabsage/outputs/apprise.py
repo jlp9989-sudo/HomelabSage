@@ -89,12 +89,12 @@ class AppriseOutput(Output):
             parts.append(f"\n{u.release_url}")
         return title, "\n".join(parts)
 
-    async def send(self, item: AnalyzedUpdate) -> None:
+    async def send(self, item: AnalyzedUpdate) -> bool:
         if not self._should_send(item):
-            return
+            return True   # nothing to do — don't retry
         apprise = _import_apprise()
         if apprise is None:
-            return
+            return True   # library missing is permanent — retrying won't help
         ap = apprise.Apprise()
         for url in self.cfg.urls:
             try:
@@ -120,5 +120,7 @@ class AppriseOutput(Output):
             ok = await asyncio.to_thread(ap.notify, **kwargs)
             if not ok:
                 log.warning("apprise notify reported partial failure for %s", item.id)
+            return bool(ok)
         except Exception as e:
             self._log_push_failure(item, e)
+            return False

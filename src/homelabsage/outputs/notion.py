@@ -84,9 +84,9 @@ class NotionOutput(Output):
             props["Summary"] = {"rich_text": [{"text": {"content": redacted_summary[:2000]}}]}
         return props
 
-    async def send(self, item: AnalyzedUpdate) -> None:
+    async def send(self, item: AnalyzedUpdate) -> bool:
         if not self._should_send(item):
-            return
+            return True   # nothing to do — don't retry
         try:
             async with httpx.AsyncClient(timeout=20) as client:
                 if item.notion_page_id:
@@ -136,3 +136,5 @@ class NotionOutput(Output):
                             self.db.set_notion_page_id(item.id, page_id)
         except httpx.HTTPError as e:
             self._log_push_failure(item, e)
+            return False
+        return True

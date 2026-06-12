@@ -166,15 +166,54 @@ _DISPATCH = {
 }
 
 
+def _channel_items(
+    sub: Any, items: list[AnalyzedUpdate],
+) -> list[AnalyzedUpdate]:
+    """Filter the batch down to what this channel would accept singly.
+
+    A channel with `min_severity: high` explicitly asked not to be pinged
+    below high — a rollup of info/medium items through the back door
+    violates that. Items without an analysis never reach the batch
+    (`below_threshold` excludes them), so missing-analysis is just a
+    defensive skip here.
+    """
+    floor = Severity(getattr(sub, "min_severity", "info"))
+    return [
+        it for it in items
+        if it.analysis is not None
+        and it.analysis.severity.order >= floor.order
+    ]
+
+
+def _channel_quiet(sub: Any) -> bool:
+    """True iff this channel's quiet-hours window is active right now.
+
+    No bypass check: batched items are below the batch threshold by
+    definition, so they can never meet the (≥ critical-ish) bypass floor.
+    """
+    spec = getattr(sub, "quiet_hours", "")
+    if not spec:
+        return False
+    from ..quiet_hours import is_quiet_now
+    return is_quiet_now(
+        window_spec=spec,
+        timezone_name=getattr(sub, "quiet_hours_timezone", "UTC"),
+    ).quiet
+
+
 async def dispatch_batch(cfg: Config, items: list[AnalyzedUpdate]) -> dict[str, str]:
     """Emit one rollup per enabled push channel. Returns `{channel: status}`.
+
+    Each channel gets its own cut of the batch: items below the channel's
+    `min_severity` are dropped, and a channel inside its quiet-hours
+    window is skipped outright (not queued — the rollup is trivia by
+    definition and the weekly digest is the backstop).
 
     No-op when `items` is empty (caller's check) or when batching is
     disabled in config. Safe to call from the engine at end-of-scan.
     """
     if not items:
         return {}
-    body = render_batch(items)
     results: dict[str, str] = {}
     for name, sender in _DISPATCH.items():
         sub = getattr(cfg.outputs, name, None)
@@ -182,8 +221,15 @@ async def dispatch_batch(cfg: Config, items: list[AnalyzedUpdate]) -> dict[str, 
             continue
         if not getattr(sub, "enabled", False):
             continue
+        chan_items = _channel_items(sub, items)
+        if not chan_items:
+            results[name] = "skipped: all items below min_severity"
+            continue
+        if _channel_quiet(sub):
+            results[name] = "skipped: quiet hours"
+            continue
         try:
-            await sender(sub, body)
+            await sender(sub, render_batch(chan_items))
             results[name] = "sent"
         except Exception as e:  # last-ditch safety net
             log.exception("batch dispatch %s crashed", name)

@@ -77,11 +77,11 @@ class GotifyOutput(Output):
             "priority": self._priority_for(a.severity.value),
         }
 
-    async def send(self, item: AnalyzedUpdate) -> None:
+    async def send(self, item: AnalyzedUpdate) -> bool:
         if not self._should_send(item):
-            return
+            return True   # nothing to do — don't retry
         url = f"{self.cfg.server_url.rstrip('/')}/message"
-        await self._push_json(
+        return await self._push_json(
             url, item=item,
             json=self._format(item),
             params={"token": self.cfg.token},

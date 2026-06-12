@@ -2,6 +2,48 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.12.2 — 2026-06-12
+
+**Gate hardening** — the 12-jun review found that the delivery guarantees
+the gates promise (don't disturb / don't lose / don't repeat) all leaked.
+Four fixes, each with a regression test:
+
+- **User-ruled rows don't resurrect.** A row left with `analysis=NULL`
+  (LLM down, or `provider=disabled`) that the user then DISMISSED came
+  back on the next scan: re-analyzed, upserted back to ANALYZED (clobbering
+  the user's status) and re-notified — on every scan with the LLM disabled.
+  `_analyze_single` now skips re-emits whose existing status is
+  DISMISSED / APPLIED / FAILED. The LLM-failure recovery path (status NEW)
+  still re-analyzes.
+- **`Output.send()` now reports delivery** (`-> bool`; all 11 outputs
+  updated, mypy-enforced). Previously every push output swallowed its own
+  HTTP errors, so the pending-dispatch queue's "failures stay queued and
+  retry" was fiction — rows were deleted even when the push never went
+  out. Now: direct-path failures queue for the next scan's flush, and the
+  flush only deletes a row on confirmed delivery. "Nothing to do"
+  (disabled / below severity floor) returns True so dead rows don't
+  retry forever.
+- **Flush honours quiet hours.** An item queued at 23:30 fired from the
+  00:00 scan mid-window; the flush now skips quiet-blocked outputs and
+  keeps the row for the first scan after the window.
+- **Batch rollup honours snooze + per-channel `min_severity` + quiet
+  hours.** Snoozed items were appended to the rollup before the snooze
+  check; the rollup was sent to every enabled channel even when all items
+  sat below that channel's floor (telegram defaults to `high`) or inside
+  its quiet window. Each channel now gets its own severity-filtered cut,
+  and quiet channels are skipped (not queued — rollup is trivia by
+  definition; the weekly digest is the backstop).
+
+Also: `run_once` is serialised behind an `asyncio.Lock` — the web
+`POST /run` could overlap with a cron scan, double-analyzing (and
+double-pushing) the same updates and cross-contaminating `llm.last_call`
+explainers between rows. A concurrent call now reports
+`skipped_concurrent` and returns; the fire-and-forget task also holds a
+strong reference (asyncio only keeps a weakref — a bare `create_task`
+could be garbage-collected mid-scan).
+
+1751 → 1763 tests. Ruff clean, 0 mypy errors.
+
 ## v0.12.1 — 2026-06-12
 
 **Grouped settings index** — the `/settings` page was a flat grid of 38

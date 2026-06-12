@@ -112,13 +112,29 @@ async def test_dispatch_batch_no_op_on_empty_items(recorder):
 
 
 async def test_dispatch_batch_hits_only_enabled_channels(recorder):
+    # min_severity="info" set explicitly: since v0.12.2 the rollup honours
+    # each channel's severity floor (telegram defaults to "high", which
+    # would rightly filter this INFO item out — that's tested separately).
     cfg = Config(outputs=OutputsConfig(
-        telegram=TelegramOutputConfig(enabled=True, bot_token="b", chat_id="c"),
+        telegram=TelegramOutputConfig(
+            enabled=True, bot_token="b", chat_id="c", min_severity="info",
+        ),
     ))
     res = await dispatch_batch(cfg, [_make(Severity.INFO, "a")])
     assert res == {"telegram": "sent"}
     assert len(recorder.calls) == 1
     assert "telegram" in recorder.calls[0]["url"]
+
+
+async def test_dispatch_batch_respects_channel_min_severity(recorder):
+    """A channel whose floor is above every batched item gets skipped —
+    the rollup must not smuggle low items past the per-channel gate."""
+    cfg = Config(outputs=OutputsConfig(
+        telegram=TelegramOutputConfig(enabled=True, bot_token="b", chat_id="c"),
+    ))   # telegram default floor is "high"
+    res = await dispatch_batch(cfg, [_make(Severity.INFO, "a")])
+    assert res == {"telegram": "skipped: all items below min_severity"}
+    assert recorder.calls == []
 
 
 # ─── engine integration ──────────────────────────────────────────────

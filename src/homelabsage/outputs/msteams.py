@@ -128,9 +128,9 @@ class MSTeamsOutput(Output):
             return False
         return self._severity_passes(item)
 
-    async def send(self, item: AnalyzedUpdate) -> None:
+    async def send(self, item: AnalyzedUpdate) -> bool:
         if not self._should_send(item):
-            return
-        await self._push_json(
+            return True   # nothing to do — don't retry
+        return await self._push_json(
             self.cfg.webhook_url, item=item, json=_build_adaptive_card(item),
         )

@@ -114,10 +114,32 @@ class Engine:
         )
         self.plugins = build_plugins(cfg, db)
         self.outputs = build_outputs(cfg, db)
+        # Serialises scan cycles. APScheduler's max_instances=1 only
+        # protects scheduler-vs-scheduler; the web POST /run path could
+        # overlap with a cron scan, double-analyzing (and double-pushing)
+        # the same updates and cross-contaminating `llm.last_call` between
+        # rows. One lock, both entry points.
+        self._run_lock = asyncio.Lock()
 
     async def run_once(self) -> dict[str, int]:
         """Single full cycle. Returns counts (`scanned`, `new`, `analyzed`,
         `failed`).
+
+        Concurrent calls don't queue up — a second scan started while one
+        is in flight would just re-scan the same state, so it reports
+        `skipped_concurrent` and returns immediately.
+        """
+        if self._run_lock.locked():
+            log.info("run_once skipped — another scan is already in flight")
+            return {
+                "scanned": 0, "new": 0, "analyzed": 0, "failed": 0,
+                "skipped_concurrent": 1,
+            }
+        async with self._run_lock:
+            return await self._run_cycle()
+
+    async def _run_cycle(self) -> dict[str, int]:
+        """The actual scan cycle — only ever entered under `_run_lock`.
 
         Split into thin sub-stages in v0.11.4 so each piece is independently
         testable + readable. The orchestration shape is intentionally linear:
@@ -349,6 +371,15 @@ class Engine:
         # Skip LLM call when we already analyzed this exact (subject, new_version).
         if existing and existing.analysis is not None:
             return None
+        # A row the user already ruled on must NOT be resurrected by a
+        # re-emit. Without this, a row left with analysis=None (LLM was
+        # down, or provider=disabled) that the user then DISMISSED came
+        # back on the next scan: re-analyzed, upserted back to ANALYZED
+        # (clobbering the user's status), and re-notified — on every scan.
+        if existing and existing.status in (
+            UpdateStatus.DISMISSED, UpdateStatus.APPLIED, UpdateStatus.FAILED,
+        ):
+            return None
         # Re-emitting an existing-but-unanalyzed item (previous LLM failed).
         # Carry the Notion page_id so the output PATCHes instead of POSTing.
         if existing and existing.notion_page_id:
@@ -424,17 +455,21 @@ class Engine:
         Persistent outputs (Notion) run through every path so the DB stays
         consistent. Push outputs are gated and may be queued for later.
         """
+        # Snooze gate is per-update and trumps everything else — including
+        # the batch rollup. A snoozed item appearing in the end-of-scan
+        # rollup would defeat the user's explicit "later".
+        snoozed_until = self._snooze_active_for(analyzed.id)
+
         # Batching short-circuit: append to the rollup; push outputs are
         # skipped in the loop below. Persistent outputs still run.
         deferred_to_batch = (
-            batch_threshold is not None
+            not snoozed_until
+            and batch_threshold is not None
             and below_threshold(analyzed, batch_threshold)
         )
         if deferred_to_batch:
             batched.append(analyzed)
 
-        # Snooze gate is per-update; the others compose per-output.
-        snoozed_until = self._snooze_active_for(analyzed.id)
         for output in self.outputs:
             if snoozed_until and output.is_push:
                 # Don't queue — snooze is the user's explicit "later",
@@ -454,9 +489,15 @@ class Engine:
                 self.db.queue_pending_dispatch(analyzed.id, output.id)
                 continue
             try:
-                await output.send(analyzed)
+                ok = await output.send(analyzed)
             except Exception as e:
                 log.exception("output %s failed: %s", output.id, e)
+                ok = False
+            # `send() is False` = transient delivery failure (per the
+            # Output contract). Queue push items for the next scan's
+            # flush; `None` from legacy test doubles counts as success.
+            if ok is False and output.is_push:
+                self.db.queue_pending_dispatch(analyzed.id, output.id)
 
     async def _finalise_batch(
         self,
@@ -513,14 +554,26 @@ class Engine:
             # after the snooze expires.
             if output.is_push and self._snooze_active_for(update_id):
                 continue
+            # Honour quiet hours too: an item queued at 23:30 must not
+            # fire from the 00:00 scan's flush mid-window. Keep the row;
+            # it replays on the first scan after the window ends.
+            if output.is_push and self._quiet_blocks(output, item):
+                continue
             try:
-                await output.send(item)
-                self.db.delete_pending_dispatch(update_id, output_id)
+                ok = await output.send(item)
             except Exception as e:
                 log.exception(
                     "pending dispatch %s → %s failed; will retry: %s",
                     update_id, output_id, e,
                 )
+                continue
+            # Only a confirmed delivery clears the row. `send() is False`
+            # means the push output reported a transient failure (HTTP
+            # error) — before the Output contract carried this signal,
+            # outputs swallowed their own errors and the row was deleted
+            # even when Telegram was down, silently losing the message.
+            if ok is not False:
+                self.db.delete_pending_dispatch(update_id, output_id)
 
     def _incremental_hook(self, analyzed: AnalyzedUpdate) -> None:
         """Pin a one-line summary of a risky update to the curator's note.

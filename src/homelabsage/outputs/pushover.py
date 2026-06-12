@@ -91,9 +91,9 @@ class PushoverOutput(Output):
             form["expire"] = "3600"
         return form
 
-    async def send(self, item: AnalyzedUpdate) -> None:
+    async def send(self, item: AnalyzedUpdate) -> bool:
         if not self._should_send(item):
-            return
+            return True   # nothing to do — don't retry
         # Pushover wants form-encoded `data=`, not JSON — keep custom POST
         # instead of `_push_json`. Failure path shares the base log helper.
         try:
@@ -102,3 +102,5 @@ class PushoverOutput(Output):
                 r.raise_for_status()
         except httpx.HTTPError as e:
             self._log_push_failure(item, e)
+            return False
+        return True

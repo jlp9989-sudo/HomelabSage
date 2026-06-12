@@ -92,9 +92,9 @@ class DiscordOutput(Output):
             payload["avatar_url"] = self.cfg.avatar_url
         return payload
 
-    async def send(self, item: AnalyzedUpdate) -> None:
+    async def send(self, item: AnalyzedUpdate) -> bool:
         if not self._should_send(item):
-            return
-        await self._push_json(
+            return True   # nothing to do — don't retry
+        return await self._push_json(
             self.cfg.webhook_url, json=self._build_payload(item), item=item,
         )

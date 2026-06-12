@@ -94,14 +94,16 @@ class SMTPOutput(Output):
             client.login(self.cfg.username, self.cfg.password)
         return client
 
-    async def send(self, item: AnalyzedUpdate) -> None:
+    async def send(self, item: AnalyzedUpdate) -> bool:
         if not self._should_send(item):
-            return
+            return True   # nothing to do — don't retry
         import asyncio
         try:
             await asyncio.to_thread(self._send_sync, item)
         except Exception as e:
             self._log_push_failure(item, e)
+            return False
+        return True
 
     def _send_sync(self, item: AnalyzedUpdate) -> None:
         """Synchronous send — runs in a worker thread so the engine's

@@ -50,8 +50,18 @@ class Output(ABC):
     _min: Severity | None = None
 
     @abstractmethod
-    async def send(self, item: AnalyzedUpdate) -> None:
-        """Send a single analyzed update. Implementations must be idempotent."""
+    async def send(self, item: AnalyzedUpdate) -> bool:
+        """Send a single analyzed update. Implementations must be idempotent.
+
+        Returns True when the item was delivered OR there was nothing to
+        do (output disabled, severity below the floor) — the engine treats
+        both as "done, don't retry". Returns False only on a transient
+        delivery failure (HTTP error, unreachable server), which keeps the
+        item in the pending-dispatch queue for the next scan. Without this
+        contract the queue's "failures stay queued and retry" promise was
+        fiction — every output swallowed its own errors, so the engine
+        deleted queue rows even when the push never went out.
+        """
         raise NotImplementedError
 
     # ─── reusable helpers (opt-in from subclasses) ────────────────
@@ -89,13 +99,14 @@ class Output(ABC):
         params: dict | None = None,
         headers: dict | None = None,
         timeout: float = 15.0,
-    ) -> None:
-        """Fire-and-forget JSON POST.
+    ) -> bool:
+        """JSON POST with the shared try/except/log boilerplate.
 
-        Wraps the httpx try/except/log boilerplate that 9 of the 11 push
-        outputs would otherwise reimplement. Catches `httpx.HTTPError`,
-        logs via `_log_push_failure`, and returns silently — the caller's
-        send path doesn't propagate dispatch failures back to the engine.
+        Wraps what 9 of the 11 push outputs would otherwise reimplement.
+        Catches `httpx.HTTPError`, logs via `_log_push_failure`, and
+        reports the outcome: True on 2xx, False on failure — `send()`
+        implementations return this directly so the engine's pending-
+        dispatch queue knows whether to retry.
 
         Outputs that need POST + PATCH fallback (Notion) or non-JSON
         bodies (ntfy text/plain, pushover form-encoded) keep their own
@@ -117,3 +128,5 @@ class Output(ABC):
                 r.raise_for_status()
         except httpx.HTTPError as e:
             self._log_push_failure(item, e)
+            return False
+        return True

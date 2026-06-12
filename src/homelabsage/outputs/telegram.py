@@ -39,11 +39,11 @@ class TelegramOutput(Output):
             lines.append(f"[Release notes]({u.release_url})")
         return "\n".join(lines)
 
-    async def send(self, item: AnalyzedUpdate) -> None:
+    async def send(self, item: AnalyzedUpdate) -> bool:
         if not self._should_send(item):
-            return
+            return True   # nothing to do — don't retry
         url = f"https://api.telegram.org/bot{self.cfg.bot_token}/sendMessage"
-        await self._push_json(url, item=item, json={
+        return await self._push_json(url, item=item, json={
             "chat_id": self.cfg.chat_id,
             "text": self._format(item),
             "parse_mode": "Markdown",

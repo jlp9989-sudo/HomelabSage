@@ -95,9 +95,9 @@ class NtfyOutput(Output):
             headers["Authorization"] = f"Bearer {self.cfg.auth_token}"
         return body, headers
 
-    async def send(self, item: AnalyzedUpdate) -> None:
+    async def send(self, item: AnalyzedUpdate) -> bool:
         if not self._should_send(item):
-            return
+            return True   # nothing to do — don't retry
         body, headers = self._build(item)
         # ntfy uses a plain-text body (not JSON) so we keep a custom POST
         # instead of `_push_json`. Failure path is the same — sanitised log
@@ -114,3 +114,5 @@ class NtfyOutput(Output):
                 r.raise_for_status()
         except httpx.HTTPError as e:
             self._log_push_failure(item, e)
+            return False
+        return True
