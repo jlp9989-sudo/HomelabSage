@@ -19,6 +19,7 @@ from . import (  # noqa: F401  (imported for side-effect: command registration)
     audit,
     audit_mute,
     audit_prune,
+    autoconfig,
     backup,
     check,
     chronicle,

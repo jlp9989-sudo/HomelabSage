@@ -1,0 +1,68 @@
+{% extends "_base.html" %}
+{% set nav = "settings" %}
+{% block title %}Auto-config · HomelabSage{% endblock %}
+{% block content %}
+
+<h2 style="margin-top:0">Auto-detected configuration</h2>
+<p class="muted">
+  HomelabSage inspected this host (Docker socket, filesystem probes) and
+  found settings it can fill in for you. Review the evidence, untick
+  anything you disagree with, and apply — values are written to the
+  <em>user overlay</em>, never to the deploy default, and your existing
+  list entries always survive a merge. Manage everything later in
+  <a href="/settings">Settings</a>.
+</p>
+
+{% if flash %}<div class="flash success">{{ flash }}</div>{% endif %}
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+{% if not writable %}
+  <div class="flash error">
+    Read-only — no writable config path. Run
+    <code>homelabsage serve -c &lt;path&gt;</code>.
+  </div>
+{% endif %}
+
+{% if proposals %}
+<form method="post" action="/autoconfig/apply">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:2rem"></th>
+        <th style="width:24%">Setting</th>
+        <th style="width:30%">Proposed value</th>
+        <th>Why</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in proposals %}
+      <tr>
+        <td>
+          <input type="checkbox" name="keys" value="{{ p.dotted }}"
+                 id="prop-{{ loop.index }}" checked
+                 aria-label="Apply {{ p.dotted }}">
+        </td>
+        <td><label for="prop-{{ loop.index }}"><code>{{ p.dotted }}</code></label></td>
+        <td>
+          <code>{{ p.value }}</code>
+          {% if p.current %}
+            <div class="muted" style="font-size:.75rem">was: <code>{{ p.current }}</code></div>
+          {% endif %}
+        </td>
+        <td class="muted">{{ p.evidence }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <button class="btn" type="submit" {% if not writable %}disabled{% endif %}>
+    Apply selected
+  </button>
+</form>
+{% else %}
+<p class="muted">
+  ✅ Nothing to propose — the config already reflects what this host
+  exposes. Re-visit after adding stacks or moving storage.
+</p>
+{% endif %}
+
+{% endblock %}

@@ -2,6 +2,42 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.13.0 — 2026-06-12
+
+**Auto-configuration** — the config now follows the same philosophy as the
+curator: the machine does the work, the user reviews. Several detectors
+shipped dormant only because they need lists the user had to type
+(compose paths, disk paths) — yet everything in those lists is
+discoverable from the Docker socket and the host.
+
+- `autoconfig.py` (new): `build_proposals()` inspects and returns
+  evidence-carrying proposals; `apply_proposals()` writes the selected
+  subset to the user overlay with full-Config Pydantic validation BEFORE
+  any byte hits disk (same discipline as the settings UI). Detections:
+  - `sources.docker.compose_scan_paths` ← the
+    `com.docker.compose.project.config_files` label compose stamps on
+    every container it manages; sibling stack dirs collapse to their
+    shared root (`/opt/stacks/a` + `/opt/stacks/b` → `/opt/stacks`).
+  - `disk_pressure.paths` ← `docker info` DockerRootDir (where pulls land).
+  - `parity_gate.enabled` ← Unraid (`/boot/config`) or mdraid
+    (`/proc/mdstat`) present.
+  - `image_size_growth_detect` + `image_fit_check` ← proposed ON once a
+    disk path is known (cheap, and they power the will-it-fit cross-signal).
+  - `tls_check.urls` ← `Host(...)` rules in Traefik router labels.
+  Additive only: list proposals merge with what the user wrote (their
+  entries always survive); best-effort (no socket → fewer proposals,
+  never an exception); read-only until applied.
+- CLI `homelabsage autoconfig` (review) / `--apply` / `--json`.
+- Web `/autoconfig`: review page with per-proposal checkbox + evidence,
+  apply re-detects so applied rows disappear; `GET /api/autoconfig` for
+  scripts. "🔍 Auto-detect" button on the settings index.
+- MCP tool `autoconfig` (read-only — a human applies).
+
+Verified live against the dev host: detected the Dockge stacks root from
+32 containers' labels, the docker root dir, and Unraid parity in one shot.
+
+1763 → 1778 tests. Ruff clean, 0 mypy errors / 187 files.
+
 ## v0.12.2 — 2026-06-12
 
 **Gate hardening** — the 12-jun review found that the delivery guarantees

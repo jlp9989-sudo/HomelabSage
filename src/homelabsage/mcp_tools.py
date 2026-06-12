@@ -378,6 +378,18 @@ def _tool_list_starred(_cfg: Config, db: Database, _params: dict) -> dict:
             "items": [_summarise_update(it) for it in items]}
 
 
+def _tool_autoconfig(cfg: Config, _db: Database, _params: dict) -> dict:
+    """Detect config values from this host and return evidence-carrying
+    proposals (compose paths, disk paths, parity gate, cheap detectors,
+    TLS hosts). Read-only — apply via the CLI `autoconfig --apply` or the
+    `/autoconfig` page so a human reviews first.
+    """
+    from .autoconfig import build_proposals
+    proposals = build_proposals(cfg)
+    return {"count": len(proposals),
+            "proposals": [p.to_dict() for p in proposals]}
+
+
 def _tool_doctor(cfg: Config, db: Database, params: dict) -> dict:
     """Run the bundled diagnostic (LLM / TLS / DNS / disk / compose / audit).
 
@@ -1221,6 +1233,21 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         "impl": _tool_compose_overrides,
+    },
+    "autoconfig": {
+        "description": (
+            "Detect config values from this host (Docker socket + "
+            "filesystem probes) and return evidence-carrying proposals: "
+            "compose scan paths, disk-pressure paths, parity gate, "
+            "image-size/fit detectors, TLS hostnames. Read-only — a "
+            "human applies via CLI --apply or the /autoconfig page."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        "impl": _tool_autoconfig,
     },
     "doctor": {
         "description": (

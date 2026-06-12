@@ -2,6 +2,7 @@
 {% set nav = "settings" %}
 {% block title %}Settings · HomelabSage{% endblock %}
 {% block header_actions %}
+  <a class="btn ghost" href="/autoconfig" title="Detect settings from this host and review them">🔍 Auto-detect</a>
   {% if total_overrides %}
     <span class="pill">{{ total_overrides }} override{{ '' if total_overrides == 1 else 's' }}</span>
   {% endif %}

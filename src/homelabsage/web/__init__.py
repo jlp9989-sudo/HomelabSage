@@ -32,6 +32,7 @@ from .auth import attach_basic_auth
 from .csrf import attach_csrf_guard
 from .lifecycle import register_lifecycle
 from .routes_audit import register_audit_routes
+from .routes_autoconfig import register_autoconfig_routes
 from .routes_diagnostics import register_diagnostics_routes
 from .routes_explain import register_explain_routes
 from .routes_health import register_health_routes
@@ -116,6 +117,7 @@ def create_app(cfg: Config, cfg_path: Path | None = None) -> FastAPI:
     register_health_routes(app)
     register_stack_health_routes(app, cfg, db)
     register_profile_route(app, cfg, env)
+    register_autoconfig_routes(app, cfg, cfg_path, env)
     register_metrics_route(app, cfg, db)
 
     # Static assets (HTMX, favicon, future CSS sprites). Mounted last so
