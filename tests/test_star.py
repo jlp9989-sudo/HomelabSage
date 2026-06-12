@@ -59,6 +59,45 @@ def test_star_toggle_returns_button_with_swap_endpoint(tmp_path):
     assert "hx-swap=" in r.text
 
 
+# ─── XSS: update_id reaches HTMX fragments unescaped ──────────────
+
+
+def test_htmx_fragment_builders_escape_update_id():
+    """Regression: update_id is `source:subject:new_version`, and subject
+    can arrive from external pushers via POST /api/inbox (length-checked,
+    not character-checked). The fragment builders interpolate it raw into
+    a `"`-quoted hx-post attribute, so a crafted subject breaks out and
+    fires stored XSS in the authenticated user's browser — the gap the
+    v0.6.2 inbox sanitisation (which fixed the *displayed subject*, not the
+    *derived id*) left open. The builders must HTML-escape the id.
+    """
+    from homelabsage.web.routes_updates import (
+        _note_cell_html,
+        _note_edit_form_html,
+        _snooze_cell_html,
+    )
+
+    evil = 'docker:"><script>alert(1)</script>:2'
+    for fragment in (
+        _note_cell_html(evil, ""),
+        _note_cell_html(evil, "a note"),
+        _note_edit_form_html(evil, ""),
+        _snooze_cell_html(evil, None),
+        _snooze_cell_html(evil, "2026-06-20T00:00:00+00:00"),
+    ):
+        assert "<script>" not in fragment
+        assert "&lt;script&gt;" in fragment
+
+
+def test_star_toggle_endpoint_escapes_malicious_id(tmp_path):
+    """End-to-end: the same payload through the real route stays escaped."""
+    client, db = _client(tmp_path)
+    item = _seed(db, subject='"><script>alert(1)</script>')
+    r = client.post(f"/updates/{item.id}/star/toggle")
+    assert r.status_code == 200
+    assert "<script>alert(1)</script>" not in r.text
+
+
 # ─── filter views ────────────────────────────────────────────────
 
 

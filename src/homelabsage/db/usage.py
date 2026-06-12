@@ -16,6 +16,7 @@ qualified honestly.
 from __future__ import annotations
 
 import sqlite3
+from datetime import timedelta
 from typing import Any
 
 from .._time import utcnow
@@ -70,8 +71,8 @@ class UsageMixin:
         Returns per-provider + per-model totals so the `/usage` page can
         render a small table without doing math in the template.
         """
-        cutoff = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        cutoff = cutoff.replace(day=max(1, cutoff.day - days))
+        midnight = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        cutoff = midnight - timedelta(days=days)
         # `created_at` is ISO-8601 lexicographic — string compare is safe
         # in the same time zone.
         rows = self._conn.execute(

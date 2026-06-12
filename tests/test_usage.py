@@ -67,6 +67,42 @@ def test_usage_summary_aggregates_by_provider_model(tmp_path: Path):
         db.close()
 
 
+def test_usage_summary_window_spans_full_days_not_calendar_month(tmp_path: Path):
+    """Regression: the N-day window must reach back N actual days, even
+    across a month boundary. The old code did
+    `cutoff.replace(day=max(1, day - days))`, which clamped the cutoff to
+    day-1 of the *current* month (e.g. 30 days back from the 12th → the
+    1st = only 11 days), silently dropping every row in the previous
+    month and lying about "is the free tier covering my scans?".
+    """
+    from datetime import datetime, timedelta
+
+    from homelabsage._time import utcnow
+    db = Database(tmp_path / "s.sqlite")
+    try:
+        now = utcnow()
+        recent = (now - timedelta(days=20)).isoformat()   # inside 30d window
+        ancient = (now - timedelta(days=40)).isoformat()   # outside it
+        for created in (recent, ancient):
+            db._conn.execute(
+                "INSERT INTO llm_usage (provider, model, update_id, "
+                "tokens_in, tokens_out, estimated, duration_ms, succeeded, "
+                "created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                ("groq", "m", None, 10, 5, 0, 100, 1, created),
+            )
+        db._conn.commit()
+        s = db.usage_summary(days=30)
+        # Only the 20-day-old row counts — independent of today's day-of-month.
+        assert s["totals"]["calls"] == 1
+        since = datetime.fromisoformat(s["since"])
+        expected = now.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) - timedelta(days=30)
+        assert since.date() == expected.date()
+    finally:
+        db.close()
+
+
 def test_usage_page_renders(tmp_path: Path):
     cfg = Config()
     cfg.web.auth.enabled = False

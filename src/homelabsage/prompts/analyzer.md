@@ -137,6 +137,38 @@ Rules:
   intentionally before applying.", and ensure severity is at least
   `medium`. Do NOT downgrade severity below medium even if the release
   notes look benign; the pin is a user-asserted constraint.
+- If the context block contains "image_fit", the candidate image may not
+  fit in the free space on the filesystem that backs the docker image
+  store. `verdict="wont_fit"` means the pull is LARGER than the free space
+  (`new_image_mib` > `free_mib`) and will fail mid-download, risking a
+  corrupt image cache — set `action_required` to true, set severity to at
+  least `high`, and set `recommended_action` to "free up disk before
+  pulling — needs ~<new_image_mib> MiB, only <free_mib> MiB free on
+  <path>". `verdict="tight"` means it fits but leaves little slack —
+  mention `headroom_after_mib` in the summary and add a `breaking_changes`
+  entry "low disk headroom after pull (<headroom_after_mib> MiB left on
+  <path>)". Quote the MiB numbers and `path` VERBATIM.
+- If the context block contains any of "restart_freq", "oom_killed", or
+  "healthcheck_stale", the container is ALREADY unstable before this
+  update (flapping, out-of-memory killed, or unhealthy for hours). Factor
+  this into the recommendation: an unstable container may be FIXED by the
+  update or further destabilised by it, so advise the user to investigate
+  why it's unstable first. Mention the concrete signal in the summary
+  verbatim (e.g. "container already OOM-killed", "restarting
+  <restarts_per_hour>/h", "unhealthy for <hours_unhealthy>h") and set
+  `recommended_action` to check the cause before applying. Do NOT raise
+  severity on instability alone — it's framing, not a verdict, unless the
+  release notes themselves address the failure mode.
+- If the context block contains "backup_health", your most recent backups
+  are stale or unverifiable: each entry in `repos` has `staleness_days`,
+  `severity`, and `ok` (false = the probe failed entirely). When THIS
+  update carries breaking_changes, a schema migration, or a major-version
+  bump, set `action_required` to true and PREPEND `recommended_action`
+  with "verify backups are current before applying — most recent snapshot
+  is <staleness_days>d old (repo <repo>)" (use the stalest / least-ok
+  repo). Mention the staleness in the summary. Do NOT raise severity on
+  backup staleness alone if the update itself is benign — a stale backup
+  is a reason to pause a RISKY apply, not to inflate a harmless one.
 
 # Update
 - Source: {source}

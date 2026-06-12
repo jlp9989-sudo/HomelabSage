@@ -412,7 +412,23 @@ def _parse_analysis(raw: str) -> Analysis | None:
         return Analysis(**data)
     except ValidationError as e:
         log.warning("LLM JSON did not match schema: %s", e)
-        # Best-effort fallback: keep summary if present
-        if "summary" in data:
-            return Analysis(severity=Severity.INFO, summary=str(data["summary"])[:500])
-        return None
+        # Best-effort fallback. For an update advisor, failing *down* to
+        # info hides danger: a row the model tried to flag critical would
+        # drop below every push threshold and, because dedup skips rows
+        # that already have an analysis, never get re-analysed. So keep the
+        # severity the model emitted if it's a valid value, otherwise fail
+        # *up* to high, and mark the summary so the degraded parse is
+        # visible to the user.
+        if "summary" not in data:
+            return None
+        raw_sev = data.get("severity")
+        severity = Severity.HIGH
+        if isinstance(raw_sev, str):
+            try:
+                severity = Severity(raw_sev.lower())
+            except ValueError:
+                severity = Severity.HIGH
+        return Analysis(
+            severity=severity,
+            summary=f"[parse-degraded] {str(data['summary'])[:500]}",
+        )

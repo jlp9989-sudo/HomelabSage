@@ -34,6 +34,10 @@ def _note_cell_html(update_id: str, note: str) -> str:
     the index template's initial render and the HTMX save target so the
     swapped fragment matches the static one byte-for-byte.
     """
+    # `update_id` is `source:subject:new_version`; subject/version reach us
+    # from external pushers via /api/inbox, so escape before it lands in an
+    # HTML attribute (the index template autoescapes, these fragments don't).
+    update_id = _html_escape(update_id)
     if note:
         body = (
             f'<span class="note-text">{_html_escape(note)}</span> '
@@ -56,6 +60,7 @@ def _note_edit_form_html(update_id: str, current: str) -> str:
     `/updates/{id}/note`; the response is `_note_cell_html` again so
     save returns the user to the read view.
     """
+    update_id = _html_escape(update_id)
     return (
         f'<td class="note-cell">'
         f'<form hx-post="/updates/{update_id}/note" '
@@ -80,6 +85,7 @@ def _snooze_cell_html(update_id: str, snooze_until: str | None) -> str:
     the `quick_snooze_html` HTMX target. Kept module-level so both
     callers stay in sync without circular helpers.
     """
+    update_id = _html_escape(update_id)
     if snooze_until:
         # Pretty up the timestamp: keep `YYYY-MM-DD HH:MM` then drop the
         # rest (timezone suffix). The DB always stores ISO 8601 UTC so
@@ -302,9 +308,10 @@ def register_updates_routes(
         icon = "★" if new else "☆"
         cls = "btn" if new else "btn ghost"
         label = "Unstar" if new else "Star"
+        safe_id = _html_escape(update_id)
         return HTMLResponse(
             f'<button class="{cls}" '
-            f'hx-post="/updates/{update_id}/star/toggle" '
+            f'hx-post="/updates/{safe_id}/star/toggle" '
             f'hx-swap="outerHTML" '
             f'title="Toggle star" aria-label="{label}" '
             f'aria-pressed="{"true" if new else "false"}">{icon}</button>'

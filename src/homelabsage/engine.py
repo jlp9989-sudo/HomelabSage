@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx
 
 from ._time import utcnow
+from .backup_health import BackupHealthReport, probe_repo
 from .config import Config
 from .curator.incremental import append_update_to_note
 from .db import Database
@@ -140,6 +141,11 @@ class Engine:
         batched: list[AnalyzedUpdate] = []
         batch_threshold = self._batch_threshold()
 
+        # Scan-level cross-signal context (disk free space, backup freshness)
+        # is the same for every update this cycle — compute it once and
+        # thread it into each row rather than re-probing per update.
+        scan_ctx = await self._scan_enrichments()
+
         for plugin in self.plugins:
             try:
                 items = await plugin.scan()
@@ -149,7 +155,7 @@ class Engine:
                 continue
             stats["scanned"] += len(items)
             for update in items:
-                analyzed = await self._analyze_single(update, stats)
+                analyzed = await self._analyze_single(update, stats, scan_ctx)
                 if analyzed is None:
                     continue  # dedup: already analyzed in a prior run
                 await self._dispatch_single(
@@ -229,17 +235,74 @@ class Engine:
         batch_cfg = self.cfg.outputs.batching
         return Severity(batch_cfg.below_severity) if batch_cfg.enabled else None
 
-    async def _analyze_single(
-        self, update, stats: dict[str, int],
-    ) -> AnalyzedUpdate | None:
-        """Process one Update through pin-check → dedup → LLM → persist →
-        auto-apply → curator hook. Returns the analyzed item, or None when
-        the update is a duplicate we already analyzed in a prior run.
+    async def _scan_enrichments(self) -> dict:
+        """Compute the cross-signal context shared by every update this scan.
+
+        Some signals don't vary per update — the host's free disk space and
+        the freshness of the backup repos are the same for every row in the
+        scan. Probing them once here (instead of per update) keeps the
+        per-row path cheap and the subprocess/stat cost bounded to once per
+        cycle. Returns a dict with optional keys consumed by
+        `_inject_cross_signals`:
+          - `free_space`: `{free_bytes, path}` of the tightest configured
+            filesystem (for will-it-fit).
+          - `backup_health`: `{repos: [...]}` listing only stale/failed
+            repos (healthy backups are omitted so they don't noise up rows).
         """
-        # Image-pin enforcement runs BEFORE the analyzer so the LLM sees the
-        # verdict in `context.pin_violation` and frames its recommendation
-        # against it. The Update's context dict is REPLACED (not mutated in
-        # place) so cached cross-run state isn't polluted.
+        enrich: dict = {}
+
+        docker_cfg = self.cfg.sources.docker
+        if docker_cfg.image_fit_check and self.cfg.disk_pressure.paths:
+            from .disk_pressure import tightest_free
+            free = tightest_free(self.cfg.disk_pressure.paths)
+            if free is not None:
+                enrich["free_space"] = {"free_bytes": free[0], "path": free[1]}
+
+        bh = self.cfg.backup_health
+        if bh.enabled and bh.inject_into_updates and bh.repos:
+            report = await asyncio.to_thread(self._probe_backups)
+            stale = [
+                r.to_context() for r in report.results
+                if not r.ok or r.severity in ("medium", "high", "critical")
+            ]
+            if stale:
+                enrich["backup_health"] = {"repos": stale}
+
+        return enrich
+
+    def _probe_backups(self) -> BackupHealthReport:
+        """Probe every configured backup repo (blocking subprocess work —
+        always call via `asyncio.to_thread`). Best-effort: each `probe_repo`
+        returns a failure verdict rather than raising."""
+        results = [
+            probe_repo(
+                name=r.name, tool=r.tool, env=r.env or None,
+                binary=r.binary or None,
+                warn_after_days=r.warn_after_days,
+                critical_after_days=r.critical_after_days,
+                timeout=r.timeout_seconds,
+            )
+            for r in self.cfg.backup_health.repos
+        ]
+        return BackupHealthReport(results=results)
+
+    def _inject_cross_signals(self, update, scan_ctx: dict):
+        """Attach cross-signal verdicts to `update.context` before the LLM call.
+
+        Each signal crosses data the analyzer would otherwise see only in
+        pieces (or not at all) into one framed verdict the prompt has a rule
+        for:
+          - `pin_violation`: a user pin vs the new version (per-update).
+          - `image_fit`: candidate image size vs free disk (per-update size,
+            scan-level free space).
+          - `backup_health`: snapshot freshness, so applying a breaking
+            update on stale backups gets a warning (scan-level).
+
+        The context dict is REPLACED, never mutated in place, so cached
+        cross-run state on the Update isn't polluted.
+        """
+        extra: dict = {}
+
         if self.cfg.image_pins.enabled and self.cfg.image_pins.pins:
             from .image_pins import evaluate as evaluate_pin
             verdict = evaluate_pin(
@@ -248,10 +311,38 @@ class Engine:
                 pins=self.cfg.image_pins.pins,
             )
             if verdict is not None:
-                update.context = {
-                    **(update.context or {}),
-                    "pin_violation": verdict.to_context(),
-                }
+                extra["pin_violation"] = verdict.to_context()
+
+        free_space = scan_ctx.get("free_space")
+        growth = (update.context or {}).get("image_size_growth")
+        if free_space and isinstance(growth, dict) and growth.get("new_mib"):
+            from .image_fit import evaluate as evaluate_fit
+            fit = evaluate_fit(
+                new_image_bytes=int(float(growth["new_mib"]) * 1024 * 1024),
+                free_bytes=int(free_space["free_bytes"]),
+                path=str(free_space["path"]),
+            )
+            if fit is not None:
+                extra["image_fit"] = fit.to_context()
+
+        if "backup_health" in scan_ctx:
+            extra["backup_health"] = scan_ctx["backup_health"]
+
+        if extra:
+            update.context = {**(update.context or {}), **extra}
+        return update
+
+    async def _analyze_single(
+        self, update, stats: dict[str, int], scan_ctx: dict,
+    ) -> AnalyzedUpdate | None:
+        """Process one Update through cross-signals → dedup → LLM → persist →
+        auto-apply → curator hook. Returns the analyzed item, or None when
+        the update is a duplicate we already analyzed in a prior run.
+        """
+        # Cross-signal verdicts (pin, will-it-fit, backup freshness) run
+        # BEFORE the analyzer so the LLM sees them framed in `context` and
+        # the prompt rules can act on them.
+        update = self._inject_cross_signals(update, scan_ctx)
 
         analyzed = AnalyzedUpdate(update=update)
         existing = self.db.get(analyzed.id)

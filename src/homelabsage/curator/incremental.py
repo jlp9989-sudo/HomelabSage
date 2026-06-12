@@ -44,6 +44,17 @@ LOG_END = "<!-- update-log:end -->"
 _LINE_TOKEN_RE = re.compile(r"<!--\s*update:([^\s>-]+)\s*-->")
 
 
+def _is_hold(recommended_action: str | None) -> bool:
+    """True when the analyzer recommended holding the update.
+
+    The prompt (prompts/analyzer.md) tells the model to write
+    `recommended_action` as `"HOLD — <reason>"` (e.g. a pin violation —
+    the highest-trust signal we surface), so an exact `== "hold"` never
+    matches. Match the prefix instead.
+    """
+    return (recommended_action or "").strip().lower().startswith("hold")
+
+
 def _should_log(analyzed: AnalyzedUpdate) -> bool:
     """True if this analyzed update is worth pinning to the note.
 
@@ -54,7 +65,7 @@ def _should_log(analyzed: AnalyzedUpdate) -> bool:
     a = analyzed.analysis
     if a is None:
         return False
-    if (a.recommended_action or "").strip().lower() == "hold":
+    if _is_hold(a.recommended_action):
         return True
     return bool(a.breaking_changes)
 
@@ -73,7 +84,7 @@ def _format_line(analyzed: AnalyzedUpdate, *, now: datetime | None = None) -> st
     a = analyzed.analysis
     assert a is not None
     when = (now or datetime.now(UTC)).strftime("%Y-%m-%d")
-    label = "HOLD" if (a.recommended_action or "").strip().lower() == "hold" else "BREAKING"
+    label = "HOLD" if _is_hold(a.recommended_action) else "BREAKING"
     summary = (a.summary or "").strip()
     if not summary and a.breaking_changes:
         summary = a.breaking_changes[0].strip()

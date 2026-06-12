@@ -138,6 +138,15 @@ sources:
     image_size_growth_detect: false
     image_size_growth_ratio: 2.0
 
+    # ── ¿Cabe el update? (cross-signal) ───────────────────────────────
+    # Cruza el tamaño de la imagen candidata (de image_size_growth_detect,
+    # que debe estar ON) con el espacio libre de `disk_pressure.paths` y
+    # añade `context.image_fit` cuando el pull no cabría (`wont_fit`) o
+    # dejaría poco margen (`tight`). La prompt rule avisa de liberar disco
+    # antes de aplicar. Off por defecto; necesita ambos inputs configurados.
+    # Sin coste de red: 1 statvfs por scan.
+    image_fit_check: false
+
   # ── Home Assistant ──────────────────────────────────────────────────
   homeassistant:
     enabled: false

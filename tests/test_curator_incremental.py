@@ -69,6 +69,16 @@ def test_should_log_true_for_hold_case_insensitive():
     assert _should_log(_analyzed(action="  Hold  ")) is True
 
 
+def test_should_log_true_for_hold_with_reason_suffix():
+    """Regression: the analyzer is prompted to write
+    `recommended_action="HOLD — image_pins.<x> is set to <pin>…"`, so an
+    exact `== "hold"` never matched and pin violations never logged.
+    """
+    action = "HOLD — image_pins.tintes is set to <=11.0.13"
+    assert _should_log(_analyzed(action=action)) is True
+    assert _format_line(_analyzed(action=action), now=FIXED_NOW).count("HOLD") == 1
+
+
 def test_should_log_true_for_breaking_changes_even_without_hold():
     a = _analyzed(action="apply", breaking=["removes config key X"])
     assert _should_log(a) is True

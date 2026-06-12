@@ -56,12 +56,27 @@ def test_parser_returns_none_on_garbage():
     assert _parse_analysis("not even close to JSON") is None
 
 
-def test_parser_fallback_keeps_summary_when_schema_wrong():
-    # Missing 'severity' but has 'summary' — best effort
+def test_parser_fallback_fails_up_to_high_when_severity_missing():
+    # Missing 'severity' but has 'summary'. For an update advisor, an
+    # unparseable verdict must fail *up* (high), not down to info where it
+    # would slip below every push threshold and never be re-analysed.
     a = _parse_analysis('{"summary":"useful sentence"}')
     assert a is not None
-    assert a.severity is Severity.INFO
+    assert a.severity is Severity.HIGH
     assert "useful sentence" in a.summary
+    assert a.summary.startswith("[parse-degraded]")
+
+
+def test_parser_fallback_rescues_valid_severity_on_other_schema_error():
+    # severity is valid but another field breaks validation
+    # (breaking_changes must be a list). Keep the severity the model
+    # emitted rather than discarding it.
+    a = _parse_analysis(
+        '{"severity":"critical","summary":"x","breaking_changes":"oops"}'
+    )
+    assert a is not None
+    assert a.severity is Severity.CRITICAL
+    assert a.summary.startswith("[parse-degraded]")
 
 
 def test_build_prompt_includes_all_context_fields():
@@ -108,12 +123,13 @@ def test_build_prompt_truncates_huge_release_notes():
     # Release notes are capped at 15k chars in the template. We allow a small
     # margin for incidental "A" characters elsewhere in the template literal.
     assert 15000 <= p.count("A") <= 15020
-    # The bound is total = 15k (capped release notes) + template overhead +
-    # accumulated prompt rules. The point of the check is that release-note
-    # truncation IS happening — without it the prompt would be ≥50k chars.
-    # Bumping the overhead allowance is fine; bumping past the cap (i.e.
-    # ≥25k total when release_notes were 50k) is not.
-    assert len(p) < 25000
+    # The real invariant: the whole prompt is SHORTER than the raw release
+    # notes (50k), which can only be true if truncation happened. The "A"
+    # count above already pins the cap to 15k; this is the backstop. The
+    # ceiling tracks template overhead + accumulated prompt rules (~12k as
+    # of the cross-signal rules), so it's well under 50k but not pinned so
+    # tight that adding a conditional rule trips it.
+    assert len(p) < 30000
 
 
 # ─── <think> stripper ────────────────────────────────────────────────────

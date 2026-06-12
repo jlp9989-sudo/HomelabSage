@@ -2,6 +2,56 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.12.0 — 2026-06-12
+
+**Cross-signal analysis** — turn three standalone detectors into update
+framing the LLM actually uses, so the advisor answers "can I update X
+without breaking Y?" instead of just bundling monitoring features. All
+injected via the same `context` → prompt-rule path as `pin_violation`,
+consolidated into a new `Engine._inject_cross_signals` (also extracts the
+old inline pin block out of `_analyze_single`) plus a once-per-scan
+`Engine._scan_enrichments` for the host-level probes.
+
+- **Will-it-fit** (`image_fit.py`, new): crosses the candidate image size
+  (`image_size_growth`) with free space on `disk_pressure.paths` and
+  attaches `context.image_fit` when a `docker pull` would not fit
+  (`wont_fit`, critical) or leave little slack (`tight`, high). Conservative
+  model (assumes no overlay layer sharing). New `sources.docker.image_fit_check`
+  toggle (off; needs `image_size_growth_detect` + `disk_pressure.paths`).
+  New `disk_pressure.tightest_free()` helper (shares the stat/dedup
+  discipline of `evaluate`). Prompt rule quotes the MiB numbers + path.
+- **Pre-update instability** (prompt rule only): when `context` already
+  carries `restart_freq`, `oom_killed`, or `healthcheck_stale` (the docker
+  plugin attaches these today but nothing told the analyzer to use them for
+  update framing), the LLM now flags that the container is unstable BEFORE
+  the change and advises finding the cause first. No new code — the signals
+  were already there.
+- **Backup-before-breaking** (wires the long-declared
+  `backup_health.inject_into_updates`): probes the configured restic/borg/
+  kopia repos once per scan and attaches `context.backup_health` — but only
+  the stale/failed repos (≥ medium), so healthy backups don't noise up every
+  row. Prompt rule prepends a "verify backups are current" warning when the
+  update carries breaking_changes / a migration / a major bump; never
+  inflates severity on a benign update.
+
+Also folds in the bug-fix pass that preceded it:
+- **usage tracker window** (`db/usage.py`): "last N days" used
+  `cutoff.replace(day=max(1, day-N))`, clamping to day-1 of the current
+  month (30 days back from the 12th = 11 days). Now `- timedelta(days=N)`.
+- **curator HOLD** (`curator/incremental.py`): matched
+  `recommended_action == "hold"`, but the prompt emits `"HOLD — <reason>"`,
+  so pin-violation holds never logged. Now prefix-matched via `_is_hold`.
+- **LLM parse fallback** (`llm.py`): a schema-invalid analysis fell back to
+  `severity=info`, hiding danger (drops below push thresholds, never
+  re-analysed). Now rescues a valid emitted severity or fails *up* to
+  `high`, marked `[parse-degraded]`.
+- **XSS** (`web/routes_updates.py`): `update_id` (derived from the
+  inbox-supplied subject) was interpolated unescaped into the HTMX
+  star/snooze/note fragment builders. Now HTML-escaped — the gap the v0.6.2
+  inbox sanitisation left.
+
+1725 → 1749 tests. Ruff clean, 0 mypy errors.
+
 ## v0.11.11 — 2026-06-06
 
 Refactor pass #12 (wave 6 of test reorg #9): **bulk-rename of every

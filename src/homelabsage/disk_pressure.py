@@ -109,4 +109,33 @@ def evaluate(paths: list[str]) -> list[DiskFinding]:
     return out
 
 
-__all__ = ["DiskFinding", "evaluate"]
+def tightest_free(paths: list[str]) -> tuple[int, str] | None:
+    """Return `(free_bytes, path)` for the path with the LEAST free space.
+
+    Shares the same stat/dedup discipline as `evaluate` — non-existent or
+    unstat'able paths are skipped, duplicate filesystems collapse to one.
+    Returns None when no path could be measured. Used by the will-it-fit
+    cross-signal to learn how much room a `docker pull` has to land in.
+    """
+    seen_devices: set[int] = set()
+    best: tuple[int, str] | None = None
+    for raw in paths:
+        p = Path(raw).expanduser()
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        if st.st_dev in seen_devices:
+            continue
+        seen_devices.add(st.st_dev)
+        try:
+            usage = shutil.disk_usage(p)
+        except OSError:
+            continue
+        free = usage.free or 0
+        if best is None or free < best[0]:
+            best = (free, str(p))
+    return best
+
+
+__all__ = ["DiskFinding", "evaluate", "tightest_free"]

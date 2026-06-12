@@ -64,6 +64,13 @@ class DockerSourceConfig(BaseModel):
         2.0,
         description="Trigger threshold: new_size_bytes / current_size_bytes ≥ ratio.",
     )
+    # Will-it-fit cross-signal. When ON, the engine crosses the candidate
+    # image's size (from `image_size_growth_detect`, which must also be on)
+    # with the free space on `disk_pressure.paths`, and attaches
+    # `Update.context.image_fit` when the pull would not fit / be tight.
+    # Off by default — needs both inputs configured to mean anything; no
+    # extra HTTP or subprocess (one `statvfs` per scan).
+    image_fit_check: bool = False
     # Release-cadence stagnation: for each repo, compute the typical
     # days-between-releases over the last 30 releases and flag when
     # `now - latest_release` exceeds the historical median by ≥2× (medium)
