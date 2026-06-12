@@ -2,6 +2,38 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v1.0.0 — 2026-06-12
+
+**First stable release.** Consolidates everything since v0.2.0 (the last
+version promoted to production) — 90+ releases across five weeks:
+
+- **The wedge, complete**: notes-aware LLM analysis with the full
+  release-notes span between your version and the candidate, curator
+  auto-written notes with honest Rule-7 interviews, and cross-signal
+  framing (image pins, will-it-fit disk check, pre-update instability,
+  backup-before-breaking).
+- **Auto-configuration**: the machine proposes settings detected from
+  the host (compose paths, docker root, parity) with evidence; the user
+  reviews and applies.
+- **Delivery contracts that hold**: severity gates, quiet hours, parity
+  gate, snooze, and low-severity batching enforced on every path —
+  including the pending-dispatch flush and the rollup; `Output.send()`
+  reports delivery so the queue retries instead of silently losing.
+- **Operational surface**: audit (registry-driven findings + mutes +
+  history diff), doctor, autoconfig, 40+ CLI commands, 50-tool MCP
+  endpoint, Prometheus metrics, dashboard widgets, weekly digest.
+- **Hardened**: SSRF guard on user-supplied URL fetches, minimal
+  auth-bypass set, shape-preserving secret masking, pre-LLM secret
+  redaction, CSRF origin checks, conditional prompt assembly.
+- **Quality bar**: ~1,700 tests, ruff clean, 0 mypy errors, every
+  release through the same triple gate.
+
+The v1.0 punch list (5 Critical + 12 Important + 5 Nits) closed in
+v0.10.x; the 12-jun full review's findings (correctness, architecture,
+security, LLM/product) closed across v0.12.0–v0.14.0. No schema or
+config breaking changes against any v0.x — DB migrations are
+forward-only and idempotent.
+
 ## v0.14.0 — 2026-06-12
 
 **Conditional prompt assembly** — the analyzer prompt had grown to 24

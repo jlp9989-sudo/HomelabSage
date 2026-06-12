@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/jlp9989-sudo/HomelabSage/actions/workflows/ci.yml"><img src="https://github.com/jlp9989-sudo/HomelabSage/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
-  <a href="#"><img src="https://img.shields.io/badge/status-pre--alpha-orange" alt="Status"></a>
+  <a href="#"><img src="https://img.shields.io/badge/status-beta-green" alt="Status"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python"></a>
 </p>
 

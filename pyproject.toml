@@ -1,6 +1,6 @@
 [project]
 name = "homelabsage"
-version = "0.14.0"
+version = "1.0.0"
 description = "AI-powered homelab analyzer, update tracker and improvement advisor"
 readme = "README.md"
 license = { text = "AGPL-3.0-only" }
@@ -8,7 +8,7 @@ requires-python = ">=3.11"
 authors = [{ name = "Javier López", email = "jlp9989@gmail.com" }]
 keywords = ["homelab", "docker", "homeassistant", "updates", "ai", "llm", "ollama"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
