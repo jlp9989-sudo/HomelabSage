@@ -404,7 +404,7 @@ def test_mcp_run_coro_helper_handles_nested_loop():
     """The MCP impls used to `asyncio.run()` from inside the FastAPI
     async handler; now `_run_coro` detects the running loop and
     schedules on a worker thread."""
-    from homelabsage.mcp_tools import _run_coro
+    from homelabsage.mcp_tools._shared import _run_coro
 
     async def _async_op():
         return 42

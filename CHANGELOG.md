@@ -2,6 +2,29 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.13.2 — 2026-06-12
+
+**mcp_tools split** — the last finding from the 12-jun architecture
+review. The 1,712-line `mcp_tools.py` (50 handlers + a 660-line TOOLS
+descriptor literal) is now a package with one module per domain, each
+owning its `_tool_*` impls AND their JSON-Schema descriptors as a
+`TOOLS` fragment — adding a tool touches exactly one file:
+
+- `mcp_tools/updates.py` (19 tools) — rows, status, notes, stars,
+  snooze, diffs, explainers.
+- `mcp_tools/audit_tools.py` (9) — report, history, diff, mutes, prune.
+- `mcp_tools/probes.py` (11) — doctor, dns/disk/tls, compose graph,
+  where-is, autoconfig.
+- `mcp_tools/ops.py` (11) — diagnostics, watched, dispatch queue,
+  analyze_url, csi, chronicle, system info.
+- `mcp_tools/_shared.py` — `_run_coro` + update shaping helpers.
+
+`__init__.py` assembles the registry, so `mcp.py`'s
+`from .mcp_tools import TOOLS` is unchanged. Pure mechanical move
+(AST-driven), zero behaviour change; largest module is now 613 lines.
+
+1699 tests. Ruff clean, 0 mypy errors / 183 source files.
+
 ## v0.13.1 — 2026-06-12
 
 **Hygiene pass** — the 12-jun architecture review found the cost of the
