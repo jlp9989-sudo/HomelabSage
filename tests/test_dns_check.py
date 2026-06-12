@@ -10,60 +10,8 @@ import socket
 import pytest
 
 from homelabsage.config import Config
-from homelabsage.disappearance import (
-    DisappearanceFinding,
-    diff_snapshots,
-    load_snapshot,
-    save_snapshot,
-)
 from homelabsage.dns_check import DNSFinding, check_hostnames
 from homelabsage.dns_check import probe as probe_dns
-
-# ─── disappearance ────────────────────────────────────────────────
-
-
-def test_disappearance_diff_returns_missing():
-    prev = {"a": "2026-06-01T00:00:00Z", "b": "2026-06-01T00:00:00Z"}
-    out = diff_snapshots(prev, {"a"})
-    assert len(out) == 1
-    assert out[0].name == "b"
-    assert out[0].last_seen_at == "2026-06-01T00:00:00Z"
-
-
-def test_disappearance_diff_no_changes():
-    prev = {"a": "2026-06-01T00:00:00Z"}
-    assert diff_snapshots(prev, {"a"}) == []
-
-
-def test_disappearance_diff_extra_in_current_ignored():
-    prev = {"a": "t"}
-    assert diff_snapshots(prev, {"a", "b"}) == []
-
-
-def test_disappearance_save_and_load_roundtrip(tmp_path):
-    snap_path = tmp_path / "snap.json"
-    save_snapshot(snap_path, {"a", "b"}, "2026-06-04T00:00:00Z")
-    loaded = load_snapshot(snap_path)
-    assert loaded == {
-        "a": "2026-06-04T00:00:00Z",
-        "b": "2026-06-04T00:00:00Z",
-    }
-
-
-def test_disappearance_load_corrupt_returns_empty(tmp_path):
-    p = tmp_path / "snap.json"
-    p.write_text("not json")
-    assert load_snapshot(p) == {}
-
-
-def test_disappearance_load_missing_returns_empty(tmp_path):
-    assert load_snapshot(tmp_path / "nope.json") == {}
-
-
-def test_disappearance_to_context_shape():
-    d = DisappearanceFinding(name="x", last_seen_at="t")
-    assert d.to_context() == {"name": "x", "last_seen_at": "t"}
-
 
 # ─── DNS check ────────────────────────────────────────────────────
 

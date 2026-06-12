@@ -26,17 +26,16 @@ import typer
 from ..audit import build_report, render_markdown, run_audit
 from ..config import load_config
 from ..db import Database
+from ..models import Severity, severity_order
 from ._common import CONFIG_OPT, VERBOSE_OPT, app, console, setup_logging
-
-_SEVERITY_ORDER = {"info": 0, "medium": 1, "high": 2, "critical": 3}
 
 
 def _validate_severity(value: str) -> str:
     if not value:
         return ""
-    if value not in _SEVERITY_ORDER:
+    if value not in {s.value for s in Severity}:
         raise typer.BadParameter(
-            f"--severity must be one of {sorted(_SEVERITY_ORDER)} (got {value!r})"
+            f"--severity must be one of {sorted(s.value for s in Severity)} (got {value!r})"
         )
     return value
 
@@ -49,10 +48,10 @@ def _filter_findings(report, floor: str):
     """
     if not floor:
         return report
-    threshold = _SEVERITY_ORDER[floor]
+    threshold = severity_order(floor)
     kept = [
         f for f in report.findings
-        if _SEVERITY_ORDER.get(f.severity, 0) >= threshold
+        if severity_order(f.severity) >= threshold
     ]
     by_sev: dict[str, int] = {}
     by_cat: dict[str, int] = {}

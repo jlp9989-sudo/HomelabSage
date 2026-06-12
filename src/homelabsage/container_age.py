@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from ._time import parse_iso, utcnow
+from ._time import parse_docker_ts, utcnow
 
 
 @dataclass
@@ -40,33 +40,16 @@ class AgeFinding:
 def _extract_created(attrs: dict) -> datetime | None:
     """Pull the container's `Created` timestamp from docker SDK attrs.
 
-    Docker emits ISO-8601 with `Z` suffix on Linux daemons. Falls back
-    silently when the field is missing or unparseable.
+    Docker emits ISO-8601 with `Z` suffix and up to 9 fractional digits;
+    `parse_docker_ts` handles the trim. Falls back silently when the field
+    is missing or unparseable.
     """
     if not isinstance(attrs, dict):
         return None
     raw = attrs.get("Created") or (attrs.get("State") or {}).get("Created")
-    if not isinstance(raw, str) or not raw:
+    if not isinstance(raw, str):
         return None
-    # Docker uses `2026-01-15T10:30:45.123456789Z` (nanoseconds). Python's
-    # fromisoformat in 3.11 accepts `Z` but not trailing nanos > 6 digits.
-    # Truncate to microseconds before handing to parse_iso.
-    if "." in raw:
-        head, _, tail = raw.partition(".")
-        # Keep at most 6 chars of fractional seconds + the trailing `Z`/offset.
-        tz_marker = ""
-        for marker in ("Z", "+", "-"):
-            idx = tail.find(marker)
-            if idx != -1:
-                tz_marker = tail[idx:]
-                tail = tail[:idx]
-                break
-        tail = tail[:6]
-        raw = f"{head}.{tail}{tz_marker}"
-    try:
-        return parse_iso(raw)
-    except ValueError:
-        return None
+    return parse_docker_ts(raw)
 
 
 def evaluate(

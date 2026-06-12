@@ -5,88 +5,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
 from homelabsage.config import Config
-from homelabsage.restart_drift import (
-    RestartDriftFinding,
-)
-from homelabsage.restart_drift import (
-    evaluate as eval_drift,
-)
-
-# ─── restart_drift ────────────────────────────────────────────────
-
-
-def test_restart_drift_recent_no_apply_flags():
-    now = datetime(2026, 6, 4, 12, 0, 0, tzinfo=UTC)
-    started = now - timedelta(minutes=30)
-    out = eval_drift(started_at=started, now=now)
-    assert out is not None
-    assert out.severity == "info"
-    assert 0.4 <= out.hours_since_start <= 0.6
-
-
-def test_restart_drift_too_old_no_flag():
-    now = datetime(2026, 6, 4, 12, 0, 0, tzinfo=UTC)
-    started = now - timedelta(hours=24)
-    assert eval_drift(started_at=started, now=now) is None
-
-
-def test_restart_drift_too_recent_no_flag():
-    """Just-started containers race with scan; skip <min_hours."""
-    now = datetime(2026, 6, 4, 12, 0, 0, tzinfo=UTC)
-    started = now - timedelta(minutes=5)
-    assert eval_drift(started_at=started, now=now) is None
-
-
-def test_restart_drift_attributed_to_recent_apply():
-    now = datetime(2026, 6, 4, 12, 0, 0, tzinfo=UTC)
-    started = now - timedelta(minutes=30)
-    # apply was 15 min before restart — within 1h window
-    applied = started - timedelta(minutes=15)
-    assert eval_drift(
-        started_at=started, now=now, last_applied_at=applied,
-    ) is None
-
-
-def test_restart_drift_distant_apply_does_not_attribute():
-    now = datetime(2026, 6, 4, 12, 0, 0, tzinfo=UTC)
-    started = now - timedelta(minutes=30)
-    # apply was 5 days before restart
-    applied = started - timedelta(days=5)
-    out = eval_drift(
-        started_at=started, now=now, last_applied_at=applied,
-    )
-    assert out is not None
-    assert out.has_recent_apply is False
-
-
-def test_restart_drift_handles_naive_timestamps():
-    now = datetime(2026, 6, 4, 12, 0, 0)
-    started = now - timedelta(minutes=30)
-    out = eval_drift(started_at=started, now=now)
-    assert out is not None
-
-
-def test_restart_drift_none_started_at_returns_none():
-    now = datetime(2026, 6, 4, 12, 0, 0, tzinfo=UTC)
-    assert eval_drift(started_at=None, now=now) is None
-
-
-def test_restart_drift_to_context_shape():
-    d = RestartDriftFinding(
-        started_at="2026-06-04T11:30:00+00:00",
-        hours_since_start=0.5,
-        has_recent_apply=False,
-        severity="info",
-    )
-    ctx = d.to_context()
-    assert ctx["hours_since_start"] == 0.5
-    assert ctx["severity"] == "info"
-
 
 # ─── GitHub release webhook ───────────────────────────────────────
 # Snooze engine wiring tests moved to test_snooze.py in v0.11.6.

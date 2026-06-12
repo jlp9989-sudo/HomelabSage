@@ -10,12 +10,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from homelabsage._time import parse_docker_ts
 from homelabsage.config import DockerSourceConfig
 from homelabsage.plugins.docker import (
     _SEMVER_RE,
     DockerPlugin,
     _orphan_days,
-    _parse_docker_timestamp,
 )
 
 
@@ -86,26 +86,26 @@ def test_is_newer_refuses_to_compare_non_semver():
         ("2025-04-12T10:33:45.987654321+02:00", 2025, 2),
     ],
 )
-def test_parse_docker_timestamp_accepts_real_shapes(raw, expected_year, expected_offset_hours):
-    dt = _parse_docker_timestamp(raw)
+def test_parse_docker_ts_accepts_real_shapes(raw, expected_year, expected_offset_hours):
+    dt = parse_docker_ts(raw)
     assert dt is not None
     assert dt.year == expected_year
     assert dt.utcoffset() is not None
     assert dt.utcoffset().total_seconds() == expected_offset_hours * 3600
 
 
-def test_parse_docker_timestamp_returns_none_for_sentinel():
+def test_parse_docker_ts_returns_none_for_sentinel():
     # Docker uses 0001-01-01T00:00:00Z when the field is unset.
-    assert _parse_docker_timestamp("0001-01-01T00:00:00Z") is None
+    assert parse_docker_ts("0001-01-01T00:00:00Z") is None
 
 
-def test_parse_docker_timestamp_returns_none_for_empty():
-    assert _parse_docker_timestamp("") is None
-    assert _parse_docker_timestamp("   ") is None
+def test_parse_docker_ts_returns_none_for_empty():
+    assert parse_docker_ts("") is None
+    assert parse_docker_ts("   ") is None
 
 
-def test_parse_docker_timestamp_returns_none_for_garbage():
-    assert _parse_docker_timestamp("not a timestamp") is None
+def test_parse_docker_ts_returns_none_for_garbage():
+    assert parse_docker_ts("not a timestamp") is None
 
 
 # ─── orphan detection ────────────────────────────────────────────────────

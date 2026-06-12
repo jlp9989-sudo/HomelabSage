@@ -24,6 +24,20 @@ class Severity(StrEnum):
         return {"info": 0, "medium": 1, "high": 2, "critical": 3}[self.value]
 
 
+def severity_order(value: object, *, default: int = 0) -> int:
+    """Rank an arbitrary severity value on the canonical enum order.
+
+    Detectors and audit findings carry severity as plain strings (their
+    `to_context()` output is JSON), so ranking code kept growing private
+    `_SEVERITY_ORDER` dicts — five copies at the worst point. This is the
+    one shared ranking: case-insensitive, unknown/None → `default`.
+    """
+    try:
+        return Severity(str(value).lower()).order
+    except ValueError:
+        return default
+
+
 class UpdateStatus(StrEnum):
     """Tracking state of a detected update in the local DB."""
 

@@ -10,8 +10,6 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
 from homelabsage import web
-from homelabsage.arch_mismatch import ArchFinding, host_platform
-from homelabsage.arch_mismatch import evaluate as arch_eval
 from homelabsage.config import (
     AppriseOutputConfig,
     Config,
@@ -219,55 +217,6 @@ def test_evaluate_only_mem_limit_emits_finding():
     assert f is not None
     assert f.has_mem_limit
     assert not f.has_cpu_limit
-
-
-# ─── arch_mismatch ──────────────────────────────────────────────────
-
-
-def test_host_platform_resolves_known_machine(monkeypatch):
-    monkeypatch.setattr("platform.system", lambda: "Linux")
-    monkeypatch.setattr("platform.machine", lambda: "x86_64")
-    assert host_platform() == "linux/amd64"
-
-
-def test_arch_evaluate_returns_none_when_no_manifests_array():
-    assert arch_eval({"schemaVersion": 2, "config": {}}) is None
-    assert arch_eval(None) is None
-
-
-def test_arch_evaluate_finds_mismatch():
-    manifest = {
-        "manifests": [
-            {"platform": {"os": "linux", "architecture": "arm64"}},
-            {"platform": {"os": "linux", "architecture": "arm/v7"}},
-        ],
-    }
-    f = arch_eval(manifest, host="linux/amd64")
-    assert isinstance(f, ArchFinding)
-    assert f.host_arch == "linux/amd64"
-    assert "linux/arm64" in f.available
-    assert not f.matches
-
-
-def test_arch_evaluate_returns_none_when_match():
-    manifest = {
-        "manifests": [
-            {"platform": {"os": "linux", "architecture": "amd64"}},
-            {"platform": {"os": "linux", "architecture": "arm64"}},
-        ],
-    }
-    assert arch_eval(manifest, host="linux/amd64") is None
-
-
-def test_arch_evaluate_variant_match():
-    """`linux/arm64/v8` covers a host that just declares `linux/arm64`."""
-    manifest = {
-        "manifests": [
-            {"platform": {"os": "linux", "architecture": "arm64", "variant": "v8"}},
-        ],
-    }
-    # Host declares no variant — variant-suffixed manifest still satisfies
-    assert arch_eval(manifest, host="linux/arm64") is None
 
 
 # ─── scan_diff ──────────────────────────────────────────────────────

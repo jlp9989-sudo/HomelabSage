@@ -11,6 +11,7 @@ import docker
 from docker.models.containers import Container
 from packaging.version import InvalidVersion, Version
 
+from .._time import parse_docker_ts
 from ..compose import DependencyGraph
 from ..compose import build_graph as build_compose_graph
 from ..config import DockerSourceConfig
@@ -30,30 +31,6 @@ from . import Plugin
 log = logging.getLogger(__name__)
 
 
-def _parse_docker_timestamp(ts: str) -> datetime | None:
-    """Parse Docker's RFC3339 timestamps (potentially with nanosecond precision).
-
-    Docker returns ISO-8601 timestamps with up to 9 fractional digits
-    (`2025-04-12T10:33:45.123456789Z`); Python's fromisoformat handles 6 at most.
-    Truncate to microseconds and convert the trailing `Z` to a real offset.
-    Returns None for the sentinel values Docker uses when the field is unset
-    (e.g. `"0001-01-01T00:00:00Z"`).
-    """
-    if not ts or ts.startswith("0001-"):
-        return None
-    s = ts.rstrip()
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    # Truncate fractional seconds beyond 6 digits, if present.
-    m = re.match(r"^(.*\.\d{1,6})\d*(\+\d{2}:\d{2}|-\d{2}:\d{2})$", s)
-    if m:
-        s = m.group(1) + m.group(2)
-    try:
-        return datetime.fromisoformat(s)
-    except ValueError:
-        return None
-
-
 def _orphan_days(
     status: str,
     finished_at: str,
@@ -69,7 +46,7 @@ def _orphan_days(
     """
     if status != "exited":
         return None
-    finished = _parse_docker_timestamp(finished_at)
+    finished = parse_docker_ts(finished_at)
     if finished is None:
         return None
     now = now or datetime.now(UTC)
@@ -396,31 +373,11 @@ class DockerPlugin(Plugin):
                     ctx["container_age"] = age.to_context()
 
             if self.cfg.detect_restart_flapping:
-                from datetime import datetime as _dt
 
-                from .._time import parse_iso, utcnow
+                from .._time import utcnow
                 from ..restart_freq import evaluate as eval_restart
                 state = c.attrs.get("State") or {}
-                started_at_raw = state.get("StartedAt") or ""
-                started_at: _dt | None = None
-                if started_at_raw:
-                    try:
-                        # Docker may emit 9-digit nanos that Python
-                        # rejects; trim before parsing.
-                        s = started_at_raw
-                        if "." in s:
-                            head, _, tail = s.partition(".")
-                            tz = ""
-                            for m in ("Z", "+", "-"):
-                                i = tail.find(m)
-                                if i != -1:
-                                    tz = tail[i:]
-                                    tail = tail[:i]
-                                    break
-                            s = f"{head}.{tail[:6]}{tz}"
-                        started_at = parse_iso(s)
-                    except ValueError:
-                        started_at = None
+                started_at = parse_docker_ts(state.get("StartedAt") or "")
                 rc = int(c.attrs.get("RestartCount") or 0)
                 rf = eval_restart(
                     restart_count=rc, started_at=started_at, now=utcnow(),
@@ -557,7 +514,7 @@ class DockerPlugin(Plugin):
         # analyzer can reason about age — "container was pulled 6 months
         # ago, registry digest changed last week" carries different weight
         # than "pulled yesterday, registry moved today".
-        local_pulled_at = _parse_docker_timestamp(str(image_attrs.get("Created") or ""))
+        local_pulled_at = parse_docker_ts(str(image_attrs.get("Created") or ""))
 
         labels = c.attrs.get("Config", {}).get("Labels") or {}
         compose_project = labels.get("com.docker.compose.project", "")

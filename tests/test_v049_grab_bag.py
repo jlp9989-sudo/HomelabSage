@@ -13,19 +13,8 @@ from homelabsage.container_age import (
 from homelabsage.container_age import (
     evaluate as age_eval,
 )
-from homelabsage.models import Analysis, AnalyzedUpdate, Severity, Update
 from homelabsage.pr_changelog import PRChangelog, _extract_pr_refs
 from homelabsage.renovate_config import RenovateConfig, parse_config
-from homelabsage.retry_queue import (
-    next_delay_minutes,
-    should_retry_now,
-)
-from homelabsage.stack_digest import (
-    StackGroup,
-    group_by_project,
-    render_group_markdown,
-    render_groups_summary,
-)
 
 # ─── container_age ──────────────────────────────────────────────────
 
@@ -68,124 +57,6 @@ def test_age_evaluate_handles_naive_now():
     attrs = {"Created": (datetime.now(UTC) - timedelta(days=200)).isoformat()}
     f = age_eval(attrs, warn_after_days=180, now=datetime.now())
     assert f is not None
-
-
-# ─── retry_queue ────────────────────────────────────────────────────
-
-
-def test_next_delay_minutes_progression():
-    assert next_delay_minutes(0) == 0
-    assert next_delay_minutes(1) == 15
-    assert next_delay_minutes(2) == 60
-    assert next_delay_minutes(3) == 360
-    assert next_delay_minutes(4) == 1440
-    # Past the schedule → None (give up)
-    assert next_delay_minutes(5) is None
-    assert next_delay_minutes(99) is None
-
-
-def test_should_retry_now_inside_window():
-    last = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
-    now = last + timedelta(minutes=20)
-    d = should_retry_now(attempts=1, last_attempt_at=last, now=now)
-    # attempts=1 → wait 15 min. 20 min elapsed → ready.
-    assert d.should_retry
-    assert not d.permanently_failed
-
-
-def test_should_retry_now_outside_window():
-    last = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
-    now = last + timedelta(minutes=5)
-    d = should_retry_now(attempts=1, last_attempt_at=last, now=now)
-    assert not d.should_retry
-
-
-def test_should_retry_now_gives_up_past_schedule():
-    last = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
-    now = last + timedelta(days=30)
-    d = should_retry_now(attempts=10, last_attempt_at=last, now=now)
-    assert d.permanently_failed
-    assert not d.should_retry
-
-
-def test_should_retry_now_handles_naive_inputs():
-    last = datetime(2026, 6, 1, 12, 0)  # naive
-    now = datetime(2026, 6, 1, 13, 0)
-    d = should_retry_now(attempts=2, last_attempt_at=last, now=now)
-    # attempts=2 → 60 min wait, 60 min elapsed exactly → ready
-    assert d.should_retry
-
-
-# ─── stack_digest ───────────────────────────────────────────────────
-
-
-def _make_item(subject: str, project: str, sev: Severity = Severity.HIGH):
-    return AnalyzedUpdate(
-        update=Update(
-            source="docker", subject=subject,
-            current_version="1", new_version="2",
-            context={"compose_project": project},
-        ),
-        analysis=Analysis(severity=sev, summary=f"{subject} summary"),
-    )
-
-
-def test_group_by_project_under_threshold_stays_singleton():
-    items = [_make_item("a", "stack-x"), _make_item("b", "stack-x")]
-    groups, singletons = group_by_project(items, min_group_size=3)
-    assert groups == []
-    assert len(singletons) == 2
-
-
-def test_group_by_project_above_threshold_forms_group():
-    items = [
-        _make_item("a", "p"), _make_item("b", "p"), _make_item("c", "p"),
-        _make_item("solo", "other"),
-    ]
-    groups, singletons = group_by_project(items, min_group_size=3)
-    assert len(groups) == 1
-    assert groups[0].project == "p"
-    assert len(groups[0].items) == 3
-    assert len(singletons) == 1
-    assert singletons[0].update.subject == "solo"
-
-
-def test_group_max_severity():
-    g = StackGroup(project="p", items=[
-        _make_item("a", "p", Severity.INFO),
-        _make_item("b", "p", Severity.CRITICAL),
-        _make_item("c", "p", Severity.MEDIUM),
-    ])
-    assert g.max_severity == "critical"
-
-
-def test_render_group_markdown_lists_each_item():
-    items = [_make_item(f"svc{i}", "stack") for i in range(3)]
-    groups, _ = group_by_project(items, min_group_size=3)
-    body = render_group_markdown(groups[0])
-    assert "stack" in body
-    for i in range(3):
-        assert f"svc{i}" in body
-
-
-def test_render_groups_summary_empty_is_empty():
-    assert render_groups_summary([]) == ""
-
-
-def test_group_by_project_no_project_falls_to_singletons():
-    items = [
-        AnalyzedUpdate(
-            update=Update(
-                source="docker", subject="x",
-                current_version="1", new_version="2",
-                context={},
-            ),
-            analysis=Analysis(severity=Severity.HIGH, summary="x"),
-        ),
-    ]
-    groups, singletons = group_by_project(items)
-    assert groups == []
-    assert len(singletons) == 1
 
 
 # ─── renovate_config ────────────────────────────────────────────────
@@ -315,40 +186,3 @@ def test_pr_changelog_to_context_round_trip():
     assert ctx["base"] == "v1"
 
 
-# ─── compose_validate ──────────────────────────────────────────────
-
-
-def test_compose_validate_no_docker_returns_none(monkeypatch, tmp_path):
-    """Missing docker binary → silent skip."""
-    from homelabsage import compose_validate
-    monkeypatch.setattr("shutil.which", lambda name: None)
-    f = tmp_path / "compose.yaml"
-    f.write_text("services:\n  x:\n    image: foo:1.0\n", encoding="utf-8")
-    assert compose_validate.validate_compose_file(f) is None
-
-
-def test_compose_validate_failure_surfaces_first_line(monkeypatch, tmp_path):
-    from homelabsage import compose_validate
-
-    def fake_run_config(file):
-        return 1, "first error\nlots\nof\nlines"
-
-    monkeypatch.setattr(
-        compose_validate, "_run_docker_compose_config", fake_run_config,
-    )
-    f = tmp_path / "compose.yaml"
-    f.write_text("garbage", encoding="utf-8")
-    finding = compose_validate.validate_compose_file(f)
-    assert finding is not None
-    assert finding.error == "first error"
-
-
-def test_compose_validate_success_returns_none(monkeypatch, tmp_path):
-    from homelabsage import compose_validate
-    monkeypatch.setattr(
-        compose_validate, "_run_docker_compose_config",
-        lambda file: (0, ""),
-    )
-    f = tmp_path / "compose.yaml"
-    f.write_text("ok", encoding="utf-8")
-    assert compose_validate.validate_compose_file(f) is None

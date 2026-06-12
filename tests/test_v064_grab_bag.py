@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import ssl
-from unittest.mock import MagicMock
 
 from homelabsage.config import MSTeamsOutputConfig
 from homelabsage.models import Analysis, AnalyzedUpdate, Severity, Update
@@ -15,11 +14,6 @@ from homelabsage.tls_check import (
     _parse_x509_date,
     _severity,
     probe,
-)
-from homelabsage.volume_orphans import (
-    OrphanVolume,
-    _used_volume_names,
-    find_orphans,
 )
 
 # ─── tls_check ──────────────────────────────────────────────────────
@@ -169,96 +163,3 @@ def test_msteams_respects_min_severity():
     assert not out._should_send(low)
 
 
-# ─── volume orphans ────────────────────────────────────────────────
-
-
-def _fake_container(*, mounts=None):
-    c = MagicMock()
-    c.attrs = {"Mounts": mounts or []}
-    return c
-
-
-def _fake_volume(name: str, *, mountpoint: str = "/var/lib/docker/volumes/x",
-                 driver: str = "local", labels: dict | None = None,
-                 created_at: str | None = None):
-    v = MagicMock()
-    v.name = name
-    v.attrs = {
-        "Driver": driver,
-        "Mountpoint": mountpoint,
-        "CreatedAt": created_at or "2026-01-01T00:00:00Z",
-        "Labels": labels or {},
-    }
-    return v
-
-
-def test_used_volume_names_from_mounts():
-    containers = [
-        _fake_container(mounts=[
-            {"Type": "volume", "Name": "vol_a"},
-            {"Type": "bind", "Source": "/host/path"},
-        ]),
-        _fake_container(mounts=[{"Type": "volume", "Name": "vol_b"}]),
-    ]
-    used = _used_volume_names(containers)
-    assert used == {"vol_a", "vol_b"}
-
-
-def test_used_volume_names_handles_missing_fields():
-    containers = [
-        _fake_container(mounts=[
-            {"Type": "volume"},        # no Name
-            "garbage",                  # not a dict
-            {"Type": "volume", "Name": ""},
-        ]),
-        _fake_container(mounts="not a list"),
-    ]
-    assert _used_volume_names(containers) == set()
-
-
-def test_find_orphans_returns_unreferenced():
-    volumes = [
-        _fake_volume("vol_a"),
-        _fake_volume("vol_b"),
-        _fake_volume("vol_orphan"),
-    ]
-    containers = [
-        _fake_container(mounts=[{"Type": "volume", "Name": "vol_a"}]),
-        _fake_container(mounts=[{"Type": "volume", "Name": "vol_b"}]),
-    ]
-    orphans = find_orphans(volumes, containers)
-    assert len(orphans) == 1
-    assert orphans[0].name == "vol_orphan"
-    assert isinstance(orphans[0], OrphanVolume)
-
-
-def test_find_orphans_counts_stopped_containers_as_users():
-    """A stopped container still references its volume — not orphan."""
-    volumes = [_fake_volume("vol_a")]
-    # Caller passes containers.list(all=True), so stopped is included
-    containers = [_fake_container(
-        mounts=[{"Type": "volume", "Name": "vol_a"}],
-    )]
-    assert find_orphans(volumes, containers) == []
-
-
-def test_find_orphans_carries_project_label():
-    volumes = [_fake_volume(
-        "vol_x",
-        labels={"com.docker.compose.project": "mealie-stack"},
-    )]
-    containers: list = []
-    orphans = find_orphans(volumes, containers)
-    assert len(orphans) == 1
-    ctx = orphans[0].to_context()
-    assert ctx["compose_project"] == "mealie-stack"
-    assert ctx["driver"] == "local"
-
-
-def test_find_orphans_empty_inputs():
-    assert find_orphans([], []) == []
-    assert find_orphans([_fake_volume("v1")], []) == [
-        OrphanVolume(name="v1", driver="local",
-                     mountpoint="/var/lib/docker/volumes/x",
-                     created_at="2026-01-01T00:00:00Z", labels={}),
-    ]

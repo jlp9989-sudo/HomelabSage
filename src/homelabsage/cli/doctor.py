@@ -19,15 +19,14 @@ import typer
 from ..config import load_config
 from ..db import Database
 from ..doctor import build_report
+from ..models import Severity, severity_order
 from ._common import CONFIG_OPT, VERBOSE_OPT, app, console, setup_logging
-
-_SEVERITY_ORDER = {"info": 0, "medium": 1, "high": 2, "critical": 3}
 
 
 def _validate_floor(value: str) -> str:
-    if value not in _SEVERITY_ORDER:
+    if value not in {s.value for s in Severity}:
         raise typer.BadParameter(
-            f"--severity-floor must be one of {sorted(_SEVERITY_ORDER)} (got {value!r})"
+            f"--severity-floor must be one of {sorted(s.value for s in Severity)} (got {value!r})"
         )
     return value
 
@@ -40,11 +39,11 @@ def _audit_has_findings_at_or_above(report: dict, floor: str) -> bool:
         .get("counts_by_severity", {})
         or {}
     )
-    threshold = _SEVERITY_ORDER[floor]
+    threshold = severity_order(floor)
     for sev, n in counts.items():
         if int(n or 0) <= 0:
             continue
-        if _SEVERITY_ORDER.get(sev, 0) >= threshold:
+        if severity_order(sev) >= threshold:
             return True
     return False
 

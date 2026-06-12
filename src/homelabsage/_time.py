@@ -36,3 +36,37 @@ def parse_iso(text: str | None) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return dt
+
+
+def parse_docker_ts(text: str | None) -> datetime | None:
+    """Parse a Docker-emitted timestamp, tolerating 9-digit nanoseconds.
+
+    Docker inspect emits RFC 3339 with nanosecond precision
+    (`2026-06-12T09:00:26.123456789Z`); Python's `fromisoformat` accepts
+    at most microseconds, so the fractional part is trimmed to 6 digits
+    before parsing. This used to be copy-pasted in three detectors —
+    import it from here instead.
+
+    Returns `None` for falsy input, for docker's `0001-01-01…` "unset"
+    sentinel, or for an unparseable string (docker metadata is
+    best-effort: a malformed timestamp means "no signal", never a
+    crashed scan — unlike `parse_iso`, which guards data WE wrote and
+    raises on corruption).
+    """
+    if not text or text.startswith("0001-"):
+        return None
+    s = text
+    if "." in s:
+        head, _, tail = s.partition(".")
+        tz = ""
+        for marker in ("Z", "+", "-"):
+            i = tail.find(marker)
+            if i != -1:
+                tz = tail[i:]
+                tail = tail[:i]
+                break
+        s = f"{head}.{tail[:6]}{tz}"
+    try:
+        return parse_iso(s)
+    except ValueError:
+        return None

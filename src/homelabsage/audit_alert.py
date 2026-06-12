@@ -32,18 +32,18 @@ from typing import Any
 
 import httpx
 
+from .models import severity_order
+
 log = logging.getLogger(__name__)
 
-
-_SEVERITY_ORDER = {"info": 0, "medium": 1, "high": 2, "critical": 3}
 
 
 def _meets_floor(findings: list[dict[str, Any]], floor: str) -> bool:
     """True iff at least one new finding meets the severity floor."""
-    floor_n = _SEVERITY_ORDER.get((floor or "").lower(), 1)
+    floor_n = severity_order(floor, default=1)
     for f in findings:
         sev = str(f.get("severity") or "").lower()
-        if _SEVERITY_ORDER.get(sev, 0) >= floor_n:
+        if severity_order(sev) >= floor_n:
             return True
     return False
 

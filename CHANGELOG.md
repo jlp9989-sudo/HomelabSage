@@ -2,6 +2,41 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v0.13.1 — 2026-06-12
+
+**Hygiene pass** — the 12-jun architecture review found the cost of the
+0.2→0.13 sprint pace: modules built and never wired, and "single source
+of truth" constants redeclared locally. This release pays that down.
+
+- **Deleted 9 orphan detectors** (~1,020 LoC + their tests): `arch_mismatch`,
+  `compose_diff`, `compose_validate`, `disappearance`, `restart_drift`,
+  `stack_digest`, `tag_patterns`, `volume_orphans`, `retry_queue`. Zero
+  production importers (verified twice); only their own tests kept them
+  green. Two of them documented config/DB columns that never existed.
+  They live in git history if ever wanted back. Mixed test files were
+  surgically trimmed; two now-single-topic files renamed
+  (`test_dns_check.py`, `test_github_release_webhook.py`).
+- **`_time.parse_docker_ts()`** — the "trim 9-digit docker nanos then
+  parse" block was copy-pasted in three detectors (one literally
+  commented "same as docker plugin does"). Now one helper, which also
+  owns the `0001-01-01` "unset" sentinel. Replaces
+  `plugins/docker._parse_docker_timestamp` and the inline copies in
+  `container_age` and `healthcheck_stale`.
+- **`models.severity_order()`** — the `{"info": 0, … "critical": 3}`
+  ranking dict existed in FIVE files (audit, audit_alert, auto_apply,
+  cli/audit, cli/doctor), parallel to the `Severity` enum that already
+  encodes the order. One canonical helper now; validation messages use
+  the enum's values.
+- **audit.py registries completed** — the v0.11.5 registry only covered
+  unconditional per-update detectors; tag_lag was hardcoded and the 8
+  state collectors were a wall of if-blocks. Now three data registries
+  (`_PER_UPDATE_DETECTORS`, `_GATED_PER_UPDATE_DETECTORS`,
+  `_STATE_DETECTORS` with `(gate, runner)` pairs) — adding any detector
+  is one entry, no body edits.
+
+1778 → 1699 tests (-79: the dead modules' tests left with them).
+Ruff clean, 0 mypy errors / 178 source files (was 187).
+
 ## v0.13.0 — 2026-06-12
 
 **Auto-configuration** — the config now follows the same philosophy as the

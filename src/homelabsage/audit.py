@@ -44,7 +44,7 @@ from .config import Config
 from .db import Database
 from .disk_pressure import evaluate as eval_disk
 from .env_perms import scan as scan_env_perms
-from .models import AnalyzedUpdate, UpdateStatus
+from .models import AnalyzedUpdate, UpdateStatus, severity_order
 from .parity import is_parity_running
 from .tag_lag import derive_tag_lag
 
@@ -654,9 +654,6 @@ def _disk_pressure_findings(findings_in: list) -> list[AuditFinding]:
 # ─── orchestrator ───────────────────────────────────────────────────────
 
 
-_SEVERITY_ORDER = {"critical": 3, "high": 2, "medium": 1, "info": 0}
-
-
 # Registry of unconditional per-update detectors. Each takes the
 # AnalyzedUpdate and returns 0..N findings. To add a detector, drop
 # its `_X_findings` helper in this list — no edits to `build_report`.
@@ -677,20 +674,34 @@ _PER_UPDATE_DETECTORS: list[
 ]
 
 
-def _collect_per_update_findings(
-    cfg: Config, item: AnalyzedUpdate,
-) -> list[AuditFinding]:
-    """Run every per-update detector. Tag-lag is gated by config so it
-    stays outside the unconditional registry."""
-    found: list[AuditFinding] = []
-    for detector in _PER_UPDATE_DETECTORS:
-        found.extend(detector(item))
-    if cfg.tag_lag.enabled:
-        found.extend(_tag_lag_findings(
+# Config-gated per-update detectors: `(gate, runner)` pairs. The gate
+# reads config; the runner gets `(cfg, item)` so it can pull its own
+# knobs. Adding a gated detector = one tuple here — no body edits.
+_GATED_PER_UPDATE_DETECTORS: list[tuple[
+    Callable[[Config], bool],
+    Callable[[Config, AnalyzedUpdate], list[AuditFinding]],
+]] = [
+    (
+        lambda cfg: cfg.tag_lag.enabled,
+        lambda cfg, item: _tag_lag_findings(
             item,
             warn_after_days=cfg.tag_lag.warn_after_days,
             critical_after_days=cfg.tag_lag.critical_after_days,
-        ))
+        ),
+    ),
+]
+
+
+def _collect_per_update_findings(
+    cfg: Config, item: AnalyzedUpdate,
+) -> list[AuditFinding]:
+    """Run every per-update detector — unconditional first, then gated."""
+    found: list[AuditFinding] = []
+    for detector in _PER_UPDATE_DETECTORS:
+        found.extend(detector(item))
+    for gate, runner in _GATED_PER_UPDATE_DETECTORS:
+        if gate(cfg):
+            found.extend(runner(cfg, item))
     return found
 
 
@@ -722,37 +733,79 @@ def _state_backup_health(
     return _backup_health_findings(backup_report)
 
 
+# State-level detectors: `(gate, runner)` pairs, mirror of the gated
+# per-update registry. Runners get `(cfg, db, backup_report)` so the
+# whole collection is data — adding a state detector = one tuple here,
+# no edits to `_collect_state_findings`. Order matters only insofar as
+# the final sort is stable on category+title for ties.
+_STATE_DETECTORS: list[tuple[
+    Callable[[Config], bool],
+    Callable[[Config, Database, object | None], list[AuditFinding]],
+]] = [
+    (
+        lambda cfg: True,
+        lambda cfg, db, br: _pending_dispatch_findings(db.list_pending_dispatches()),
+    ),
+    (
+        lambda cfg: True,
+        lambda cfg, db, br: _state_parity(cfg),
+    ),
+    (
+        lambda cfg: True,
+        lambda cfg, db, br: _state_backup_health(cfg, br),
+    ),
+    (
+        lambda cfg: True,
+        lambda cfg, db, br: _health_check_findings(db.list_recent_health_checks(limit=200)),
+    ),
+    (
+        lambda cfg: True,
+        lambda cfg, db, br: _log_anomaly_findings(db.list_recent_log_anomalies(limit=200)),
+    ),
+    (
+        lambda cfg: bool(cfg.sources.docker.compose_scan_paths and cfg.compose_lint.enabled),
+        lambda cfg, db, br: _compose_lint_findings(
+            lint_paths(cfg.sources.docker.compose_scan_paths),
+        ),
+    ),
+    (
+        lambda cfg: bool(cfg.disk_pressure.enabled and cfg.disk_pressure.paths),
+        lambda cfg, db, br: _disk_pressure_findings(
+            eval_disk(cfg.disk_pressure.paths),
+        ),
+    ),
+    (
+        lambda cfg: bool(
+            cfg.sources.docker.detect_compose_override
+            and cfg.sources.docker.compose_scan_paths
+        ),
+        lambda cfg, db, br: _compose_override_findings(
+            scan_overrides(cfg.sources.docker.compose_scan_paths),
+        ),
+    ),
+    (
+        lambda cfg: bool(cfg.sources.docker.compose_scan_paths),
+        lambda cfg, db, br: _env_perm_findings(
+            scan_env_perms(cfg.sources.docker.compose_scan_paths),
+        ),
+    ),
+    (
+        lambda cfg: True,
+        lambda cfg, db, br: _recurring_failure_findings(
+            db.list_recurring_failures(min_count=2),
+        ),
+    ),
+]
+
+
 def _collect_state_findings(
     cfg: Config, db: Database, backup_report: object | None,
 ) -> list[AuditFinding]:
-    """Run state-level (non-per-update) detectors. Order matters only
-    insofar as the final sort is stable on category+title for ties."""
+    """Run every state-level (non-per-update) detector from the registry."""
     found: list[AuditFinding] = []
-    found.extend(_pending_dispatch_findings(db.list_pending_dispatches()))
-    found.extend(_state_parity(cfg))
-    found.extend(_state_backup_health(cfg, backup_report))
-    found.extend(_health_check_findings(db.list_recent_health_checks(limit=200)))
-    found.extend(_log_anomaly_findings(db.list_recent_log_anomalies(limit=200)))
-    if cfg.sources.docker.compose_scan_paths and cfg.compose_lint.enabled:
-        found.extend(_compose_lint_findings(
-            lint_paths(cfg.sources.docker.compose_scan_paths),
-        ))
-    if cfg.disk_pressure.enabled and cfg.disk_pressure.paths:
-        found.extend(_disk_pressure_findings(
-            eval_disk(cfg.disk_pressure.paths),
-        ))
-    if (cfg.sources.docker.detect_compose_override
-            and cfg.sources.docker.compose_scan_paths):
-        found.extend(_compose_override_findings(
-            scan_overrides(cfg.sources.docker.compose_scan_paths),
-        ))
-    if cfg.sources.docker.compose_scan_paths:
-        found.extend(_env_perm_findings(
-            scan_env_perms(cfg.sources.docker.compose_scan_paths),
-        ))
-    found.extend(_recurring_failure_findings(
-        db.list_recurring_failures(min_count=2),
-    ))
+    for gate, runner in _STATE_DETECTORS:
+        if gate(cfg):
+            found.extend(runner(cfg, db, backup_report))
     return found
 
 
@@ -798,7 +851,7 @@ def build_report(
 
     # Severity first (critical → info), then category alphabetical so the
     # same input always produces the same output.
-    findings.sort(key=lambda f: (-_SEVERITY_ORDER[f.severity], f.category, f.title))
+    findings.sort(key=lambda f: (-severity_order(f.severity), f.category, f.title))
 
     by_cat: dict[str, int] = {}
     by_sev: dict[str, int] = {}

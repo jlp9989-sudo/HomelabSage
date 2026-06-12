@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from ._time import parse_iso
+from ._time import parse_docker_ts
 
 
 @dataclass
@@ -132,23 +132,8 @@ def evaluate(
 
     end_raw = anchor.get("End") or anchor.get("Start") or ""
     stale_since_dt: datetime | None = None
-    if isinstance(end_raw, str) and end_raw:
-        # Trim 9-digit nanos same as docker plugin does.
-        s = end_raw
-        if "." in s:
-            head, _, tail = s.partition(".")
-            tz = ""
-            for m in ("Z", "+", "-"):
-                i = tail.find(m)
-                if i != -1:
-                    tz = tail[i:]
-                    tail = tail[:i]
-                    break
-            s = f"{head}.{tail[:6]}{tz}"
-        try:
-            stale_since_dt = parse_iso(s)
-        except ValueError:
-            stale_since_dt = None
+    if isinstance(end_raw, str):
+        stale_since_dt = parse_docker_ts(end_raw)
 
     hours: float | None = None
     if stale_since_dt is not None:

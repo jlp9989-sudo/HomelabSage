@@ -30,14 +30,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from .models import AnalyzedUpdate, Severity
+from .models import AnalyzedUpdate, Severity, severity_order
 
 log = logging.getLogger(__name__)
 
 
-_SEVERITY_ORDER: dict[str, int] = {
-    "info": 0, "medium": 1, "high": 2, "critical": 3,
-}
 
 
 @dataclass
@@ -79,8 +76,8 @@ def should_auto_apply(
         )
 
     # Block 3: severity above ceiling.
-    ceiling = _SEVERITY_ORDER.get((max_severity or "info").lower(), 0)
-    sev_order = _SEVERITY_ORDER.get(a.severity.value, 0)
+    ceiling = severity_order(max_severity or "info")
+    sev_order = severity_order(a.severity)
     if sev_order > ceiling:
         return AutoApplyDecision(
             should_apply=False,
