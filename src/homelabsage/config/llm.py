@@ -51,6 +51,19 @@ class LLMConfig(BaseModel):
         True,
         description="Force the model to return strict JSON (provider-specific). Disable only when the model rejects the response_format header.",
     )
+    json_schema: bool = Field(
+        False,
+        description=(
+            "Constrain the model to the exact analysis schema (grammar / "
+            "guided decoding) rather than free-form JSON. Eliminates parse "
+            "failures on backends that support it (llama.cpp, Ollama, OpenAI, "
+            "most Groq / OpenRouter models). Requires `strict_json`. Safe to "
+            "leave on: if a backend rejects schema-mode `response_format` "
+            "(e.g. Anthropic's bridge, older models) HomelabSage logs a "
+            "warning once and retries that model in plain-JSON mode, so "
+            "analysis keeps working."
+        ),
+    )
     secret_guard: bool | None = Field(
         None,
         description=(

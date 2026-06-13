@@ -2,6 +2,29 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v1.1.0 — 2026-06-13
+
+**Guided decoding for the analyzer** — root-cause fix for LLM JSON parse
+failures, opt-in and safe to leave on.
+
+- **`llm.json_schema` flag** (default `false`): when on, `analyze()`
+  constrains the model to the exact `Analysis` schema via grammar /
+  guided decoding instead of free-form JSON. On backends that support it
+  (llama.cpp, Ollama ≥0.5, OpenAI, most Groq / OpenRouter models) the
+  model *cannot* emit malformed output, so the tolerant parser's degraded
+  fallback never has to fire. OpenAI-compat sends
+  `response_format:{type:"json_schema",strict:true}`; Ollama sends the
+  schema dict as `format`.
+- **Graceful per-backend fallback**: a backend that rejects schema-mode
+  `response_format` (Anthropic's bridge, older models — HTTP 400/404/422)
+  is logged once, retried immediately in plain-JSON mode, and remembered
+  for the rest of the process so it isn't re-probed every call. Analysis
+  never breaks because of an unsupported backend.
+- The schema only applies to `analyze()`; the curator's `generate_text()`
+  (Markdown notes, `strict_json=false`) is untouched. The hand-built
+  schema has a drift guard test asserting it matches the `Analysis` model
+  field-for-field.
+
 ## v1.0.1 — 2026-06-13
 
 Two robustness backstops against pathological payloads — neither changes

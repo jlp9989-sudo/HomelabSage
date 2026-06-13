@@ -126,6 +126,48 @@ def build_prompt(update: Update, notes: str = "") -> str:
     )
 
 
+def _analysis_json_schema() -> dict:
+    """JSON Schema for the `Analysis` object — used for guided / constrained
+    decoding when `cfg.json_schema` is on.
+
+    Hand-built rather than dumped from `Analysis.model_json_schema()` so it
+    stays free of pydantic's `$defs` / `$ref` / `anyOf` constructs: OpenAI's
+    strict mode and llama.cpp / Ollama grammar conversion are all happier
+    with a flat schema. `tests/test_json_schema_mode.py` asserts this
+    property set matches the `Analysis` model so the two can't drift.
+
+    Every field is `required` with `additionalProperties: false`, which is
+    what OpenAI strict mode demands and what the grammar backends accept
+    unchanged. The list fields accept `[]` and `recommended_action` accepts
+    `null`, so requiring them costs the model nothing.
+    """
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "severity": {
+                "type": "string",
+                "enum": [s.value for s in Severity],
+            },
+            "summary": {"type": "string"},
+            "breaking_changes": {"type": "array", "items": {"type": "string"}},
+            "config_obsolete": {"type": "array", "items": {"type": "string"}},
+            "new_features_relevant": {"type": "array", "items": {"type": "string"}},
+            "action_required": {"type": "boolean"},
+            "recommended_action": {"type": ["string", "null"]},
+        },
+        "required": [
+            "severity",
+            "summary",
+            "breaking_changes",
+            "config_obsolete",
+            "new_features_relevant",
+            "action_required",
+            "recommended_action",
+        ],
+    }
+
+
 # Provider presets — sensible defaults for `endpoint` and `model` per
 # provider so the settings UI can auto-fill them when the user picks a
 # provider from the dropdown. The keys MUST match LLMConfig.provider's
@@ -219,6 +261,13 @@ class LLMClient:
         # each call so a failed HTTP request doesn't leak the previous
         # call's content into the next audit row.
         self.last_call: LastCall | None = None
+        # Backends (keyed by provider+endpoint+model) that 4xx'd on a
+        # json_schema response_format. Once a key lands here we stop
+        # attempting schema mode for it and go straight to plain JSON, so a
+        # misconfigured `json_schema=true` probes the backend exactly once
+        # instead of doubling every request. Cleared on process restart;
+        # changing the model/endpoint produces a new key that re-probes.
+        self._schema_unsupported: set[tuple[str, str, str]] = set()
 
     @property
     def cfg(self) -> LLMConfig:
@@ -226,6 +275,32 @@ class LLMClient:
 
     def is_enabled(self) -> bool:
         return self.cfg.provider != "disabled"
+
+    def _schema_key(self) -> tuple[str, str, str]:
+        return (self.cfg.provider, self.cfg.endpoint, self.cfg.model)
+
+    def _want_schema(self, strict_json: bool) -> bool:
+        """Whether to send a guided-decoding json_schema for this call.
+
+        Only when the user opted in (`cfg.json_schema`), the call wants JSON
+        at all (`strict_json`), and the current backend hasn't already been
+        recorded as rejecting schema mode.
+        """
+        return (
+            strict_json
+            and self.cfg.json_schema
+            and self._schema_key() not in self._schema_unsupported
+        )
+
+    def _mark_schema_unsupported(self, status: int) -> None:
+        log.warning(
+            "LLM backend %s (%s) rejected json_schema response_format "
+            "(HTTP %d); falling back to plain-JSON mode for this model. Set "
+            "llm.json_schema=false to silence, or point at a backend that "
+            "supports guided decoding.",
+            self.cfg.endpoint, self.cfg.model, status,
+        )
+        self._schema_unsupported.add(self._schema_key())
 
     async def analyze(self, update: Update, notes: str = "") -> Analysis | None:
         self.last_call = None
@@ -347,18 +422,36 @@ class LLMClient:
         absent (very old servers, custom forks) we fall back to estimates.
         """
         url = self.cfg.endpoint.rstrip("/") + "/api/generate"
-        payload = {
+        # Ollama's `format` accepts the string "json" (loose) OR a full JSON
+        # schema object (guided decoding, since Ollama 0.5). Pick per config.
+        use_schema = self._want_schema(strict_json)
+        base = {
             "model": self.cfg.model,
             "prompt": prompt,
             "stream": False,
-            "format": "json" if strict_json else None,
             "options": {"num_ctx": self.cfg.context_size, "temperature": temperature},
         }
-        # Drop nullable to avoid backend confusion
-        payload = {k: v for k, v in payload.items() if v is not None}
+
+        def _payload(schema_mode: bool) -> dict:
+            if schema_mode:
+                fmt: object = _analysis_json_schema()
+            elif strict_json:
+                fmt = "json"
+            else:
+                fmt = None
+            p = {**base, "format": fmt}
+            return {k: v for k, v in p.items() if v is not None}
+
         async with httpx.AsyncClient(timeout=self.cfg.timeout) as client:
-            r = await client.post(url, json=payload)
-            r.raise_for_status()
+            try:
+                r = await client.post(url, json=_payload(use_schema))
+                r.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                if not (use_schema and e.response.status_code in (400, 404, 422)):
+                    raise
+                self._mark_schema_unsupported(e.response.status_code)
+                r = await client.post(url, json=_payload(False))
+                r.raise_for_status()
             data = r.json()
             text = data.get("response", "")
             tin = int(data.get("prompt_eval_count") or 0)
@@ -382,16 +475,40 @@ class LLMClient:
         """
         url = _resolve_chat_completions_url(self.cfg.endpoint)
         headers = {"Authorization": f"Bearer {self.cfg.api_key}"} if self.cfg.api_key else {}
-        payload = {
+        use_schema = self._want_schema(strict_json)
+        base = {
             "model": self.cfg.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature,
-            "response_format": {"type": "json_object"} if strict_json else None,
         }
-        payload = {k: v for k, v in payload.items() if v is not None}
+
+        def _payload(schema_mode: bool) -> dict:
+            if schema_mode:
+                rf: object = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "analysis",
+                        "schema": _analysis_json_schema(),
+                        "strict": True,
+                    },
+                }
+            elif strict_json:
+                rf = {"type": "json_object"}
+            else:
+                rf = None
+            p = {**base, "response_format": rf}
+            return {k: v for k, v in p.items() if v is not None}
+
         async with httpx.AsyncClient(timeout=self.cfg.timeout) as client:
-            r = await client.post(url, json=payload, headers=headers)
-            r.raise_for_status()
+            try:
+                r = await client.post(url, json=_payload(use_schema), headers=headers)
+                r.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                if not (use_schema and e.response.status_code in (400, 404, 422)):
+                    raise
+                self._mark_schema_unsupported(e.response.status_code)
+                r = await client.post(url, json=_payload(False), headers=headers)
+                r.raise_for_status()
             data = r.json()
             text = data["choices"][0]["message"]["content"]
             usage = data.get("usage") or {}
