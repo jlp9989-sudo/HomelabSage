@@ -47,7 +47,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
             org.opencontainers.image.title=HomelabSage
-            org.opencontainers.image.description=AI-powered homelab analyzer and update tracker
+            org.opencontainers.image.description=Self-configuring, AI-powered homelab update analyzer & advisor
             org.opencontainers.image.licenses=AGPL-3.0-or-later
 
       - name: Build + push

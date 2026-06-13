@@ -22,6 +22,8 @@ Watches your stack (Docker containers, Home Assistant, Linux packages, firmware,
 
 The LLM doesn't analyze updates in a vacuum — you can point it at your own `notes/` directory (markdown), and it pulls in only the sections that match the update subject. That's how it knows "your Elasticsearch is versionlocked on 8.x because of RAGFlow" before recommending an upgrade.
 
+**And it sets itself up.** You're not expected to hand-write any of this: the **curator** auto-writes the per-service notes from `docker inspect` + the upstream README + container logs, and **autoconfig** inspects the host (compose paths from container labels, the docker root dir, Unraid/mdraid parity, Traefik hostnames) and proposes the matching settings with evidence. The machine does the work; you just review and tick. Point it at the Docker socket and a free LLM key and it's effectively self-configuring — every other field has a sane default.
+
 > Status: **stable** (v1.x), in active development. Docker is the primary source; Home Assistant, Fedora-over-SSH, and arbitrary watched GitHub/Codeberg repos are implemented and tested.
 
 ---
@@ -282,6 +284,11 @@ web:
   enabled: true
   host: 0.0.0.0
   port: 8000
+  preflight_gate: false                  # opt-in circuit-breaker: marking an update
+                                         # "applied" when its analysis carries
+                                         # breaking_changes routes through a confirmation
+                                         # wall (/updates/<id>/preflight) first. Off keeps
+                                         # the one-click flow.
   auth:
     enabled: false                       # recommended: true if not loopback
     username: admin
