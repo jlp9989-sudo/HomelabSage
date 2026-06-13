@@ -48,7 +48,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=HomelabSage
             org.opencontainers.image.description=AI-powered homelab analyzer and update tracker
-            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
 
       - name: Build + push
         uses: docker/build-push-action@v6

@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/jlp9989-sudo/HomelabSage/actions/workflows/ci.yml"><img src="https://github.com/jlp9989-sudo/HomelabSage/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
-  <a href="#"><img src="https://img.shields.io/badge/status-beta-green" alt="Status"></a>
+  <a href="#"><img src="https://img.shields.io/badge/status-stable_(v1.x)-green" alt="Status"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python"></a>
 </p>
 
@@ -22,7 +22,7 @@ Watches your stack (Docker containers, Home Assistant, Linux packages, firmware,
 
 The LLM doesn't analyze updates in a vacuum — you can point it at your own `notes/` directory (markdown), and it pulls in only the sections that match the update subject. That's how it knows "your Elasticsearch is versionlocked on 8.x because of RAGFlow" before recommending an upgrade.
 
-> Status: **beta**, in active development. Docker is the primary source; Home Assistant, Fedora-over-SSH, and arbitrary watched GitHub/Codeberg repos are implemented and tested.
+> Status: **stable** (v1.x), in active development. Docker is the primary source; Home Assistant, Fedora-over-SSH, and arbitrary watched GitHub/Codeberg repos are implemented and tested.
 
 ---
 
@@ -106,7 +106,7 @@ Most release-note watchers (Diun, WatchTower, Renovate) tell you *that* there is
 - **Audit + doctor.** `/audit` is a prioritized report of everything wrong that isn't an update (CVEs, abandoned upstreams, flapping containers, exposed ports, env-file permissions, disk pressure…), with a mute list and history diffing. `homelabsage doctor` bundles the health probes into one exit-code-friendly command.
 - **MCP server.** `/mcp` speaks JSON-RPC with 50 tools, so Claude Code / Cursor / any MCP client can query updates, run audits, snooze rows, or pull rollback recipes.
 - **Local LLM by default.** Ollama-compatible API; works with [Ollama](https://ollama.com), [llama.cpp server](https://github.com/ggml-org/llama.cpp), LM Studio, or any OpenAI-compat endpoint. Falls back to OpenAI / Anthropic / Groq / Gemini / OpenRouter if you really want to.
-- **Tolerant JSON parser.** Strips markdown fences, surrounding prose, accepts case-insensitive severity, falls back to a `summary`-only best-effort when the model bends the schema. Removes inline `<think>…</think>` blocks from reasoning models.
+- **Tolerant JSON parser.** Strips markdown fences, surrounding prose, accepts case-insensitive severity, falls back to a `summary`-only best-effort when the model bends the schema. Removes inline `<think>…</think>` blocks from reasoning models. For backends that support it, opt into **guided decoding** (`llm.json_schema: true`, v1.1.0) to constrain the output to the schema at the source — with automatic fallback to plain JSON.
 - **Your notes are the secret sauce.** Point `notes.notes_dir` at a folder of `.md` files (your CLAUDE.md, ARCHITECTURE.md, OPS.md, etc). For each update, only the sections that mention the subject get injected — no token bloat.
 - **Curator auto-writes notes for you.** `homelabsage curate --discover` walks every running container and produces `notes/<service>.md` from `docker inspect` + the upstream README + container logs + your existing notes. `--system` adds a `notes/system.md` from host probes (kernel, docker info, GPUs, ZFS, Unraid).
 - **Rich update context.** Per Update we attach: `repo_health` (alive / stale / abandoned via GitHub pushed_at), `alternatives` (LSIO + Docker Hub cross-reference for better-maintained substitutes), `orphan_since_days` for stopped containers, `cve` (optional Trivy/Grype scan), `cascade.depends_on_me` (compose graph), `image_size_growth` (concrete bloatware signal), `puid_pgid` (LSIO permission hint).
@@ -126,7 +126,7 @@ Most release-note watchers (Diun, WatchTower, Renovate) tell you *that* there is
 
 ## Architecture
 
-One plugin = one file, one output = one file. ~31k lines of Python, ~1,700 tests, no SPA, no ORM.
+One plugin = one file, one output = one file. ~32k lines of Python, ~1,750 tests, no SPA, no ORM.
 
 ```
    ┌──────────────────────────────────────────────────────────────┐
@@ -165,7 +165,7 @@ One plugin = one file, one output = one file. ~31k lines of Python, ~1,700 tests
    └──────────────────────────────────────────────────────────────┘
 ```
 
-The **curator** (`homelabsage curate`) is a sibling pipeline that writes the notes the analyzer reads — see [ROADMAP.md](ROADMAP.md) → v0.4.
+The **curator** (`homelabsage curate`) is a sibling pipeline that writes the notes the analyzer reads — shipped since v1.0; see [Features](#features) above and [ROADMAP.md](ROADMAP.md) for what's next.
 
 ---
 
@@ -236,6 +236,14 @@ llm:
   context_size: 32768
   api_key: "${LLM_API_KEY:-}"            # only for openai/anthropic
   timeout: 180
+  json_schema: false                     # opt-in guided decoding (v1.1.0): constrain the
+                                         # analyzer's output to the JSON schema via the
+                                         # backend's native mode (openai response_format
+                                         # json_schema / ollama format=<schema>). Falls back
+                                         # to plain JSON automatically if the provider 400s,
+                                         # and the result is memoized per provider+model.
+                                         # Off by default; the tolerant parser already handles
+                                         # the common cases.
 
 sources:
   docker:
@@ -512,7 +520,7 @@ git clone https://github.com/jlp9989-sudo/HomelabSage
 cd HomelabSage
 pip install -e ".[dev]"
 
-pytest -q                # ~1,700 tests, ~70s
+pytest -q                # ~1,750 tests, ~70s
 ruff check .             # lint
 mypy src/homelabsage     # types — 0 errors is the bar
 ```
@@ -542,7 +550,7 @@ src/homelabsage/
   curator/          note-writing pipeline (discover / system / interview)
   prompts/          analyzer rules in markdown, assembled per update
   templates/        Jinja2 (server-rendered, htmx, no JS framework)
-tests/              pytest, ~1,700 tests
+tests/              pytest, ~1,750 tests
 ```
 
 ---
