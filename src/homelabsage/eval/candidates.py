@@ -44,11 +44,11 @@ FREE_CLOUD_MODELS: list[FreeCloudModel] = [
         "groq", "meta-llama/llama-4-scout-17b-16e-instruct", "GROQ_API_KEY",
     ),
     FreeCloudModel(
-        "openrouter", "deepseek/deepseek-chat-v3-0324:free", "OPENROUTER_API_KEY",
+        "openrouter", "qwen/qwen3-next-80b-a3b-instruct:free", "OPENROUTER_API_KEY",
         note="rate-limited; measure validity not representative latency",
     ),
     FreeCloudModel(
-        "openrouter", "qwen/qwen3-235b-a22b:free", "OPENROUTER_API_KEY",
+        "openrouter", "meta-llama/llama-3.3-70b-instruct:free", "OPENROUTER_API_KEY",
         note="rate-limited; measure validity not representative latency",
     ),
 ]

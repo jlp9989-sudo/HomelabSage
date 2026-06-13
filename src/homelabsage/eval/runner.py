@@ -13,14 +13,40 @@ fixtures for the offline CI suite to replay deterministically.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
+
+import httpx
 
 from ..llm import LLMClient
 from ..router import Router, parse_route
 from .candidates import Candidate
 from .scenarios import SCENARIOS, Scenario
 from .scorer import ModelReport, ScenarioScore, aggregate, score_decision
+
+# Free cloud tiers (Groq, OpenRouter ':free') throttle aggressively. A 429 is
+# a quota signal, not a model verdict — retry honouring Retry-After so the row
+# reflects routing quality, not how fast we hit the rate limit.
+_MAX_429_RETRIES = 3
+_RETRY_AFTER_CAP_S = 60.0
+
+
+async def _route_with_backoff(router: Router, message: str):
+    delay = 2.0
+    for attempt in range(_MAX_429_RETRIES + 1):
+        try:
+            return await router.route(message)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 429 or attempt == _MAX_429_RETRIES:
+                raise
+            ra = e.response.headers.get("retry-after", "")
+            try:
+                wait = float(ra)
+            except ValueError:
+                wait = delay
+            await asyncio.sleep(min(wait, _RETRY_AFTER_CAP_S))
+            delay *= 2
 
 
 @dataclass
@@ -65,7 +91,7 @@ async def run_candidate(
         raw = ""
         err: str | None = None
         try:
-            decision = await router.route(sc.message)
+            decision = await _route_with_backoff(router, sc.message)
             raw = decision.raw
             latency = int((time.monotonic() - started) * 1000)
             score = score_decision(sc, decision)
