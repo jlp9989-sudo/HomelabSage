@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from homelabsage.llm import build_prompt
+from homelabsage.llm import _MAX_CONTEXT_CHARS, build_prompt
 from homelabsage.models import Update
 from homelabsage.prompts import assemble, load_template
 
@@ -95,3 +95,30 @@ def test_build_prompt_smaller_than_full_rule_set():
     assert _rule_count(build_prompt(one)) == 1
     assert _rule_count(build_prompt(many)) == 16
     assert len(build_prompt(one)) < len(build_prompt(many))
+
+
+# ─── context cap (backstop against runaway enrichers) ─────────────
+
+
+def test_build_prompt_caps_oversized_context():
+    """A pathologically large enricher payload must not balloon the prompt
+    without limit. The serialized context is truncated with a clear marker."""
+    huge = "x" * (_MAX_CONTEXT_CHARS * 2)
+    u = Update(
+        source="docker", subject="chatty", current_version="1", new_version="2",
+        context={"log_dump": huge},
+    )
+    p = build_prompt(u)
+    assert "[context truncated:" in p
+    # The full payload is nowhere in the prompt.
+    assert huge not in p
+
+
+def test_build_prompt_leaves_small_context_untruncated():
+    u = Update(
+        source="docker", subject="tidy", current_version="1", new_version="2",
+        context={"repo_health": {"status": "alive"}},
+    )
+    p = build_prompt(u)
+    assert "[context truncated:" not in p
+    assert '"repo_health"' in p

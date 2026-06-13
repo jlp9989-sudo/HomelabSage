@@ -2,6 +2,25 @@
 
 All notable changes ship here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely. Dates are UTC.
 
+## v1.0.1 — 2026-06-13
+
+Two robustness backstops against pathological payloads — neither changes
+behaviour on healthy inputs.
+
+- **Prompt context cap** (`llm.py`): the serialized `context` block is now
+  capped at 32 000 chars before it reaches the LLM. Individual enrichers
+  were already bounded, but a single chatty one (a docker log dump, a
+  sprawling env, bloated upstream release notes nested in context) could
+  still balloon the prompt without limit. The cap only trips well past the
+  normal context size and marks the truncation clearly; `release_notes`
+  keeps its own separate cap.
+- **Pending-dispatch TTL** (closes Nit N3): the flush path now purges
+  queued dispatches older than 14 days before replaying the queue. A
+  permanently-broken push output, or an item snoozed far longer than any
+  real parity window, would otherwise keep its row indefinitely. The TTL
+  is generous — parity windows resolve in well under a day — so only
+  genuinely-stuck rows are dropped.
+
 ## v1.0.0 — 2026-06-12
 
 **First stable release.** Consolidates everything since v0.2.0 (the last

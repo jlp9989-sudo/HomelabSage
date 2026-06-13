@@ -256,6 +256,56 @@ def test_batch_channel_quiet_window():
     assert _channel_quiet(always_quiet) is True
 
 
+# ─── N3: pending-dispatch TTL backstop ────────────────────────────
+
+
+def test_purge_pending_dispatches_older_than_ttl(tmp_path):
+    """A row past the TTL is dropped; a fresh one survives. days<=0 is a
+    no-op so a misconfigured TTL never wipes the live queue."""
+    db = Database(str(tmp_path / "p.sqlite"))
+    db.queue_pending_dispatch("fresh", "out")
+    db.queue_pending_dispatch("stale", "out")
+    # Backdate one row 30 days into the past via raw SQL — the public API
+    # always stamps "now", so there's no other way to age a row.
+    db._conn.execute(
+        "UPDATE pending_dispatches SET queued_at = ? WHERE update_id = ?",
+        ("2000-01-01T00:00:00+00:00", "stale"),
+    )
+
+    assert db.purge_pending_dispatches_older_than(days=0) == 0   # guard
+    assert {r["update_id"] for r in db.list_pending_dispatches()} == {"fresh", "stale"}
+
+    assert db.purge_pending_dispatches_older_than(days=14) == 1
+    assert {r["update_id"] for r in db.list_pending_dispatches()} == {"fresh"}
+
+
+@pytest.mark.asyncio
+async def test_flush_purges_stale_queue_rows(tmp_path):
+    """The flush path enforces the TTL: a row stuck far longer than any
+    real parity window is purged on the next scan, even with no output
+    able to deliver it."""
+    engine, db = _engine(tmp_path)
+    engine.plugins = [_FakePlugin([])]  # type: ignore[list-item]
+    engine.outputs = []
+    try:
+        item = AnalyzedUpdate(
+            update=_update(),
+            analysis=Analysis(severity=Severity.HIGH, summary="x"),
+            status=UpdateStatus.ANALYZED,
+        )
+        db.upsert(item)
+        db.queue_pending_dispatch(item.id, "fake_push")
+        db._conn.execute(
+            "UPDATE pending_dispatches SET queued_at = ? WHERE update_id = ?",
+            ("2000-01-01T00:00:00+00:00", item.id),
+        )
+
+        await engine.run_once()
+        assert db.list_pending_dispatches() == []
+    finally:
+        engine.close()
+
+
 # ─── 5. run_once is serialised ────────────────────────────────────
 
 

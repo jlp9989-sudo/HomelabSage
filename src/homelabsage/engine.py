@@ -38,6 +38,13 @@ from .plugins.homeassistant import HomeAssistantPlugin
 
 log = logging.getLogger(__name__)
 
+# A queued dispatch that never delivers (output permanently broken, item
+# snoozed/quiet far longer than expected) would otherwise sit in the queue
+# forever. Parity windows resolve in well under a day, so two weeks is a
+# generous floor: anything older is genuinely stuck, not in-flight, and is
+# purged so the queue can't grow without bound.
+_PENDING_DISPATCH_TTL_DAYS = 14
+
 
 def build_plugins(cfg: Config, db: Database | None = None) -> list[Plugin]:
     plugins: list[Plugin] = []
@@ -528,7 +535,20 @@ class Engine:
         Items whose `analysis` is gone (very old row, manually purged) are
         skipped and their queue rows removed: stale entries shouldn't
         block the queue forever.
+
+        As a final backstop, rows older than the TTL are purged outright
+        before the replay: a permanently-broken output or an item snoozed
+        far longer than any real parity window would otherwise keep its
+        row indefinitely.
         """
+        purged = self.db.purge_pending_dispatches_older_than(
+            days=_PENDING_DISPATCH_TTL_DAYS
+        )
+        if purged:
+            log.info(
+                "Purged %d pending dispatch(es) older than %d days",
+                purged, _PENDING_DISPATCH_TTL_DAYS,
+            )
         queue = self.db.list_pending_dispatches()
         if not queue:
             return

@@ -86,6 +86,28 @@ def _strip_think_blocks(text: str) -> str:
 # lazily + cached on first build_prompt() call (see prompts/__init__.py).
 
 
+# Hard ceiling on the serialized context block. Individual enrichers are
+# already bounded, but a single chatty one (docker logs, a sprawling env,
+# bloated upstream release_notes nested in context) could still balloon the
+# prompt without limit. This is a backstop against pathological payloads, not
+# a tight token budget — it only trips well past the normal context size.
+# release_notes is capped separately below ([:15000]).
+_MAX_CONTEXT_CHARS = 32000
+
+
+def _serialize_context(context: dict | None) -> str:
+    if not context:
+        return "(none)"
+    dumped = json.dumps(context, indent=2, default=str)
+    if len(dumped) <= _MAX_CONTEXT_CHARS:
+        return dumped
+    dropped = len(dumped) - _MAX_CONTEXT_CHARS
+    return (
+        dumped[:_MAX_CONTEXT_CHARS]
+        + f"\n… [context truncated: {dropped} chars over {_MAX_CONTEXT_CHARS}-char cap]"
+    )
+
+
 def build_prompt(update: Update, notes: str = "") -> str:
     # Assemble first: keep only the conditional rules whose context block
     # this update actually carries, so the model isn't handed ~15 rules it
@@ -98,7 +120,7 @@ def build_prompt(update: Update, notes: str = "") -> str:
         current_version=update.current_version,
         new_version=update.new_version,
         release_url=update.release_url or "(none)",
-        context=json.dumps(update.context, indent=2, default=str) if update.context else "(none)",
+        context=_serialize_context(update.context),
         notes=notes.strip() or "(no relevant notes)",
         release_notes=(update.release_notes or "(no release notes)").strip()[:15000],
     )
