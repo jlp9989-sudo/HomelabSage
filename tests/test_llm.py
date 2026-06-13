@@ -282,11 +282,13 @@ async def test_client_dispatches_groq_to_openai_compat(monkeypatch):
     `LLMClient._call` — the dispatcher reads PROVIDER_PRESETS."""
     called: list[str] = []
 
-    async def fake_ollama(self, prompt, strict_json, temperature):
+    async def fake_ollama(self, prompt, strict_json, temperature, *, schema):
         called.append("ollama")
         return "{}", 0, 0, True
 
-    async def fake_openai_compat(self, prompt, strict_json, temperature):
+    async def fake_openai_compat(
+        self, prompt, strict_json, temperature, *, schema, schema_name="analysis"
+    ):
         called.append("openai_compat")
         return "{}", 0, 0, True
 

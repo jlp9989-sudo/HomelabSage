@@ -1,0 +1,216 @@
+{
+  "scenarios": [
+    "status_applied",
+    "search_postgres",
+    "audit_report",
+    "where_is_jellyfin",
+    "recurring_failures",
+    "list_starred",
+    "dns_check",
+    "search_then_explain",
+    "where_then_rollback",
+    "purge_old",
+    "dismiss_update",
+    "snooze_update",
+    "restart_no_tool",
+    "general_knowledge"
+  ],
+  "records": [
+    {
+      "model": "good-model",
+      "scenario_id": "status_applied",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"list_updates\", \"arguments_json\": \"{\\\"status\\\": \\\"applied\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "search_postgres",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"search_updates\", \"arguments_json\": \"{\\\"q\\\": \\\"postgres\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "audit_report",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"audit\", \"arguments_json\": \"{}\"}], \"direct_answer\": null}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "where_is_jellyfin",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"where_is\", \"arguments_json\": \"{\\\"name\\\": \\\"jellyfin\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "recurring_failures",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"recurring_failures\", \"arguments_json\": \"{}\"}], \"direct_answer\": null}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "list_starred",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"list_starred\", \"arguments_json\": \"{}\"}], \"direct_answer\": null}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "dns_check",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"dns_check\", \"arguments_json\": \"{}\"}], \"direct_answer\": null}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "search_then_explain",
+      "raw": "{\"reasoning\": \"multi\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"search_updates\", \"arguments_json\": \"{\\\"q\\\": \\\"immich\\\"}\"}, {\"tool\": \"explain\", \"arguments_json\": \"{\\\"update_id\\\": \\\"u-immich-1\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "where_then_rollback",
+      "raw": "{\"reasoning\": \"multi\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"where_is\", \"arguments_json\": \"{\\\"name\\\": \\\"traefik\\\"}\"}, {\"tool\": \"rollback_recipe\", \"arguments_json\": \"{\\\"update_id\\\": \\\"abc123\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "purge_old",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": true, \"tool_calls\": [{\"tool\": \"purge_old_updates\", \"arguments_json\": \"{\\\"older_than_days\\\": 180}\"}], \"direct_answer\": null}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "dismiss_update",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": true, \"tool_calls\": [{\"tool\": \"set_update_status\", \"arguments_json\": \"{\\\"update_id\\\": \\\"abc123\\\", \\\"status\\\": \\\"dismissed\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "snooze_update",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": true, \"tool_calls\": [{\"tool\": \"snooze_update\", \"arguments_json\": \"{\\\"update_id\\\": \\\"xyz789\\\", \\\"until\\\": \\\"2026-06-20\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "restart_no_tool",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [], \"direct_answer\": \"No tengo ninguna herramienta para reiniciar contenedores.\"}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "good-model",
+      "scenario_id": "general_knowledge",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [], \"direct_answer\": \"Par\\u00eds.\"}",
+      "latency_ms": 120,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "status_applied",
+      "raw": "```json\n{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"list_updates\", \"arguments_json\": \"{\\\"status\\\": \\\"applied\\\"}\"}], \"direct_answer\": null}\n```",
+      "latency_ms": 800,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "search_postgres",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"search_updates\", \"arguments_json\": \"{\\\"q\\\": \\\"postgres\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 800,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "audit_report",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"audit\", \"arguments_json\": \"{}\"}], \"direct_answer\": null}",
+      "latency_ms": 800,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "where_is_jellyfin",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"where_is\", \"arguments_json\": \"{\\\"name\\\": \\\"jellyfin\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 800,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "recurring_failures",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"recurring_failures\", \"arguments_json\": \"{}\"}], \"direct_answer\": null}",
+      "latency_ms": 800,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "list_starred",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"list_starred\", \"arguments_json\": \"{}\"}], \"direct_answer\": null}",
+      "latency_ms": 800,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "dns_check",
+      "raw": "",
+      "latency_ms": null,
+      "error": "TimeoutError: backend unreachable"
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "search_then_explain",
+      "raw": "{\"reasoning\": \"multi\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"explain\", \"arguments_json\": \"{\\\"update_id\\\": \\\"u1\\\"}\"}, {\"tool\": \"search_updates\", \"arguments_json\": \"{\\\"q\\\": \\\"immich\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 800,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "where_then_rollback",
+      "raw": "{\"reasoning\": \"multi\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"where_is\", \"arguments_json\": \"{\\\"name\\\": \\\"traefik\\\"}\"}, {\"tool\": \"rollback_recipe\", \"arguments_json\": \"{\\\"update_id\\\": \\\"WRONG\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 800,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "purge_old",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"purge_old_updates\", \"arguments_json\": \"{\\\"older_than_days\\\": 180}\"}], \"direct_answer\": null}",
+      "latency_ms": 800,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "dismiss_update",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": true, \"tool_calls\": [{\"tool\": \"set_update_status\", \"arguments_json\": \"{\\\"update_id\\\": \\\"abc123\\\", \\\"status\\\": \\\"dismissed\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 800,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "snooze_update",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": true, \"tool_calls\": [{\"tool\": \"snooze_update\", \"arguments_json\": \"{\\\"update_id\\\": \\\"xyz789\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 800,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "restart_no_tool",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [{\"tool\": \"restart_container\", \"arguments_json\": \"{\\\"name\\\": \\\"traefik\\\"}\"}], \"direct_answer\": null}",
+      "latency_ms": 800,
+      "error": null
+    },
+    {
+      "model": "weak-model",
+      "scenario_id": "general_knowledge",
+      "raw": "{\"reasoning\": \"r\", \"needs_confirmation\": false, \"tool_calls\": [], \"direct_answer\": \"Par\\u00eds.\"}",
+      "latency_ms": 800,
+      "error": null
+    }
+  ]
+}

@@ -42,6 +42,19 @@ class LastCall:
     duration_ms: int
     succeeded: bool
 
+
+@dataclass
+class StructuredResult:
+    """Return value of `LLMClient.complete_structured` — raw model text plus
+    usage/latency. The text is whatever the model emitted (ideally JSON
+    matching the requested schema); parsing/validation is the caller's job."""
+
+    text: str
+    tokens_in: int
+    tokens_out: int
+    tokens_estimated: bool
+    duration_ms: int
+
 log = logging.getLogger(__name__)
 
 
@@ -391,12 +404,21 @@ class LLMClient:
 
     async def _call_with_usage(
         self, prompt: str, strict_json: bool, temperature: float = 0.2,
+        *, schema: dict | None = None, schema_name: str = "analysis",
     ) -> tuple[str, int, int, bool]:
         """Returns `(text, tokens_in, tokens_out, estimated)`.
 
         `estimated=True` means the provider didn't report usage and we
         applied a 4-chars-per-token heuristic so totals stay populated.
+
+        `schema` overrides the guided-decoding grammar: when None (the
+        default), schema-mode calls use the built-in `Analysis` schema so
+        the analyzer path is unchanged. Pass an explicit schema (e.g. the
+        routing-action schema) to constrain decoding to a different shape —
+        the `_schema_unsupported` fallback still applies per backend.
         """
+        if schema is None:
+            schema = _analysis_json_schema()
         # Dispatch by the provider's protocol so adding a new openai-compat
         # provider (next Groq clone, next Gemini revision, …) doesn't need a
         # branch here — only a PROVIDER_PRESETS entry.
@@ -404,17 +426,46 @@ class LLMClient:
         if protocol == "ollama":
             text, tin, tout, est = await self._call_ollama(
                 prompt, strict_json=strict_json, temperature=temperature,
+                schema=schema,
             )
         elif protocol == "openai_compat":
             text, tin, tout, est = await self._call_openai_compat(
                 prompt, strict_json=strict_json, temperature=temperature,
+                schema=schema, schema_name=schema_name,
             )
         else:
             raise ValueError(f"unknown LLM provider: {self.cfg.provider}")
         return _strip_think_blocks(text), tin, tout, est
 
+    async def complete_structured(
+        self, prompt: str, *, schema: dict, schema_name: str = "action",
+        temperature: float = 0.0,
+    ) -> StructuredResult:
+        """Generic guided-decoding completion against an arbitrary JSON schema.
+
+        The reusable core of the agent-routing layer: hand it a prompt + a
+        flat JSON schema and it returns the raw model text plus usage/latency,
+        going through the exact same schema-mode → plain-JSON fallback the
+        analyzer relies on. Guided decoding is requested whenever the active
+        config has `json_schema` on (set it per-candidate in eval runs).
+
+        Raises on transport/HTTP failure so the caller can record the model
+        as unreachable; returns a `StructuredResult` on success (the text may
+        still be unparseable — that's a routing miss, not an exception).
+        """
+        started = time.monotonic()
+        text, tin, tout, est = await self._call_with_usage(
+            prompt, strict_json=self.cfg.strict_json, temperature=temperature,
+            schema=schema, schema_name=schema_name,
+        )
+        return StructuredResult(
+            text=text, tokens_in=tin, tokens_out=tout, tokens_estimated=est,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+
     async def _call_ollama(
         self, prompt: str, strict_json: bool, temperature: float,
+        *, schema: dict,
     ) -> tuple[str, int, int, bool]:
         """Ollama-compat: POST /api/generate, format=json forces JSON output.
 
@@ -434,7 +485,7 @@ class LLMClient:
 
         def _payload(schema_mode: bool) -> dict:
             if schema_mode:
-                fmt: object = _analysis_json_schema()
+                fmt: object = schema
             elif strict_json:
                 fmt = "json"
             else:
@@ -467,6 +518,7 @@ class LLMClient:
 
     async def _call_openai_compat(
         self, prompt: str, strict_json: bool, temperature: float,
+        *, schema: dict, schema_name: str = "analysis",
     ) -> tuple[str, int, int, bool]:
         """OpenAI-compatible chat completions.
 
@@ -487,8 +539,8 @@ class LLMClient:
                 rf: object = {
                     "type": "json_schema",
                     "json_schema": {
-                        "name": "analysis",
-                        "schema": _analysis_json_schema(),
+                        "name": schema_name,
+                        "schema": schema,
                         "strict": True,
                     },
                 }

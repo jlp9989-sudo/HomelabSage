@@ -29,6 +29,7 @@ from . import (  # noqa: F401  (imported for side-effect: command registration)
     digest,
     doctor,
     env_diff,
+    eval_routing,
     export,
     features,
     health,
